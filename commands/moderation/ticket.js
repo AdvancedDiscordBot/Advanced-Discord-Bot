@@ -167,6 +167,15 @@ module.exports = {
 				priority: priority,
 			});
 
+			if (client.hooks) {
+				await client.hooks.emitHook("onTicketCreate", {
+					guildId: interaction.guild.id,
+					ticketId: dbTicketId,
+					channelId: ticketChannel.id,
+					userId: interaction.user.id,
+				});
+			}
+
 			// 🎨 Create ticket embed
 			const ticketEmbed = new EmbedBuilder()
 				.setColor(getPriorityColor(priority, client.colors))

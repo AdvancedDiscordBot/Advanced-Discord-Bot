@@ -157,6 +157,15 @@ async function handleTicketClose(interaction, client, db, ticketId) {
 
 	await interaction.reply({ embeds: [closeEmbed] });
 
+	if (client.hooks) {
+		await client.hooks.emitHook("onTicketClose", {
+			guildId: interaction.guild.id,
+			ticketId,
+			channelId: interaction.channel?.id,
+			userId: interaction.user.id,
+		});
+	}
+
 	// 🗑️ Delete channel after 30 seconds
 	setTimeout(async () => {
 		try {

@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, Collection, MessageFlags } = require("discord.js");
-const Database = require("../../utils/database");
+const Database = require("../../../utils/database");
 
 // Cooldown collection to prevent spam
 const stealCooldowns = new Collection();
@@ -14,7 +14,7 @@ module.exports = {
         .setRequired(true)
     ),
   async execute(interaction) {
-    const db = Database; // Use the exported instance
+    const db = await Database.getInstance();
 await db.ensureConnection(); // Ensure connection is established
     const stealer = interaction.user;
     const victim = interaction.options.getUser("victim");

@@ -1,0 +1,15 @@
+{
+	"name": "ai",
+	"version": "1.0.0",
+	"description": "Official VAISH AI assistant plugin.",
+	"author": "VAISH Development Team",
+	"main": "index.js",
+	"requiresRestart": false,
+	"permissions": [
+		"db.read",
+		"db.write",
+		"commands.register",
+		"events.register"
+	],
+	"configSchema": {}
+}

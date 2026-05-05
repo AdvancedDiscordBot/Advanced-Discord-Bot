@@ -1,20 +1,20 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
-const Database = require("../../utils/database");
+const Database = require("../../../utils/database");
 
 module.exports = {
   data: new SlashCommandBuilder()
-    .setName("deposit")
-    .setDescription("🏦 Deposit coins from your wallet into the bank.")
+    .setName("withdraw")
+    .setDescription("💸 Withdraw coins from your bank into your wallet.")
     .addStringOption((option) =>
       option
         .setName("amount")
         .setDescription(
-          "The amount to deposit, or 'all' to deposit everything."
+          "The amount to withdraw, or 'all' to withdraw everything."
         )
         .setRequired(true)
     ),
   async execute(interaction) {
-    const db = Database; // Use the exported instance
+    const db = await Database.getInstance();
 await db.ensureConnection(); // Ensure connection is established
     const profile = await db.getUserProfile(
       interaction.user.id,
@@ -22,39 +22,39 @@ await db.ensureConnection(); // Ensure connection is established
     );
     const amountString = interaction.options.getString("amount");
 
-    let amountToDeposit;
+    let amountToWithdraw;
 
     if (amountString.toLowerCase() === "all") {
-      amountToDeposit = profile.wallet;
+      amountToWithdraw = profile.bank;
     } else {
-      amountToDeposit = parseInt(amountString, 10);
+      amountToWithdraw = parseInt(amountString, 10);
     }
 
     // Validation
-    if (isNaN(amountToDeposit) || amountToDeposit <= 0) {
+    if (isNaN(amountToWithdraw) || amountToWithdraw <= 0) {
       return await interaction.reply({
         content: "❌ Please provide a valid, positive number for the amount.",
-        flags: [MessageFlags.Ephemeral],
+        ephemeral: true,
       });
     }
 
-    if (profile.wallet < amountToDeposit) {
+    if (profile.bank < amountToWithdraw) {
       return await interaction.reply({
-        content: "❌ You don't have enough coins in your wallet to deposit that much.",
-        flags: [MessageFlags.Ephemeral],
+        content: "❌ You don't have enough coins in your bank to withdraw that much.",
+        ephemeral: true,
       });
     }
 
     // Perform the transaction
-    profile.wallet -= amountToDeposit;
-    profile.bank += amountToDeposit;
+    profile.bank -= amountToWithdraw;
+    profile.wallet += amountToWithdraw;
     await profile.save();
 
-    const depositEmbed = new EmbedBuilder()
-      .setColor("#3498DB") // Blue color for banking
-      .setTitle("✅ Deposit Successful")
+    const withdrawEmbed = new EmbedBuilder()
+      .setColor("#E67E22") // Orange color for withdrawing
+      .setTitle("✅ Withdrawal Successful")
       .setDescription(
-        `You have successfully deposited **${amountToDeposit.toLocaleString()}** coins into your bank.`
+        `You have successfully withdrawn **${amountToWithdraw.toLocaleString()}** coins from your bank.`
       )
       .addFields(
         {
@@ -70,6 +70,6 @@ await db.ensureConnection(); // Ensure connection is established
       )
       .setTimestamp();
 
-    await interaction.reply({ embeds: [depositEmbed] });
+    await interaction.reply({ embeds: [withdrawEmbed] });
   },
 };

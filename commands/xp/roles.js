@@ -40,7 +40,7 @@ module.exports = {
         )
     ),
   async execute(interaction) {
-    const db = Database; // Use the exported instance
+    const db = await Database.getInstance();
 await db.ensureConnection(); // Ensure connection is established
 
     try {

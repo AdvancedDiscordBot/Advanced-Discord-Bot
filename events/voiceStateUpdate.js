@@ -4,7 +4,7 @@ const Database = require("../utils/database");
 module.exports = {
   name: Events.VoiceStateUpdate,
   async execute(oldState, newState) {
-    const db = Database; // Use the exported instance
+    const db = await Database.getInstance();
 await db.ensureConnection(); // Ensure connection is established
 
     try {

@@ -7,7 +7,7 @@ module.exports = {
   async execute(member, client) {
     // 🛡️ Check for anti-raid detection first
     try {
-      const db = Database.getInstance();
+      const db = await Database.getInstance();
       const raidDetected = await checkRaidDetection(member.guild, member, db);
 
       if (raidDetected) {
@@ -22,7 +22,7 @@ module.exports = {
 
     // 🎂 Check for birthday today
     try {
-      const db = Database.getInstance();
+      const db = await Database.getInstance();
       const today = new Date();
       const birthdayUsers = await db.Birthday.find({
         guildId: member.guild.id,

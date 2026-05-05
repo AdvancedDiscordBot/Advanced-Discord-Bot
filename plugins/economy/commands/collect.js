@@ -1,12 +1,12 @@
 const { SlashCommandBuilder, EmbedBuilder ,MessageFlags } = require("discord.js");
-const Database = require("../../utils/database");
+const Database = require("../../../utils/database");
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("collect")
     .setDescription("📥 Collect income from your purchased roles."),
   async execute(interaction) {
-    const db = Database; // Use the exported instance
+    const db = await Database.getInstance();
 await db.ensureConnection(); // Ensure connection is established
     const profile = await db.getUserProfile(interaction.user.id, interaction.guild.id);
 

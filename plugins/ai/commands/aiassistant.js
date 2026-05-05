@@ -7,7 +7,7 @@ const {
   MessageFlags,
 } = require("discord.js");
 const { GoogleGenAI } = require("@google/genai");
-const Database = require("../../utils/database");
+const Database = require("../../../utils/database");
 
 // Initialize Gemini AI
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });

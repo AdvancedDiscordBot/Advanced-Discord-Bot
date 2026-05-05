@@ -120,7 +120,7 @@ module.exports = {
     const subcommand = interaction.options.getSubcommand();
 
     try {
-      const db = Database; // Use the exported instance
+      const db = await Database.getInstance();
 await db.ensureConnection(); // Ensure connection is established
       switch (subcommand) {
         case "play":

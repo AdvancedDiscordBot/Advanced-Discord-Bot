@@ -11,7 +11,7 @@ module.exports = {
   async execute(interaction) {
     await interaction.deferReply();
 
-    const db = Database; // Use the exported instance
+    const db = await Database.getInstance();
 await db.ensureConnection(); // Ensure connection is established
     const userId = interaction.user.id;
     const guildId = interaction.guild.id;

@@ -1,0 +1,436 @@
+const fastifyFactory = require("fastify");
+const cookie = require("@fastify/cookie");
+const session = require("@fastify/session");
+const MongoStore = require("connect-mongo");
+const axios = require("axios");
+const crypto = require("crypto");
+const { WebSocketServer } = require("ws");
+const { spawn } = require("child_process");
+const { createLogger } = require("../logger");
+
+const ADMIN_PERMISSION = 0x8;
+const MANAGE_GUILD_PERMISSION = 0x20;
+
+function parseOwnerIds() {
+	const raw = process.env.OWNER_IDS || "";
+	return raw
+		.split(",")
+		.map((value) => value.trim())
+		.filter(Boolean);
+}
+
+function hasGuildPermission(guild) {
+	if (guild.owner) return true;
+	const permissions = Number(guild.permissions || 0);
+	return (
+		(permissions & ADMIN_PERMISSION) === ADMIN_PERMISSION ||
+		(permissions & MANAGE_GUILD_PERMISSION) === MANAGE_GUILD_PERMISSION
+	);
+}
+
+function parseCookies(headerValue) {
+	const result = {};
+	if (!headerValue) return result;
+
+	const parts = headerValue.split(";");
+	for (const part of parts) {
+		const [key, ...rest] = part.trim().split("=");
+		result[key] = rest.join("=");
+	}
+
+	return result;
+}
+
+async function startApiServer({ client, db, pluginManager, hooks }) {
+	const logger = createLogger("ApiServer");
+	const port = Number(process.env.BOT_API_PORT || 3210);
+	const baseUrl = process.env.BOT_API_BASE_URL || `http://localhost:${port}`;
+	const dashboardRedirect = process.env.DASHBOARD_REDIRECT_URL || "";
+
+	const sessionSecret = process.env.SESSION_SECRET;
+	const discordClientId = process.env.DISCORD_OAUTH_CLIENT_ID;
+	const discordClientSecret = process.env.DISCORD_OAUTH_CLIENT_SECRET;
+	const discordRedirectUri = process.env.DISCORD_OAUTH_REDIRECT_URI;
+
+	if (
+		!sessionSecret ||
+		!discordClientId ||
+		!discordClientSecret ||
+		!discordRedirectUri
+	) {
+		logger.warn("API disabled - missing OAuth/session environment variables");
+		return null;
+	}
+
+	const fastify = fastifyFactory({ logger: false });
+
+	const sessionStore = MongoStore.create({
+		mongoUrl: process.env.MONGODB_URI,
+		collectionName: "vaish_sessions",
+	});
+
+	await fastify.register(cookie);
+	await fastify.register(session, {
+		secret: sessionSecret,
+		cookieName: "vaish.sid",
+		cookie: {
+			path: "/",
+			httpOnly: true,
+			sameSite: "lax",
+			secure: process.env.NODE_ENV === "production",
+		},
+		store: sessionStore,
+		saveUninitialized: false,
+	});
+
+	fastify.get("/health", async () => ({ status: "ok" }));
+
+	fastify.get("/auth/discord", async (request, reply) => {
+		const state = crypto.randomBytes(16).toString("hex");
+		request.session.oauthState = state;
+
+		const params = new URLSearchParams({
+			client_id: discordClientId,
+			redirect_uri: discordRedirectUri,
+			response_type: "code",
+			scope: "identify guilds",
+			state,
+		});
+
+		return reply.redirect(`https://discord.com/api/oauth2/authorize?${params}`);
+	});
+
+	fastify.get("/auth/discord/callback", async (request, reply) => {
+		const { code, state } = request.query;
+
+		if (!code || !state || state !== request.session.oauthState) {
+			return reply.code(400).send({ error: "Invalid OAuth state" });
+		}
+
+		const tokenResponse = await axios.post(
+			"https://discord.com/api/oauth2/token",
+			new URLSearchParams({
+				client_id: discordClientId,
+				client_secret: discordClientSecret,
+				grant_type: "authorization_code",
+				code,
+				redirect_uri: discordRedirectUri,
+			}).toString(),
+			{
+				headers: { "Content-Type": "application/x-www-form-urlencoded" },
+			},
+		);
+
+		const accessToken = tokenResponse.data.access_token;
+
+		const [userResponse, guildsResponse] = await Promise.all([
+			axios.get("https://discord.com/api/users/@me", {
+				headers: { Authorization: `Bearer ${accessToken}` },
+			}),
+			axios.get("https://discord.com/api/users/@me/guilds", {
+				headers: { Authorization: `Bearer ${accessToken}` },
+			}),
+		]);
+
+		const ownerIds = parseOwnerIds();
+		const adminGuilds = guildsResponse.data.filter(hasGuildPermission);
+
+		request.session.user = userResponse.data;
+		request.session.adminGuildIds = adminGuilds.map((guild) => guild.id);
+		request.session.ownerIds = ownerIds;
+
+		if (dashboardRedirect) {
+			return reply.redirect(dashboardRedirect);
+		}
+
+		return reply.send({
+			user: request.session.user,
+			guilds: adminGuilds,
+		});
+	});
+
+	fastify.post("/auth/logout", async (request) => {
+		request.session.destroy();
+		return { ok: true };
+	});
+
+	fastify.get("/api/me", async (request, reply) => {
+		if (!request.session.user) {
+			return reply.code(401).send({ error: "unauthorized" });
+		}
+
+		return {
+			user: request.session.user,
+			guildIds: request.session.adminGuildIds || [],
+		};
+	});
+
+	fastify.addHook("preHandler", async (request, reply) => {
+		if (!request.url.startsWith("/api")) return;
+
+		if (!request.session.user) {
+			return reply.code(401).send({ error: "unauthorized" });
+		}
+	});
+
+	const requireGuildAccess = (request, reply) => {
+		const guildId = request.params.guildId;
+		const ownerIds = request.session.ownerIds || [];
+
+		if (ownerIds.includes(request.session.user?.id)) {
+			return true;
+		}
+
+		const allowed = request.session.adminGuildIds || [];
+		if (!allowed.includes(guildId)) {
+			reply.code(403).send({ error: "forbidden" });
+			return false;
+		}
+
+		return true;
+	};
+
+	let broadcastInstallLog = () => {};
+
+	fastify.get("/api/plugins", async () => ({
+		plugins: pluginManager.getPluginList(),
+	}));
+
+	fastify.post("/api/plugins/install", async (request, reply) => {
+		const { packageName } = request.body || {};
+		if (!packageName || !packageName.startsWith("vaish-plugin-")) {
+			return reply.code(400).send({ error: "Invalid package name" });
+		}
+
+		const result = await runNpmInstall(
+			packageName,
+			pluginManager,
+			logger,
+			broadcastInstallLog,
+		);
+		if (!result.ok) {
+			return reply.code(500).send({ error: result.error });
+		}
+
+		return { ok: true };
+	});
+
+	fastify.post("/api/plugins/unload/:name", async (request, reply) => {
+		const ok = await pluginManager.unloadPlugin(request.params.name, "api");
+		if (!ok) {
+			return reply.code(404).send({ error: "Plugin not unloaded" });
+		}
+
+		return { ok: true };
+	});
+
+	fastify.post("/api/plugins/reload/:name", async (request, reply) => {
+		const ok = await pluginManager.reloadPlugin(request.params.name);
+		if (!ok) {
+			return reply.code(409).send({ error: "Plugin not reloadable" });
+		}
+
+		return { ok: true };
+	});
+
+	fastify.get("/api/guild/:guildId/config", async (request, reply) => {
+		if (!requireGuildAccess(request, reply)) return;
+
+		await db.ensureConnection();
+
+		const serverConfig = await db.getServerConfig(request.params.guildId);
+		const pluginConfigs = await db.getAllPluginConfigs(request.params.guildId);
+
+		return { serverConfig, pluginConfigs };
+	});
+
+	fastify.put("/api/guild/:guildId/config", async (request, reply) => {
+		if (!requireGuildAccess(request, reply)) return;
+
+		await db.ensureConnection();
+
+		const { serverConfig, pluginConfig, pluginConfigs } = request.body || {};
+
+		let updatedServer = null;
+		if (serverConfig) {
+			updatedServer = await db.updateServerConfig(
+				request.params.guildId,
+				serverConfig,
+			);
+		}
+
+		const updatedPlugins = [];
+
+		if (Array.isArray(pluginConfigs)) {
+			for (const entry of pluginConfigs) {
+				if (!entry?.pluginName) continue;
+				updatedPlugins.push(
+					await db.updatePluginConfig(
+						request.params.guildId,
+						entry.pluginName,
+						entry.data || {},
+					),
+				);
+			}
+		}
+
+		if (pluginConfig?.pluginName) {
+			updatedPlugins.push(
+				await db.updatePluginConfig(
+					request.params.guildId,
+					pluginConfig.pluginName,
+					pluginConfig.data || {},
+				),
+			);
+		}
+
+		return {
+			serverConfig: updatedServer,
+			pluginConfigs: updatedPlugins,
+		};
+	});
+
+	fastify.get("/api/guild/:guildId/stats", async (request, reply) => {
+		if (!requireGuildAccess(request, reply)) return;
+
+		await db.ensureConnection();
+
+		const guild = client.guilds.cache.get(request.params.guildId);
+		const tickets = await db.getTickets(request.params.guildId);
+
+		const stats = {
+			members: guild?.memberCount || 0,
+			tickets: {
+				total: tickets.length,
+				open: tickets.filter((ticket) => ticket.status === "open").length,
+				inProgress: tickets.filter((ticket) => ticket.status === "in_progress")
+					.length,
+				closed: tickets.filter((ticket) => ticket.status === "closed").length,
+			},
+		};
+
+		return stats;
+	});
+
+	const wss = new WebSocketServer({ server: fastify.server, path: "/ws" });
+	const wsClients = new Set();
+
+	const getSessionFromRequest = async (req) => {
+		const cookies = parseCookies(req.headers.cookie || "");
+		const rawSid = cookies["vaish.sid"];
+		if (!rawSid) return null;
+
+		const unsigned = fastify.unsignCookie(rawSid);
+		if (!unsigned.valid) return null;
+
+		return new Promise((resolve) => {
+			sessionStore.get(unsigned.value, (error, sessionData) => {
+				if (error) return resolve(null);
+				resolve(sessionData);
+			});
+		});
+	};
+
+	wss.on("connection", async (socket, req) => {
+		const sessionData = await getSessionFromRequest(req);
+		if (!sessionData?.user) {
+			socket.close();
+			return;
+		}
+
+		socket.sessionData = sessionData;
+		wsClients.add(socket);
+
+		socket.on("close", () => {
+			wsClients.delete(socket);
+		});
+	});
+
+	const broadcast = (event) => {
+		for (const socket of wsClients) {
+			if (socket.readyState !== socket.OPEN) continue;
+
+			const sessionData = socket.sessionData || {};
+			const guildId = event.guildId;
+
+			if (guildId) {
+				const ownerIds = sessionData.ownerIds || [];
+				const allowed = sessionData.adminGuildIds || [];
+
+				if (
+					!ownerIds.includes(sessionData.user?.id) &&
+					!allowed.includes(guildId)
+				) {
+					continue;
+				}
+			}
+
+			socket.send(JSON.stringify(event));
+		}
+	};
+
+	hooks.onAny((hookName, payload) => {
+		const guildId = payload?.guildId || payload?.interaction?.guild?.id;
+
+		broadcast({
+			type: "hook",
+			hook: hookName,
+			guildId,
+			payload,
+		});
+	});
+
+	broadcastInstallLog = (data) => {
+		broadcast({
+			type: "install-log",
+			payload: data,
+		});
+	};
+
+	await fastify.listen({ port, host: "0.0.0.0" });
+	logger.info(`API listening on ${baseUrl}`);
+
+	return { fastify, wss, broadcastInstallLog, runNpmInstall };
+}
+
+async function runNpmInstallInternal(packageName, emitLog) {
+	return new Promise((resolve) => {
+		const child = spawn("npm", ["install", packageName], {
+			cwd: process.cwd(),
+			shell: true,
+		});
+
+		child.stdout.on("data", (data) => {
+			emitLog({ type: "stdout", message: data.toString() });
+		});
+
+		child.stderr.on("data", (data) => {
+			emitLog({ type: "stderr", message: data.toString() });
+		});
+
+		child.on("close", (code) => {
+			if (code === 0) {
+				resolve({ ok: true });
+			} else {
+				resolve({ ok: false, error: `npm install exited with code ${code}` });
+			}
+		});
+	});
+}
+
+async function runNpmInstall(packageName, pluginManager, logger, emitLog) {
+	const result = await runNpmInstallInternal(packageName, emitLog);
+	if (!result.ok) return result;
+
+	logger.info(`Installed ${packageName}`);
+
+	try {
+		await pluginManager.loadAll();
+	} catch (error) {
+		logger.error("Failed to refresh plugins after install", error);
+	}
+
+	return result;
+}
+
+module.exports = { startApiServer };

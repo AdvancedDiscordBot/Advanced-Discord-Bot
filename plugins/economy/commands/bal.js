@@ -3,7 +3,7 @@ const {
 	EmbedBuilder,
 	MessageFlags,
 } = require("discord.js");
-const Database = require("../../utils/database");
+const Database = require("../../../utils/database");
 
 module.exports = {
 	data: new SlashCommandBuilder()

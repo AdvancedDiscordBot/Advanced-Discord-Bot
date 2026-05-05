@@ -17,7 +17,7 @@ module.exports = {
 	async execute(interaction, client) {
 		// 🎯 Handle slash commands
 		if (interaction.isChatInputCommand()) {
-			const command = interaction.client.commands.get(interaction.commandName);
+			let command = interaction.client.commands.get(interaction.commandName);
 
 			if (!command) {
 				console.error(
@@ -64,9 +64,32 @@ module.exports = {
 			timestamps.set(interaction.user.id, now);
 			setTimeout(() => timestamps.delete(interaction.user.id), cooldownAmount);
 
+			// 🧩 Run hook pipeline before command
+			if (client.hooks) {
+				const hookResult = await client.hooks.emitHook("beforeCommand", {
+					interaction,
+					command,
+				});
+
+				if (hookResult.cancelled) {
+					return;
+				}
+
+				interaction = hookResult.payload.interaction || interaction;
+				command = hookResult.payload.command || command;
+			}
+
 			// 🛡️ Execute command with error handling
 			try {
-				await command.execute(interaction, client);
+				const result = await command.execute(interaction, client);
+
+				if (client.hooks) {
+					await client.hooks.emitHook("afterCommand", {
+						interaction,
+						command,
+						result,
+					});
+				}
 			} catch (error) {
 				console.error(`❌ Error executing ${interaction.commandName}:`, error);
 
@@ -108,28 +131,9 @@ module.exports = {
 				await handleFeedbackInteraction(interaction, client);
 			}
 
-			// Handle AI context modal
-			if (interaction.customId === "show_context_modal") {
-				await showContextModal(interaction, client);
-			}
-
 			// Handle Truth or Dare buttons
 			if (interaction.customId.startsWith("tod_")) {
 				await handleTruthOrDareButton(interaction, client);
-			}
-
-			// Handle AI assistant buttons
-			if (interaction.customId.startsWith("ai_ask_again_")) {
-				await handleAIAskAgain(interaction, client);
-			}
-
-			if (interaction.customId.startsWith("ai_feedback_")) {
-				await handleAIFeedback(interaction, client);
-			}
-
-			// Handle AI rating buttons
-			if (interaction.customId.startsWith("ai_rate_")) {
-				await handleAIRating(interaction, client);
 			}
 
 			// Handle ticket system buttons
@@ -154,16 +158,6 @@ module.exports = {
 		if (interaction.isModalSubmit()) {
 			if (interaction.customId === "feedback_submit") {
 				await handleFeedbackSubmission(interaction, client);
-			}
-
-			// Handle AI context modal (if it exists)
-			if (interaction.customId === "ai_context_modal") {
-				await handleAIContextModal(interaction, client);
-			}
-
-			// Handle AI ask modal submission
-			if (interaction.customId === "ai_ask_modal") {
-				await handleAIAskModal(interaction, client);
 			}
 
 			// Handle ticket closing modal
@@ -378,87 +372,6 @@ async function handleFeedbackSubmission(interaction, client) {
 		embeds: [confirmEmbed],
 		flags: 64,
 	});
-}
-
-// 🤖 AI Context modal handler
-async function handleAIContextModal(interaction, client) {
-	const { EmbedBuilder } = require("discord.js");
-	const Database = require("../utils/database");
-
-	const context = interaction.fields.getTextInputValue("ai_context_input");
-
-	try {
-		const db = await Database.getInstance();
-		await db.updateServerConfig(interaction.guild.id, {
-			ai_context: context,
-		});
-
-		const successEmbed = new EmbedBuilder()
-			.setColor(client.colors.success)
-			.setTitle("✅ AI Context Updated")
-			.setDescription(
-				"Successfully updated the AI assistant context for your server.",
-			)
-			.addFields({
-				name: "📝 Context Preview",
-				value: context.substring(0, 500) + (context.length > 500 ? "..." : ""),
-				inline: false,
-			})
-			.setFooter({
-				text: `Updated by ${interaction.user.tag}`,
-				iconURL: interaction.user.displayAvatarURL(),
-			})
-			.setTimestamp();
-
-		await interaction.reply({
-			embeds: [successEmbed],
-			flags: 64,
-		});
-	} catch (error) {
-		console.error("❌ Error updating AI context:", error);
-
-		const errorEmbed = new EmbedBuilder()
-			.setColor(client.colors.error)
-			.setTitle("❌ Error")
-			.setDescription("Failed to update AI context. Please try again later.");
-
-		await interaction.reply({
-			embeds: [errorEmbed],
-			flags: 64,
-		});
-	}
-}
-
-// 🤖 Show context modal
-async function showContextModal(interaction, client) {
-	const {
-		ModalBuilder,
-		TextInputBuilder,
-		TextInputStyle,
-		ActionRowBuilder,
-	} = require("discord.js");
-
-	const modal = new ModalBuilder()
-		.setCustomId("ai_context_modal")
-		.setTitle("🤖 Set AI Assistant Context");
-
-	const contextInput = new TextInputBuilder()
-		.setCustomId("ai_context_input")
-		.setLabel("Server Information & FAQs")
-		.setStyle(TextInputStyle.Paragraph)
-		.setPlaceholder(
-			"Enter server rules, FAQs, information that the AI should know about your server...\n\n" +
-				"Example:\n" +
-				"Server Rules:\n1. Be respectful\n2. No spam\n\n" +
-				"FAQ:\nQ: How to get verified?\nA: Use /verify command",
-		)
-		.setRequired(true)
-		.setMaxLength(3000);
-
-	const row = new ActionRowBuilder().addComponents(contextInput);
-	modal.addComponents(row);
-
-	await interaction.showModal(modal);
 }
 
 // 🎮 Handle Truth or Dare button interactions
@@ -684,290 +597,6 @@ async function handleTruthOrDareButton(interaction, client) {
 				flags: MessageFlags.Ephemeral,
 			});
 		}
-	}
-}
-
-// 🤖 Handle AI ask again interaction
-async function handleAIAskAgain(interaction, client) {
-	const {
-		ModalBuilder,
-		TextInputBuilder,
-		TextInputStyle,
-		ActionRowBuilder,
-	} = require("discord.js");
-
-	const modal = new ModalBuilder()
-		.setCustomId("ai_ask_modal")
-		.setTitle("🤖 Ask AI Assistant Anything");
-
-	const questionInput = new TextInputBuilder()
-		.setCustomId("ai_question_input")
-		.setLabel("Your Question")
-		.setStyle(TextInputStyle.Paragraph)
-		.setPlaceholder("Ask me anything! I'm here to help.")
-		.setRequired(true)
-		.setMaxLength(1000);
-
-	const row = new ActionRowBuilder().addComponents(questionInput);
-	modal.addComponents(row);
-
-	await interaction.showModal(modal);
-}
-
-// ⭐ Handle AI feedback button
-async function handleAIFeedback(interaction, client) {
-	const {
-		EmbedBuilder,
-		ActionRowBuilder,
-		ButtonBuilder,
-		ButtonStyle,
-	} = require("discord.js");
-
-	const feedbackEmbed = new EmbedBuilder()
-		.setColor(client.colors.primary)
-		.setTitle("⭐ Rate AI Response")
-		.setDescription(
-			"How was the AI's response? Your feedback helps us improve!",
-		)
-		.addFields({
-			name: "🎯 What we track",
-			value:
-				"• Response helpfulness\n• Accuracy\n• Clarity\n• Overall satisfaction",
-			inline: false,
-		})
-		.setFooter({ text: "Your feedback is anonymous and helps improve the AI" });
-
-	const feedbackRow = new ActionRowBuilder().addComponents(
-		new ButtonBuilder()
-			.setCustomId(`ai_rate_excellent_${interaction.user.id}`)
-			.setLabel("Excellent")
-			.setStyle(ButtonStyle.Success)
-			.setEmoji("⭐"),
-		new ButtonBuilder()
-			.setCustomId(`ai_rate_good_${interaction.user.id}`)
-			.setLabel("Good")
-			.setStyle(ButtonStyle.Primary)
-			.setEmoji("👍"),
-		new ButtonBuilder()
-			.setCustomId(`ai_rate_poor_${interaction.user.id}`)
-			.setLabel("Poor")
-			.setStyle(ButtonStyle.Danger)
-			.setEmoji("👎"),
-	);
-
-	await interaction.reply({
-		embeds: [feedbackEmbed],
-		components: [feedbackRow],
-		flags: 64,
-	});
-}
-
-// ⭐ Handle AI rating
-async function handleAIRating(interaction, client) {
-	const { EmbedBuilder } = require("discord.js");
-
-	const rating = interaction.customId.split("_")[2]; // excellent, good, or poor
-
-	const ratingEmojis = {
-		excellent: "⭐⭐⭐⭐⭐",
-		good: "👍👍👍",
-		poor: "👎",
-	};
-
-	const ratingMessages = {
-		excellent: "Thank you! We're glad the AI was very helpful!",
-		good: "Thanks for the feedback! We'll keep improving.",
-		poor: "Thanks for letting us know. We'll work on improving the AI responses.",
-	};
-
-	const ratingEmbed = new EmbedBuilder()
-		.setColor(
-			rating === "excellent"
-				? client.colors.success
-				: rating === "good"
-					? client.colors.primary
-					: client.colors.warning,
-		)
-		.setTitle(`${ratingEmojis[rating]} Rating Submitted`)
-		.setDescription(ratingMessages[rating])
-		.setFooter({ text: "Your feedback helps us improve the AI assistant!" })
-		.setTimestamp();
-
-	// Log the feedback (you could save this to database for analytics)
-	console.log(
-		`AI Feedback: ${rating} from ${interaction.user.tag} in ${interaction.guild.name}`,
-	);
-
-	await interaction.update({
-		embeds: [ratingEmbed],
-		components: [],
-	});
-}
-
-// 🤖 Handle AI ask modal submission
-async function handleAIAskModal(interaction, client) {
-	const { GoogleGenAI } = require("@google/genai");
-	const {
-		EmbedBuilder,
-		ActionRowBuilder,
-		ButtonBuilder,
-		ButtonStyle,
-	} = require("discord.js");
-	const Database = require("../utils/database");
-	const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
-	const history = [];
-
-	const question = interaction.fields.getTextInputValue("ai_question_input");
-
-	// Check rate limiting (5 requests per hour - same as slash command)
-	const db = await Database.getInstance();
-	const rateLimit = await db.checkRateLimit(
-		interaction.user.id,
-		interaction.guild.id,
-		5, // 5 requests
-		3600000, // 1 hour
-	);
-
-	if (!rateLimit.allowed) {
-		const resetTime = Math.floor(rateLimit.resetTime.getTime() / 1000);
-		const rateLimitEmbed = new EmbedBuilder()
-			.setColor("#ff9900")
-			.setTitle("⏱️ Rate Limited")
-			.setDescription(
-				`You've reached the AI request limit (5 per hour).\n\n**Reset:** <t:${resetTime}:R>`,
-			)
-			.setFooter({
-				text: "Rate limiting helps manage API costs and ensures fair usage.",
-			})
-			.setTimestamp();
-
-		return interaction.reply({ embeds: [rateLimitEmbed], ephemeral: true });
-	}
-
-	await interaction.deferReply();
-
-	try {
-		// Initialize Gemini AI
-		const systemPrompt = `You are a helpful AI assistant named Vaish. Give concise answers of the questions, queries of the user`;
-
-		history.push({
-			role: "user",
-			parts: [{ text: question }],
-		});
-
-		const response = await ai.models.generateContent({
-			model: "gemini-2.5-flash",
-			contents: history,
-			config: {
-				systemInstruction: systemPrompt,
-			},
-		});
-
-		// Truncate if too long
-		const truncatedResponse =
-			response.text.length > 1500
-				? response.text.substring(0, 1500) + "..."
-				: response.text;
-
-		const aiEmbed = new EmbedBuilder()
-			.setColor("#0099ff")
-			.setTitle("🤖 AI Assistant")
-			.setDescription(truncatedResponse)
-			.addFields({
-				name: "❓ Your Question",
-				value:
-					question.length > 200 ? question.substring(0, 200) + "..." : question,
-				inline: false,
-			})
-			.setFooter({
-				text: `Asked by ${interaction.user.tag}`,
-				iconURL: interaction.user.displayAvatarURL(),
-			})
-			.setTimestamp();
-
-		// Add modern UI components for user interaction
-		const actionRow = new ActionRowBuilder().addComponents(
-			new ButtonBuilder()
-				.setCustomId(`ai_ask_again_${interaction.user.id}`)
-				.setLabel("Ask Another")
-				.setStyle(ButtonStyle.Primary)
-				.setEmoji("🔄"),
-			new ButtonBuilder()
-				.setCustomId(`ai_rate_${interaction.user.id}`)
-				.setLabel("Rate Response")
-				.setStyle(ButtonStyle.Secondary)
-				.setEmoji("⭐"),
-		);
-
-		await interaction.editReply({
-			embeds: [aiEmbed],
-			components: [actionRow],
-		});
-	} catch (error) {
-		console.error("AI generation error:", error);
-
-		let errorEmbed;
-
-		// Handle specific API errors
-		if (error.message && error.message.includes("429")) {
-			// Gemini API quota exceeded
-			errorEmbed = new EmbedBuilder()
-				.setColor("#ff6b6b")
-				.setTitle("🚫 API Quota Exceeded")
-				.setDescription(
-					"The AI service is currently at its daily quota limit. This usually resets at midnight UTC.\n\n" +
-						"**What you can do:**\n" +
-						"• Try again later (quota resets daily)\n" +
-						"• Use shorter, simpler questions\n" +
-						"• Contact server admins if this persists\n\n" +
-						"**Alternative:** Try using the `/help` command for basic information!",
-				)
-				.setFooter({
-					text: "We're using Google's free tier - quota limits help keep the bot free!",
-				})
-				.setTimestamp();
-		} else if (
-			error.status === 429 ||
-			(error.response && error.response.status === 429)
-		) {
-			// Another way quota exceeded error might appear
-			errorEmbed = new EmbedBuilder()
-				.setColor("#ff6b6b")
-				.setTitle("🚫 API Quota Exceeded")
-				.setDescription(
-					"The AI service is currently at its daily quota limit. This usually resets at midnight UTC.\n\n" +
-						"**What you can do:**\n" +
-						"• Try again later (quota resets daily)\n" +
-						"• Use shorter, simpler questions\n" +
-						"• Contact server admins if this persists\n\n" +
-						"**Alternative:** Try using the `/help` command for basic information!",
-				)
-				.setFooter({
-					text: "We're using Google's free tier - quota limits help keep the bot free!",
-				})
-				.setTimestamp();
-		} else if (error.message && error.message.includes("SAFETY")) {
-			// Content safety filter triggered
-			errorEmbed = new EmbedBuilder()
-				.setColor("#ff9900")
-				.setTitle("🛡️ Content Safety Filter")
-				.setDescription(
-					"Your question was flagged by the AI's safety filters. Please try rephrasing your question in a different way.",
-				)
-				.setTimestamp();
-		} else {
-			// Generic error
-			errorEmbed = new EmbedBuilder()
-				.setColor("#ff0000")
-				.setTitle("❌ AI Error")
-				.setDescription(
-					"Sorry, I encountered an error processing your question. Please try again in a moment.",
-				)
-				.setTimestamp();
-		}
-
-		await interaction.editReply({ embeds: [errorEmbed] });
 	}
 }
 
