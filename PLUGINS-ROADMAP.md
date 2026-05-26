@@ -80,11 +80,14 @@ Every plugin declares itself upfront:
 	"requiresRestart": false,
 	"permissions": ["db.read", "db.write", "commands.override", "scheduler"],
 	"overrides": ["daily"],
-	"configSchema": {}
+	"configSchema": {},
+	"port": 50000
 }
 ```
 
 `requiresRestart` controls hot-reload eligibility. `permissions` are surfaced in the dashboard before install — not enforced (full trust), but transparent. `configSchema` (JSON Schema) lets the dashboard auto-generate a settings UI for the plugin with zero extra dashboard code.
+
+`port` (optional) — declares the port requirement for plugins that expose web interfaces. The plugin is responsible for starting its own web server on this port.
 
 ### Plugin Structure
 
@@ -238,8 +241,73 @@ To make the power of this platform concrete — a single well-built plugin can:
 - Listen to any Discord event directly via the raw client
 - Expose its own config schema so admins get a settings UI for free
 - Communicate between plugins via the shared Hook Bus
+- **Expose its own web interface** — plugins can run their own HTTP servers on declared ports
 
 A plugin that does all of the above is effectively a new bot running on the same infrastructure. That is the intended ceiling.
+
+---
+
+## Phase 3.5 — Administration Plugin
+
+**Goal:** Provide a built-in web-based admin dashboard as a default plugin.
+
+The `administration` plugin is a first-class plugin that demonstrates the full power of the plugin system by exposing a complete web-based admin interface.
+
+### Location
+
+```
+plugins/
+  administration/
+    plugin.json       ← manifest with port: 50000
+    index.js          ← Fastify web server + API routes
+    web/              ← React frontend source
+      src/
+        components/   ← Reusable UI components
+        pages/        ← Dashboard pages (AI, XP, Tickets, etc.)
+        hooks/        ← React hooks for auth and API calls
+        utils/        ← Helper functions
+```
+
+### Features
+
+| Section | Description |
+|---------|-------------|
+| **Dashboard** | Server overview with member count, XP stats, ticket counts, top users |
+| **AI Settings** | Toggle AI, configure mode (context/auto/hybrid), set channels, edit FAQ context |
+| **XP & Leveling** | Configure XP rates, channel tracking, role rewards |
+| **Tickets** | View ticket stats, configure category and log channel |
+| **Economy** | Work reward settings, shop item management |
+| **Birthdays** | Enable/disable, configure announcement channel and birthday role |
+| **Anti-Raid** | Enable raid protection, configure thresholds and actions |
+| **Activity Logs** | View recent XP transactions and events |
+| **Settings** | Server info, config export, documentation links |
+
+### Authentication
+
+- Uses Discord OAuth2 — same as the internal bot API
+- Sessions stored in MongoDB (`admin_sessions` collection)
+- Permission check: Administrator (0x8) or Manage Guild (0x20)
+- Bot owners bypass all permission checks via `OWNER_IDS` env var
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `ADMINISTRATION_PORT` | Web server port (default: 50000) |
+| `ADMINISTRATION_SESSION_SECRET` | Session secret (falls back to `SESSION_SECRET`) |
+| `ADMINISTRATION_OAUTH_CLIENT_ID` | Discord OAuth client ID (falls back to `DISCORD_OAUTH_CLIENT_ID`) |
+| `ADMINISTRATION_OAUTH_CLIENT_SECRET` | Discord OAuth secret (falls back to `DISCORD_OAUTH_CLIENT_SECRET`) |
+| `ADMINISTRATION_OAUTH_REDIRECT_URI` | OAuth callback URL (default: `http://localhost:50000/auth/discord/callback`) |
+| `ADMINISTRATION_BOT_API_URL` | Bot API URL for internal calls (default: `http://localhost:{BOT_API_PORT}`) |
+
+### Plugin Architecture Extension
+
+This plugin extends the concept of what a plugin can do:
+- Plugins can declare a `port` in their manifest
+- Plugins can run their own HTTP servers
+- Plugins can serve their own static content (React SPA)
+- Plugins can register their own API routes
+- Plugins can implement their own authentication flows using the core OAuth setup
 
 ---
 

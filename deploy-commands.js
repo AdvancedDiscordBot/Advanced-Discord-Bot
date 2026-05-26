@@ -20,17 +20,14 @@ function loadCommandsFromDirectory(dirPath) {
 		const fullPath = path.join(dirPath, item.name);
 
 		if (item.isDirectory()) {
-			// Recursively load commands from subdirectories
 			loadCommandsFromDirectory(fullPath);
 		} else if (item.isFile() && item.name.endsWith(".js")) {
-			// Load command file
 			try {
 				const command = require(fullPath);
 
 				if ("data" in command && "execute" in command) {
 					commands.push(command.data.toJSON());
 
-					// Determine category from folder structure
 					const relativePath = path.relative(commandsPath, fullPath);
 					const category =
 						path.dirname(relativePath) === "."
@@ -83,44 +80,66 @@ loadPluginCommands(pluginsPath);
 // 🌐 Initialize REST client
 const rest = new REST().setToken(process.env.DISCORD_TOKEN);
 
+// ⏱️ Timeout wrapper — forces rejection if Discord hangs instead of responding
+const withTimeout = (promise, ms = 15000) =>
+	Promise.race([
+		promise,
+		new Promise((_, reject) =>
+			setTimeout(
+				() =>
+					reject(
+						Object.assign(new Error("timeout"), {
+							status: 429,
+							retryAfter: 60,
+						}),
+					),
+				ms,
+			),
+		),
+	]);
+
+// 🔁 Retry wrapper — waits on rate limit and retries automatically
+const deployWithRetry = async (route, body, retries = 5) => {
+	for (let i = 0; i < retries; i++) {
+		try {
+			return await withTimeout(rest.put(route, { body }));
+		} catch (error) {
+			if (error.status === 429) {
+				const wait = (error.retryAfter ?? 60) * 1000;
+				console.log(
+					`⏳ Rate limited. Waiting ${wait / 1000}s before retry ${i + 1}/${retries}...`,
+				);
+				await new Promise((r) => setTimeout(r, wait));
+			} else {
+				throw error;
+			}
+		}
+	}
+	throw new Error("Max retries exceeded");
+};
+
 // 🚀 Deploy commands
 (async () => {
 	try {
-		console.log(`\n🗑️ Clearing existing commands...`);
-
-		// Clear existing commands first to prevent duplicates
-		if (process.env.GUILD_ID) {
-			await rest.put(
-				Routes.applicationGuildCommands(
-					process.env.CLIENT_ID,
-					process.env.GUILD_ID,
-				),
-				{ body: [] },
-			);
-			console.log("✅ Cleared guild commands");
-		} else {
-			await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), {
-				body: [],
-			});
-			console.log("✅ Cleared global commands");
-		}
-
 		console.log(
 			`\n🚀 Started refreshing ${commands.length} application (/) commands.`,
 		);
 
-		// Register new commands
-		const data = process.env.GUILD_ID
-			? await rest.put(
-					Routes.applicationGuildCommands(
+		// Optional: log REST responses for debugging
+		rest.on("response", (req, res) => {
+			console.log(`[REST] ${req.method} ${req.path} → ${res.status}`);
+		});
+
+		// Single PUT replaces all existing commands — no need to clear first
+		const data = await deployWithRetry(
+			process.env.GUILD_ID
+				? Routes.applicationGuildCommands(
 						process.env.CLIENT_ID,
 						process.env.GUILD_ID,
-					),
-					{ body: commands },
-				)
-			: await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), {
-					body: commands,
-				});
+					)
+				: Routes.applicationCommands(process.env.CLIENT_ID),
+			commands,
+		);
 
 		console.log(
 			`✅ Successfully reloaded ${data.length} application (/) commands.`,
@@ -141,6 +160,7 @@ const rest = new REST().setToken(process.env.DISCORD_TOKEN);
 
 		console.log("\n🎉 Command deployment completed successfully!");
 	} catch (error) {
-		console.error("❌ Error deploying commands:", error);
+		console.error("❌ Error deploying commands:", error.message);
+		process.exit(1);
 	}
 })();
