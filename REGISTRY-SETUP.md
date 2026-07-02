@@ -1,28 +1,29 @@
-# Setting Up the Plugin Registry
+# Setting Up The ADB Plugin Registry
 
-This guide covers how to set up and manage the VAISH plugin registry for production.
+This guide covers how to set up and manage a plugin registry for **Advanced Discord Bot (ADB)**.
 
 ## Overview
 
-The plugin registry is a JSON file that lists all available plugins in the marketplace. Users browse and install plugins from this list.
+The plugin registry is a JSON file that lists available plugins for the dashboard marketplace. Users browse registry entries and install plugins from npm packages or supported package sources.
 
 **Submission Flow:**
-1. Developer creates a plugin and publishes to npm
-2. Developer submits PR to registry repo
-3. Maintainers review and merge
-4. Plugin appears in marketplace automatically
 
-## Creating the Registry Repository
+1. Developer creates a plugin and publishes it.
+2. Developer submits a PR to the registry repository.
+3. Maintainer reviews the manifest, package, and security posture.
+4. Plugin appears in the marketplace after merge and cache refresh.
 
-### 1. Create a New GitHub Repository
+## Creating The Registry Repository
 
-Create a new public repository called `registry` (or `vaish-plugin-registry`):
+### 1. Create A GitHub Repository
 
+Create a public repository such as:
+
+```text
+https://github.com/YOUR_USERNAME/adb-plugin-registry
 ```
-https://github.com/YOUR_USERNAME/registry
-```
 
-### 2. Create plugins.json
+### 2. Create `plugins.json`
 
 Create `plugins.json` in the repository root:
 
@@ -30,28 +31,28 @@ Create `plugins.json` in the repository root:
 {
   "plugins": [
     {
-      "name": "vaish-plugin-economy",
+      "name": "adb-plugin-economy",
       "displayName": "Economy System",
       "description": "Complete economy system with coins, work commands, shop, and leaderboards",
-      "author": "VAISH",
+      "author": "ADB",
       "version": "1.0.0",
       "category": "features",
       "permissions": ["db.read", "db.write", "commands.register"],
       "requiresRestart": false,
       "verified": true,
-      "npmPackage": "vaish-plugin-economy"
+      "npmPackage": "adb-plugin-economy"
     },
     {
-      "name": "vaish-plugin-moderation",
+      "name": "adb-plugin-moderation",
       "displayName": "Advanced Moderation",
       "description": "Auto-mod, logs, slowmode, and advanced moderation tools",
-      "author": "VAISH",
+      "author": "ADB",
       "version": "1.0.0",
       "category": "moderation",
       "permissions": ["db.read", "db.write", "commands.register"],
       "requiresRestart": false,
       "verified": true,
-      "npmPackage": "vaish-plugin-moderation"
+      "npmPackage": "adb-plugin-moderation"
     }
   ]
 }
@@ -59,26 +60,22 @@ Create `plugins.json` in the repository root:
 
 ### 3. Plugin Entry Reference
 
-Each plugin entry supports these fields:
-
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | Yes | Internal name (npm package name) |
+| `name` | string | Yes | Internal plugin or npm package name |
 | `displayName` | string | Yes | Human-readable name |
 | `description` | string | Yes | What the plugin does |
 | `author` | string | Yes | Developer name |
 | `version` | string | Yes | Current version |
-| `category` | string | Yes | Category (see below) |
-| `permissions` | array | No | Required permissions |
-| `requiresRestart` | boolean | No | Needs bot restart to apply |
-| `verified` | boolean | No | Official/audited plugin |
+| `category` | string | Yes | Marketplace category |
+| `permissions` | array | No | Declared plugin permissions |
+| `requiresRestart` | boolean | No | Whether the bot must restart after install/update |
+| `verified` | boolean | No | Officially reviewed or audited plugin |
 | `npmPackage` | string | Yes | Exact npm package name |
-| `port` | number | No | Dashboard port if applicable |
-| `configSchema` | object | No | Settings schema |
+| `port` | number | No | Dashboard port if the plugin exposes a web UI |
+| `configSchema` | object | No | JSON Schema used to render plugin settings |
 
 ### 4. Categories
-
-Use these category IDs:
 
 | ID | Display Name |
 |----|--------------|
@@ -87,159 +84,112 @@ Use these category IDs:
 | `entertainment` | Entertainment |
 | `utility` | Utility |
 | `analytics` | Analytics |
+| `ai` | AI |
+| `dashboard` | Dashboard |
 
-### 5. README (Optional)
+### 5. Registry README
 
-Create a `README.md` explaining the submission process:
+Optional registry README:
 
 ```markdown
-# VAISH Plugin Registry
+# ADB Plugin Registry
 
-This repository contains the official list of VAISH plugins.
+This repository contains the plugin list for the ADB marketplace.
 
-## Adding a Plugin
+## Adding A Plugin
 
-1. Publish your plugin to npm (must start with `vaish-plugin-`)
-2. Fork this repository
-3. Add your plugin to `plugins.json`
-4. Submit a PR
+1. Publish your plugin package.
+2. Fork this repository.
+3. Add your plugin to `plugins.json`.
+4. Submit a PR.
 
 ## Plugin Requirements
 
-- Must have a valid `plugin.json` manifest
-- Must be published to npm
-- Must not break the bot
-- Must follow VAISH conventions
-
-## Review Process
-
-PRs are reviewed within 5 business days. We check for:
-- Valid plugin.json
-- Working npm package
-- No security issues
-- Proper Discord.py/discord.js usage
+- Valid `plugin.json` manifest
+- Published package or supported install source
+- No malicious behavior
+- Clear permissions and restart requirements
+- Compatible with the current ADB plugin API
 ```
 
-## Configuring VAISH
+## Configuring ADB
 
-### Set the Registry URL
-
-In your bot's environment:
+Set the registry URL in your bot environment:
 
 ```bash
-# For GitHub raw URL
-export PLUGIN_REGISTRY_URL="https://raw.githubusercontent.com/YOUR_USERNAME/registry/main/plugins.json"
-
-# For custom server
-export PLUGIN_REGISTRY_URL="https://your-server.com/plugins.json"
+export PLUGIN_REGISTRY_URL="https://raw.githubusercontent.com/YOUR_USERNAME/adb-plugin-registry/main/plugins.json"
 ```
 
-### Default URL
-
-If not set, defaults to:
-```
-https://raw.githubusercontent.com/vaish-plugin-registry/registry/main/plugins.json
-```
+If `PLUGIN_REGISTRY_URL` is not set, configure one before enabling marketplace installs in production.
 
 ## Managing Submissions
 
-### Review Checklist
+Review checklist:
 
-When reviewing a PR, verify:
-
-- [ ] Plugin has valid `plugin.json`
-- [ ] npm package exists and is accessible
-- [ ] Version matches package.json
+- [ ] Plugin has a valid `plugin.json`
+- [ ] Package exists and is installable
+- [ ] Version matches registry entry
 - [ ] Description is accurate
 - [ ] Category is appropriate
-- [ ] No malicious code
-- [ ] Plugin loads without errors
+- [ ] Permissions are clearly declared
+- [ ] No obvious malicious code or unsafe install scripts
+- [ ] Plugin loads without errors in a test bot
 
-### Merging a Plugin
+Example merge flow:
 
 ```bash
-# Clone the repo
-git clone https://github.com/vaish-plugin-registry/registry.git
-cd registry
-
-# Add the new plugin entry to plugins.json
-# (use a text editor or jq)
-
-# Commit and push
+git clone https://github.com/YOUR_USERNAME/adb-plugin-registry.git
+cd adb-plugin-registry
 git add plugins.json
-git commit -m "Add vaish-plugin-example"
+git commit -m "Add adb-plugin-example"
 git push origin main
-```
-
-### Using jq (Optional)
-
-```bash
-# Add a new plugin
-jq '.plugins += [{
-  "name": "vaish-plugin-example",
-  "displayName": "Example Plugin",
-  "description": "An example plugin",
-  "author": "ExampleAuthor",
-  "version": "1.0.0",
-  "category": "features",
-  "requiresRestart": false,
-  "verified": false,
-  "npmPackage": "vaish-plugin-example"
-}]' plugins.json > temp.json && mv temp.json plugins.json
 ```
 
 ## Production Best Practices
 
 ### Cache Management
 
-The bot caches the registry for 30 minutes. To force refresh:
+The bot may cache the registry. To force a refresh:
 
 1. Restart the bot, or
-2. The bot will fetch automatically on next request after cache expires
+2. Wait for the registry cache to expire.
 
 ### Health Checks
 
-Monitor your registry:
-
 ```bash
-# Test URL accessibility
-curl -I https://raw.githubusercontent.com/YOUR_USERNAME/registry/main/plugins.json
-
-# Validate JSON
-curl -s https://raw.githubusercontent.com/YOUR_USERNAME/registry/main/plugins.json | jq .
+curl -I https://raw.githubusercontent.com/YOUR_USERNAME/adb-plugin-registry/main/plugins.json
+curl -s https://raw.githubusercontent.com/YOUR_USERNAME/adb-plugin-registry/main/plugins.json | jq .
 ```
 
 ### Backup
 
-Keep a backup of `plugins.json` - it's your source of truth.
+Keep `plugins.json` backed up. It is the source of truth for marketplace listings.
 
 ## Troubleshooting
 
-### Plugin not appearing
+### Plugin Not Appearing
 
-- Check the JSON is valid: `jq . plugins.json`
-- Verify the npm package exists
-- Ensure `npmPackage` matches exactly
-- Wait for cache to expire (30 min) or restart bot
+- Check that `plugins.json` is valid JSON.
+- Verify the package exists and is accessible.
+- Ensure `npmPackage` matches exactly.
+- Wait for cache expiry or restart the bot.
 
 ### Invalid JSON
 
 ```bash
-# Find syntax errors
-jq plugins.json
+jq . plugins.json
 ```
 
-### Registry URL not working
+### Registry URL Not Working
 
-- Must be HTTPS
-- Must return valid JSON
-- Raw GitHub URL format: `https://raw.githubusercontent.com/USER/REPO/BRANCH/FILE`
+- Use HTTPS in production.
+- Return valid JSON.
+- For GitHub raw files, use:
 
-## Example Registry
-
-See [vaish-plugin-registry/registry](https://github.com/vaish-plugin-registry/registry) for a complete example.
+```text
+https://raw.githubusercontent.com/USER/REPO/BRANCH/plugins.json
+```
 
 ## Need Help?
 
-- Issues: Open an issue on the registry repo
-- Discord: [VAISH Support](https://discord.gg/vaish)
+Open an issue in the registry repository or in the main ADB repository with the registry URL, the plugin entry, and any install logs.

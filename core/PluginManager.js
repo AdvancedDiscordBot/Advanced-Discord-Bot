@@ -106,7 +106,7 @@ class PluginManager {
 					for (const scopedPkg of scopedPackages) {
 						if (!scopedPkg.isDirectory()) continue;
 						const packageName = `${pkg.name}/${scopedPkg.name}`;
-						if (!scopedPkg.name.startsWith("vaish-plugin-")) continue;
+						if (!scopedPkg.name.startsWith("adb-plugin-")) continue;
 
 						const pluginPath = path.join(scopedPath, scopedPkg.name);
 						const manifestPath = path.join(pluginPath, "plugin.json");
@@ -129,7 +129,7 @@ class PluginManager {
 				}
 
 				if (!pkg.isDirectory()) continue;
-				if (!pkg.name.startsWith("vaish-plugin-")) continue;
+				if (!pkg.name.startsWith("adb-plugin-")) continue;
 
 				const pluginPath = path.join(this.config.nodeModulesDir, pkg.name);
 				const manifestPath = path.join(pluginPath, "plugin.json");

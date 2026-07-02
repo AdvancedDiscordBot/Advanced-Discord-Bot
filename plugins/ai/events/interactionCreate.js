@@ -244,7 +244,7 @@ async function handleAIAskModal(interaction, client) {
 
 	try {
 		const systemPrompt =
-			"You are a helpful AI assistant named Vaish. Give concise answers of the questions, queries of the user";
+			"You are a helpful AI assistant named ADB. Give concise answers of the questions, queries of the user";
 
 		history.push({
 			role: "user",

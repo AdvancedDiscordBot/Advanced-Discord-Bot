@@ -5,7 +5,7 @@ const { createLogger } = require("./logger");
 
 const REGISTRY_URL =
 	process.env.PLUGIN_REGISTRY_URL ||
-	"https://raw.githubusercontent.com/vaish-plugin-registry/registry/main/plugins.json";
+	"https://raw.githubusercontent.com/adb-plugin-registry/registry/main/plugins.json";
 
 const REGISTRY_CACHE_FILE = path.join(process.cwd(), "data", "plugin-registry.json");
 const SUBMISSIONS_FILE = path.join(process.cwd(), "data", "plugin-submissions.json");
@@ -76,31 +76,31 @@ class PluginRegistry {
 	getDefaultPlugins() {
 		return [
 			{
-				name: "vaish-plugin-economy",
+				name: "adb-plugin-economy",
 				displayName: "Economy System",
 				description: "Complete economy system with coins, work commands, shop, and leaderboards",
-				author: "VAISH",
+				author: "ADB",
 				version: "1.0.0",
 				category: "features",
 				permissions: ["db.read", "db.write", "commands.register"],
 				requiresRestart: false,
 				verified: true,
-				npmPackage: "vaish-plugin-economy",
+				npmPackage: "adb-plugin-economy",
 			},
 			{
-				name: "vaish-plugin-tickets",
+				name: "adb-plugin-tickets",
 				displayName: "Ticket System",
 				description: "Advanced ticket system with categories, transcripts, and automation",
-				author: "VAISH",
+				author: "ADB",
 				version: "1.0.0",
 				category: "features",
 				permissions: ["db.read", "db.write", "commands.register"],
 				requiresRestart: false,
 				verified: true,
-				npmPackage: "vaish-plugin-tickets",
+				npmPackage: "adb-plugin-tickets",
 			},
 			{
-				name: "vaish-plugin-music",
+				name: "adb-plugin-music",
 				displayName: "Music Player",
 				description: "Play music from YouTube, Spotify, and more with advanced controls",
 				author: "Community",
@@ -109,10 +109,10 @@ class PluginRegistry {
 				permissions: ["db.read", "commands.register"],
 				requiresRestart: true,
 				verified: false,
-				npmPackage: "vaish-plugin-music",
+				npmPackage: "adb-plugin-music",
 			},
 			{
-				name: "vaish-plugin-games",
+				name: "adb-plugin-games",
 				displayName: "Mini Games",
 				description: "Trivia, word games, and more to keep your server entertained",
 				author: "Community",
@@ -121,22 +121,22 @@ class PluginRegistry {
 				permissions: ["db.read", "db.write", "commands.register"],
 				requiresRestart: false,
 				verified: false,
-				npmPackage: "vaish-plugin-games",
+				npmPackage: "adb-plugin-games",
 			},
 			{
-				name: "vaish-plugin-moderation",
+				name: "adb-plugin-moderation",
 				displayName: "Advanced Moderation",
 				description: "Auto-mod, logs, slowmode, and advanced moderation tools",
-				author: "VAISH",
+				author: "ADB",
 				version: "1.0.0",
 				category: "moderation",
 				permissions: ["db.read", "db.write", "commands.register"],
 				requiresRestart: false,
 				verified: true,
-				npmPackage: "vaish-plugin-moderation",
+				npmPackage: "adb-plugin-moderation",
 			},
 			{
-				name: "vaish-plugin-levels",
+				name: "adb-plugin-levels",
 				displayName: "Enhanced Levels",
 				description: "Advanced XP system with rewards, milestones, and custom ranks",
 				author: "Community",
@@ -145,10 +145,10 @@ class PluginRegistry {
 				permissions: ["db.read", "db.write", "commands.register"],
 				requiresRestart: false,
 				verified: false,
-				npmPackage: "vaish-plugin-levels",
+				npmPackage: "adb-plugin-levels",
 			},
 			{
-				name: "vaish-plugin-welcomer",
+				name: "adb-plugin-welcomer",
 				displayName: "Welcome & Leave Messages",
 				description: "Customizable welcome messages, images, and leave messages",
 				author: "Community",
@@ -157,10 +157,10 @@ class PluginRegistry {
 				permissions: ["db.read", "commands.register"],
 				requiresRestart: false,
 				verified: false,
-				npmPackage: "vaish-plugin-welcomer",
+				npmPackage: "adb-plugin-welcomer",
 			},
 			{
-				name: "vaish-plugin-polls",
+				name: "adb-plugin-polls",
 				displayName: "Polls & Voting",
 				description: "Create polls with reactions, anonymous voting, and results",
 				author: "Community",
@@ -169,7 +169,7 @@ class PluginRegistry {
 				permissions: ["commands.register"],
 				requiresRestart: false,
 				verified: false,
-				npmPackage: "vaish-plugin-polls",
+				npmPackage: "adb-plugin-polls",
 			},
 		];
 	}

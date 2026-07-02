@@ -1,5 +1,5 @@
 function createLogger(namespace) {
-	const prefix = namespace ? `[${namespace}]` : "[vaish]";
+	const prefix = namespace ? `[${namespace}]` : "[adb]";
 
 	return {
 		info(message, meta) {

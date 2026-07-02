@@ -1,8 +1,8 @@
 {
 	"name": "ai",
 	"version": "1.0.0",
-	"description": "Official VAISH AI assistant plugin.",
-	"author": "VAISH Development Team",
+	"description": "Official ADB AI assistant plugin.",
+	"author": "ADB Development Team",
 	"main": "index.js",
 	"requiresRestart": false,
 	"permissions": [

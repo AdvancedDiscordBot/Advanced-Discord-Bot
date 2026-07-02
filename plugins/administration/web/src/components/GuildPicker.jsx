@@ -38,7 +38,7 @@ export function GuildPicker() {
         <Server size={32} color="#6366F1" />
         <h1 style={styles.title}>Select a Server</h1>
         <p style={styles.subtitle}>
-          Choose a server where you have admin permissions to manage VAISH
+          Choose a server where you have admin permissions to manage ADB
         </p>
       </div>
       <div style={styles.grid}>
@@ -71,7 +71,7 @@ export function GuildPicker() {
       </div>
       {guilds.length === 0 && (
         <div style={styles.empty}>
-          No servers found. Make sure VAISH is in a server where you have admin
+          No servers found. Make sure ADB is in a server where you have admin
           permissions.
         </div>
       )}

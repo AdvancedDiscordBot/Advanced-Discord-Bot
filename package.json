@@ -1,7 +1,7 @@
 {
-	"name": "vaish-discord-bot",
+	"name": "advanced-discord-bot",
 	"version": "2.0.0",
-	"description": "VAISH - Ultra-modern AI-powered Discord bot with advanced features and beautiful UI",
+	"description": "Advanced Discord Bot - a self-hosted Discord bot platform with dashboard and plugin marketplace support",
 	"main": "index.js",
 	"scripts": {
 		"start": "node index.js",
@@ -16,21 +16,21 @@
 		"ai",
 		"gemini",
 		"modern",
-		"VAISH",
+		"ADB",
 		"advanced",
 		"typescript-ready",
 		"mongodb",
 		"open-source"
 	],
-	"author": "VAISH Development Team",
+	"author": "DeadIndian",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/VAISH-bot/discord-bot"
+		"url": "https://github.com/DeadIndian/Advanced-Discord-Bot"
 	},
-	"homepage": "https://VAISH-bot.com",
+	"homepage": "https://github.com/DeadIndian/Advanced-Discord-Bot",
 	"bugs": {
-		"url": "https://github.com/VAISH-bot/discord-bot/issues"
+		"url": "https://github.com/DeadIndian/Advanced-Discord-Bot/issues"
 	},
 	"dependencies": {
 		"@google/genai": "^1.16.0",

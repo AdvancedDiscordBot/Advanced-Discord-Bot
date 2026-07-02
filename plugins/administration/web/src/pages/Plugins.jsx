@@ -198,7 +198,7 @@ export function Plugins() {
 				<div style={styles.headerActions}>
 					<Button
 						variant="secondary"
-						onClick={() => window.open('https://github.com/vaish-plugin-registry/registry', '_blank')}
+						onClick={() => window.open('https://github.com/adb-plugin-registry/registry', '_blank')}
 					>
 						<ExternalLink size={16} style={{ marginRight: 8 }} />
 						Submit Plugin
@@ -288,12 +288,12 @@ export function Plugins() {
 					<div style={styles.modal} onClick={(e) => e.stopPropagation()}>
 						<h2 style={styles.modalTitle}>Install Custom Plugin</h2>
 						<p style={styles.modalHint}>
-							Enter the npm package name (must start with vaish-plugin-)
+							Enter the npm package name (must start with adb-plugin-)
 						</p>
 						<Input
 							value={customPackage}
 							onChange={setCustomPackage}
-							placeholder="vaish-plugin-my-plugin"
+							placeholder="adb-plugin-my-plugin"
 						/>
 						<div style={styles.modalActions}>
 							<Button variant="secondary" onClick={() => setShowInstallModal(false)}>

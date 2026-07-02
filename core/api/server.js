@@ -68,13 +68,13 @@ async function startApiServer({ client, db, pluginManager, hooks }) {
 
 	const sessionStore = MongoStore.create({
 		mongoUrl: process.env.MONGODB_URI,
-		collectionName: "vaish_sessions",
+		collectionName: "adb_sessions",
 	});
 
 	await fastify.register(cookie);
 	await fastify.register(session, {
 		secret: sessionSecret,
-		cookieName: "vaish.sid",
+		cookieName: "adb.sid",
 		cookie: {
 			path: "/",
 			httpOnly: true,
@@ -235,7 +235,7 @@ async function startApiServer({ client, db, pluginManager, hooks }) {
 
 		const pluginList = pluginManager.getPluginList();
 		const plugin = pluginList.find(
-			(p) => p.name === packageName || p.name === `vaish-plugin-${packageName.replace("vaish-plugin-", "")}`,
+			(p) => p.name === packageName || p.name === `adb-plugin-${packageName.replace("adb-plugin-", "")}`,
 		);
 
 		if (plugin) {
@@ -303,8 +303,8 @@ async function startApiServer({ client, db, pluginManager, hooks }) {
 			return reply.code(400).send({ error: "Missing required fields" });
 		}
 
-		if (!packageName.startsWith("vaish-plugin-")) {
-			return reply.code(400).send({ error: "Package name must start with 'vaish-plugin-'" });
+		if (!packageName.startsWith("adb-plugin-")) {
+			return reply.code(400).send({ error: "Package name must start with 'adb-plugin-'" });
 		}
 
 		return registry.submitPlugin({ packageName, description, author, category });
@@ -437,7 +437,7 @@ async function startApiServer({ client, db, pluginManager, hooks }) {
 
 	const getSessionFromRequest = async (req) => {
 		const cookies = parseCookies(req.headers.cookie || "");
-		const rawSid = cookies["vaish.sid"];
+		const rawSid = cookies["adb.sid"];
 		if (!rawSid) return null;
 
 		const unsigned = fastify.unsignCookie(rawSid);

@@ -55,7 +55,7 @@ async function handleAIAssistant(message, db, client) {
 			return;
 		}
 
-		let systemPrompt = `You are an AI assistant named Vaish in the Discord " ${message.guild.name} ". `;
+		let systemPrompt = `You are an AI assistant named ADB in the Discord " ${message.guild.name} ". `;
 
 		if (config.aiContext) {
 			systemPrompt += `\n Here's important information about this server: ${config.aiContext} `;

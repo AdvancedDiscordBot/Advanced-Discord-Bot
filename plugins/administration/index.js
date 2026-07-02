@@ -47,13 +47,13 @@ async function load(ctx) {
 
   const sessionStore = MongoStore.create({
     mongoUrl: ctx.config.env.MONGODB_URI,
-    collectionName: "vaish_sessions",
+    collectionName: "adb_sessions",
   });
 
   await fastify.register(cookie);
   await fastify.register(session, {
     secret: sessionSecret,
-    cookieName: "vaish.sid",
+    cookieName: "adb.sid",
     cookie: {
       path: "/",
       httpOnly: true,
@@ -505,8 +505,8 @@ async function load(ctx) {
     if (!packageName || !description || !author) {
       return reply.code(400).send({ error: "Missing required fields" });
     }
-    if (!packageName.startsWith("vaish-plugin-")) {
-      return reply.code(400).send({ error: "Package name must start with 'vaish-plugin-'" });
+    if (!packageName.startsWith("adb-plugin-")) {
+      return reply.code(400).send({ error: "Package name must start with 'adb-plugin-'" });
     }
     return registry.submitPlugin({ packageName, description, author, category });
   });

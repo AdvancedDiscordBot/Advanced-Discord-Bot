@@ -1,9 +1,10 @@
 <div align="center">
 
-# 📚 VAISH Bot Slash Command Documentation
+# 📚 Advanced Discord Bot Slash Command Documentation
 
-Welcome to the official command reference for **VAISH**, the open-source Discord bot!  
-This document outlines all available slash commands, organized by category.
+Official command reference for **Advanced Discord Bot (ADB)**.
+
+</div>
 
 ---
 
@@ -11,19 +12,19 @@ This document outlines all available slash commands, organized by category.
 
 | Command | Description | Usage |
 |--------|-------------|-------|
-| `/bal [user]` | Check your wallet and bank balance. | `/bal` |
+| `/bal [user]` | Check wallet and bank balance. | `/bal` |
 | `/buy <item>` | Buy a role from the shop. | `/buy PremiumRole` |
-| `/coinflip <bet> <choice>` | Flip a coin and gamble your coins. | `/coinflip 100 heads` |
-| `/collect` | Collect income from your purchased roles. | `/collect` |
+| `/coinflip <bet> <choice>` | Flip a coin and gamble coins. | `/coinflip 100 heads` |
+| `/collect` | Collect income from purchased roles. | `/collect` |
 | `/deposit <amount \| all>` | Deposit coins into the bank. | `/deposit all` |
 | `/diceroll <bet> <number>` | Roll a die and bet on a number. | `/diceroll 50 4` |
-| `/economy-setup [options]` | Configure economy settings (Admin Only). | `/economy-setup` |
+| `/economy-setup [options]` | Configure economy settings. Admin only. | `/economy-setup` |
 | `/give <recipient> <amount>` | Give coins to another user. | `/give @user 100` |
-| `/leaderboard` | Shows top 10 richest users. | `/leaderboard` |
+| `/leaderboard` | Show the richest users. | `/leaderboard` |
 | `/shop` | Display roles available for purchase. | `/shop` |
-| `/shop-admin <subcommand> [options]` | Manage the role shop (Admin Only). | `/shop-admin add PremiumRole` |
-| `/steal <victim>` | Attempt to steal coins (risky). | `/steal @user` |
-| `/withdraw <amount \| all>` | Withdraw coins into your wallet. | `/withdraw 200` |
+| `/shop-admin <subcommand> [options]` | Manage the role shop. Admin only. | `/shop-admin add PremiumRole` |
+| `/steal <victim>` | Attempt to steal coins. | `/steal @user` |
+| `/withdraw <amount \| all>` | Withdraw coins into wallet. | `/withdraw 200` |
 | `/work` | Work to earn coins. | `/work` |
 
 ---
@@ -37,7 +38,7 @@ This document outlines all available slash commands, organized by category.
 | `/meme [subreddit]` | Get a random meme. | `/meme` |
 | `/poll <question> <options>` | Create an emoji poll. | `/poll "Best fruit?" apples, bananas, oranges` |
 | `/reminder <time> <message>` | Set a reminder. | `/reminder 1h Take a break` |
-| `/roll <dice>` | Roll dice (e.g., 2d20). | `/roll 2d6` |
+| `/roll <dice>` | Roll dice. | `/roll 2d6` |
 | `/secret` | Discover an easter egg. | `/secret` |
 
 ---
@@ -51,15 +52,15 @@ This document outlines all available slash commands, organized by category.
 | `/botstats` | Bot performance statistics. | `/botstats` |
 | `/calculate <expression>` | Perform arithmetic. | `/calculate 5 + 7` |
 | `/dm <message>` | Send yourself a DM. | `/dm Remember the meeting!` |
-| `/feedback` | Submit feedback. | `/feedback This bot is awesome!` |
+| `/feedback` | Submit feedback. | `/feedback This bot is useful!` |
 | `/help` | List bot commands. | `/help` |
-| `/joindate [user]` | When did a user join? | `/joindate @user` |
+| `/joindate [user]` | Show when a user joined. | `/joindate @user` |
 | `/ping` | Bot and API latency. | `/ping` |
 | `/resetnick` | Reset your nickname. | `/resetnick` |
 | `/reverse <text>` | Reverse a message. | `/reverse hello` |
 | `/serverinfo` | Display server info. | `/serverinfo` |
 | `/setnick <nickname>` | Change your nickname. | `/setnick Hero` |
-| `/spoiler <text>` | Hide text as spoiler. | `/spoiler Darth Vader is Luke's father` |
+| `/spoiler <text>` | Hide text as spoiler. | `/spoiler secret text` |
 | `/uptime` | Bot uptime info. | `/uptime` |
 | `/userinfo [user]` | Detailed user info. | `/userinfo @user` |
 
@@ -73,7 +74,7 @@ This document outlines all available slash commands, organized by category.
 | `/kick <user> [reason]` | Kick a user. | `/kick @user offensive language` |
 | `/purge <amount> [user]` | Bulk delete messages. | `/purge 50` |
 | `/ticket <title> <description>` | Create a support ticket. | `/ticket "Bug Report" "Feature not working"` |
-| `/ticketdashboard <subcommand>` | Manage tickets (Mods Only). | `/ticketdashboard list` |
+| `/ticketdashboard <subcommand>` | Manage tickets. Mods only. | `/ticketdashboard list` |
 
 ---
 
@@ -82,19 +83,23 @@ This document outlines all available slash commands, organized by category.
 | Command | Description | Usage |
 |--------|-------------|-------|
 | `/daily` | Claim daily reward. | `/daily` |
-| `/points <subcommand>` | Manage/view points. | `/points view` |
+| `/points <subcommand>` | Manage or view points. | `/points view` |
 | `/profile [user]` | View profile and stats. | `/profile @user` |
 | `/roles <subcommand>` | View or claim role rewards. | `/roles claim` |
-| `/xpconfig <subcommand>` | XP/leveling config (Admin Only). | `/xpconfig set multiplier 2x` |
+| `/xpconfig <subcommand>` | Configure XP and leveling. Admin only. | `/xpconfig set multiplier 2x` |
 
 ---
 
-## 🤖 Other Commands
+## 🤖 AI & Plugin Commands
 
 | Command | Description | Usage |
 |--------|-------------|-------|
-| `/aiassistant ask <question>` | Ask the AI anything. | `/aiassistant ask What's the weather?` |
+| `/aiassistant ask <question>` | Ask the AI assistant. | `/aiassistant ask What can you do?` |
+| `/config-ai` | Configure AI plugin behavior. | `/config-ai` |
+| `/faq` | Use FAQ assistant features when the AI plugin is enabled. | `/faq` |
 | `/antiraid <subcommand>` | Manage anti-raid system. | `/antiraid enable` |
 | `/truthordare <subcommand>` | Play Truth or Dare. | `/truthordare start` |
 
-</div>
+---
+
+Plugins can add more slash commands at runtime. Re-run `npm run deploy` after adding or changing slash command definitions so Discord receives the updated command list.

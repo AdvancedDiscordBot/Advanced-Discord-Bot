@@ -9,7 +9,7 @@ export function GuildSettings() {
   const { guild, config } = guildData || {};
   const { user } = useAuth();
   const [isOwner, setIsOwner] = useState(() => {
-    const stored = localStorage.getItem('vaish_isOwner');
+    const stored = localStorage.getItem('adb_isOwner');
     return stored === 'true';
   });
   const [restarting, setRestarting] = useState(false);
@@ -21,7 +21,7 @@ export function GuildSettings() {
         if (res.ok) {
           const data = await res.json();
           setIsOwner(data.isOwner || false);
-          localStorage.setItem('vaish_isOwner', String(data.isOwner || false));
+          localStorage.setItem('adb_isOwner', String(data.isOwner || false));
         }
       } catch {}
     }
@@ -101,7 +101,7 @@ export function GuildSettings() {
           <h3 style={styles.cardTitle}>Resources</h3>
           <div style={styles.links}>
             <a
-              href="https://github.com/VAISH-bot"
+              href="https://github.com/ADB-bot"
               target="_blank"
               rel="noopener noreferrer"
               style={styles.link}

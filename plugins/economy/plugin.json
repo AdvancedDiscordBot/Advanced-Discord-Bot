@@ -1,8 +1,8 @@
 {
 	"name": "economy",
 	"version": "1.0.0",
-	"description": "Official VAISH economy plugin.",
-	"author": "VAISH Development Team",
+	"description": "Official ADB economy plugin.",
+	"author": "ADB Development Team",
 	"main": "index.js",
 	"requiresRestart": false,
 	"permissions": ["db.read", "db.write", "commands.register"],

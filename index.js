@@ -15,7 +15,7 @@ const { createLogger } = require("./core/logger");
 const TaskScheduler = require("./utils/scheduler");
 require("dotenv").config();
 
-// 🚀 Create VAISH - Ultra Modern Discord Bot
+// 🚀 Create ADB - Ultra Modern Discord Bot
 const client = new Client({
 	intents: [
 		GatewayIntentBits.Guilds,
@@ -39,7 +39,7 @@ const client = new Client({
 client.commands = new Collection();
 client.cooldowns = new Collection();
 
-// 🎨 VAISH Brand Colors - Ultra Modern Design
+// 🎨 ADB Brand Colors - Ultra Modern Design
 client.colors = {
 	primary: "#6366F1", // Indigo-500 - Modern primary
 	secondary: "#8B5CF6", // Violet-500 - Rich secondary
@@ -57,15 +57,15 @@ client.colors = {
 	},
 };
 
-// 🤖 VAISH Bot Profile
+// 🤖 ADB Bot Profile
 client.profile = {
-	name: "VAISH",
+	name: "ADB",
 	version: "2.0.0",
-	description: "Ultra-modern AI-powered Discord bot with advanced features",
-	author: "VAISH Development Team",
-	website: "https://VAISH-bot.com",
-	github: "https://github.com/VAISH-bot/discord-bot",
-	support: "https://discord.gg/VAISH-support",
+	description: "Self-hosted Discord bot platform with dashboard and plugin support",
+	author: "DeadIndian",
+	website: "https://github.com/DeadIndian/Advanced-Discord-Bot",
+	github: "https://github.com/DeadIndian/Advanced-Discord-Bot",
+	support: "https://discord.gg/ADB_PLACEHOLDER",
 	features: [
 		"🤖 Advanced AI Assistant (Google Gemini)",
 		"💎 Points & Rewards System",
@@ -91,7 +91,7 @@ let scheduler;
 let pluginManager;
 let hookBus;
 
-// 🔄 Dynamic Activity Status for VAISH
+// 🔄 Dynamic Activity Status for ADB
 const activities = [
 	{ name: "🤖 AI Assistant | /aiassistant", type: ActivityType.Playing },
 	{ name: "💎 Points & Rewards | /points", type: ActivityType.Watching },
@@ -108,23 +108,23 @@ let currentActivity = 0;
 async function initializeDatabase() {
 	try {
 		db = await Database.getInstance();
-		console.log("🗃️ VAISH Database initialized successfully");
+		console.log("🗃️ ADB Database initialized successfully");
 
 		// Update bot stats
 		client.profile.stats.uptime = Date.now();
 
 		return db;
 	} catch (error) {
-		console.error("❌ VAISH Database initialization failed:", error);
+		console.error("❌ ADB Database initialization failed:", error);
 		process.exit(1);
 	}
 }
 
-// 🚀 VAISH Startup Sequence
+// 🚀 ADB Startup Sequence
 client.once("ready", async () => {
 	console.log(`
   ╔═══════════════════════════════════════════════════════════════╗
-  ║                    🤖 VAISH BOT ONLINE 🤖                     ║
+  ║                    🤖 ADB BOT ONLINE 🤖                     ║
   ╠═══════════════════════════════════════════════════════════════╣
   ║  Name: ${client.user.tag.padEnd(49)} ║
   ║  ID: ${client.user.id.padEnd(51)} ║  
@@ -145,7 +145,7 @@ client.once("ready", async () => {
 	// Initialize core systems
 	if (!scheduler) {
 		scheduler = new TaskScheduler(client);
-		console.log("⏰ VAISH Task Scheduler initialized");
+		console.log("⏰ ADB Task Scheduler initialized");
 	}
 
 	// Update bot stats
@@ -161,7 +161,7 @@ client.once("ready", async () => {
 	// Rotate activity status every 30 seconds
 	setInterval(updateBotActivity, 30000);
 
-	console.log("🎯 VAISH is fully operational and ready to serve!");
+	console.log("🎯 ADB is fully operational and ready to serve!");
 });
 
 // 🔄 Update Bot Activity Status
@@ -188,14 +188,14 @@ process.on("uncaughtException", (error) => {
 
 	// Graceful shutdown
 	setTimeout(() => {
-		console.log("🔄 VAISH is restarting due to critical error...");
+		console.log("🔄 ADB is restarting due to critical error...");
 		process.exit(1);
 	}, 5000);
 });
 
 // 🎯 Graceful Shutdown Handler
 process.on("SIGINT", async () => {
-	console.log("\n🛑 VAISH shutdown initiated...");
+	console.log("\n🛑 ADB shutdown initiated...");
 
 	try {
 		if (db) {
@@ -204,9 +204,9 @@ process.on("SIGINT", async () => {
 		}
 
 		client.destroy();
-		console.log("🤖 VAISH client destroyed");
+		console.log("🤖 ADB client destroyed");
 
-		console.log("✅ VAISH shutdown complete");
+		console.log("✅ ADB shutdown complete");
 		process.exit(0);
 	} catch (error) {
 		console.error("❌ Error during shutdown:", error);
@@ -214,16 +214,16 @@ process.on("SIGINT", async () => {
 	}
 });
 
-// 🚀 Initialize VAISH Bot
-async function startVAISH() {
+// 🚀 Initialize ADB Bot
+async function startADB() {
 	try {
-		console.log("🔄 Starting VAISH Bot...");
+		console.log("🔄 Starting ADB Bot...");
 
 		db = await initializeDatabase();
 
 		if (!scheduler) {
 			scheduler = new TaskScheduler(client);
-			console.log("⏰ VAISH Task Scheduler initialized");
+			console.log("⏰ ADB Task Scheduler initialized");
 		}
 
 		hookBus = new HookBus(createLogger("HookBus"));
@@ -251,7 +251,7 @@ async function startVAISH() {
 		// Login to Discord
 		await client.login(process.env.DISCORD_TOKEN);
 	} catch (error) {
-		console.error("❌ Failed to start VAISH Bot:", error);
+		console.error("❌ Failed to start ADB Bot:", error);
 		console.log("🔑 Please check your DISCORD_TOKEN in the .env file");
 		console.log("💡 Ensure your bot token is valid and has proper permissions");
 		process.exit(1);
@@ -268,11 +268,11 @@ async function startVAISH() {
 // const PORT = process.env.PORT || 3000;
 
 // app.get("/", (req, res) => {
-//   res.send("🟢 VAISH is alive and running!");
+//   res.send("🟢 ADB is alive and running!");
 // });
 
 // app.listen(PORT, () => {
 //   console.log(`🌐 Web server running on port ${PORT}`);
 // });
 // 🎬 Start the show!
-startVAISH();
+startADB();

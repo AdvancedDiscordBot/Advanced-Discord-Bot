@@ -1,8 +1,8 @@
 {
   "name": "administration",
   "version": "1.0.0",
-  "description": "VAISH Administration Dashboard - Web-based admin panel for bot configuration",
-  "author": "VAISH Development Team",
+  "description": "ADB Administration Dashboard - Web-based admin panel for bot configuration",
+  "author": "ADB Development Team",
   "main": "index.js",
   "requiresRestart": false,
   "permissions": ["db.read", "db.write", "commands.register", "scheduler", "hooks"],

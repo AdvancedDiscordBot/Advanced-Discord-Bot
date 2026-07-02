@@ -1,18 +1,18 @@
-# Creating a VAISH Plugin
+# Creating a ADB Plugin
 
-This guide covers everything you need to create a plugin for the VAISH Discord bot.
+This guide covers everything you need to create a plugin for the ADB Discord bot.
 
 ## Quick Start
 
 ```bash
 # Create your plugin directory
-mkdir plugins/vaish-plugin-my-plugin
-cd plugins/vaish-plugin-my-plugin
+mkdir plugins/adb-plugin-my-plugin
+cd plugins/adb-plugin-my-plugin
 
 # Create plugin.json
 cat > plugin.json << 'EOF'
 {
-  "name": "vaish-plugin-my-plugin",
+  "name": "adb-plugin-my-plugin",
   "version": "1.0.0",
   "description": "My awesome plugin",
   "author": "YourName",
@@ -45,7 +45,7 @@ EOF
 ## Plugin Structure
 
 ```
-vaish-plugin-my-plugin/
+adb-plugin-my-plugin/
 ├── plugin.json       # Required: Plugin manifest
 ├── index.js          # Required: Entry point
 ├── commands/         # Optional: Slash commands
@@ -57,7 +57,7 @@ vaish-plugin-my-plugin/
 
 ```json
 {
-  "name": "vaish-plugin-my-plugin",
+  "name": "adb-plugin-my-plugin",
   "displayName": "My Plugin",
   "version": "1.0.0",
   "description": "What your plugin does",
@@ -92,7 +92,7 @@ vaish-plugin-my-plugin/
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | Yes | Package name (must start with `vaish-plugin-`) |
+| `name` | string | Yes | Package name (must start with `adb-plugin-`) |
 | `displayName` | string | No | Human-readable name for marketplace |
 | `version` | string | Yes | Semantic version |
 | `description` | string | Yes | What your plugin does |
@@ -216,7 +216,7 @@ const MyModel = ctx.defineModel("myModel", {
 const doc = await MyModel.create({ userId: "123", data: "hello" });
 ```
 
-This creates a model named `plugin_vaish-plugin-my-plugin_mymodel`.
+This creates a model named `plugin_adb-plugin-my-plugin_mymodel`.
 
 ### ctx.scheduler
 
@@ -354,7 +354,7 @@ Your plugin can expose its own web interface! When you declare a port in `plugin
 
 ```json
 {
-  "name": "vaish-plugin-my-plugin",
+  "name": "adb-plugin-my-plugin",
   "port": 50001
 }
 ```
@@ -398,7 +398,7 @@ async function load(ctx) {
   // Get plugin settings for a guild
   app.get("/api/settings/:guildId", async (request, reply) => {
     const { guildId } = request.params;
-    const settings = await ctx.db.getPluginConfig(guildId, "vaish-plugin-my-plugin");
+    const settings = await ctx.db.getPluginConfig(guildId, "adb-plugin-my-plugin");
     return settings?.data || {};
   });
   
@@ -406,7 +406,7 @@ async function load(ctx) {
   app.put("/api/settings/:guildId", async (request, reply) => {
     const { guildId } = request.params;
     const data = request.body || {};
-    await ctx.db.updatePluginConfig(guildId, "vaish-plugin-my-plugin", data);
+    await ctx.db.updatePluginConfig(guildId, "adb-plugin-my-plugin", data);
     return { ok: true };
   });
   
@@ -482,7 +482,7 @@ async function load(ctx) {
   
   // Clean up when plugin is unloaded
   ctx.hooks.on("onPluginUnload", async ({ pluginName }) => {
-    if (pluginName === "vaish-plugin-my-plugin") {
+    if (pluginName === "adb-plugin-my-plugin") {
       await server.close();
     }
   });
@@ -492,7 +492,7 @@ async function load(ctx) {
 ### Plugin Structure with Web UI
 
 ```
-vaish-plugin-my-plugin/
+adb-plugin-my-plugin/
 ├── plugin.json
 ├── index.js              # Fastify server
 ├── public/               # Static web files
@@ -510,7 +510,7 @@ Define settings that server admins can configure:
 
 ```json
 {
-  "name": "vaish-plugin-my-plugin",
+  "name": "adb-plugin-my-plugin",
   "configSchema": {
     "type": "object",
     "properties": {
@@ -543,7 +543,7 @@ Access settings in your plugin:
 ```javascript
 async function load(ctx) {
   // Get settings for a specific guild
-  const settings = await ctx.db.getPluginConfig(guildId, "vaish-plugin-my-plugin");
+  const settings = await ctx.db.getPluginConfig(guildId, "adb-plugin-my-plugin");
   
   // settings.data contains { apiKey, enabled, maxCount, mode }
 }
@@ -556,7 +556,7 @@ async function load(ctx) {
 2. **Create npm package**:
    ```json
    {
-     "name": "vaish-plugin-my-plugin",
+     "name": "adb-plugin-my-plugin",
      "version": "1.0.0",
      "main": "index.js",
      "peerDependencies": {
@@ -571,7 +571,7 @@ async function load(ctx) {
    ```
 
 4. **Submit to marketplace**:
-   - Fork the [VAISH Plugin Registry](https://github.com/vaish-plugin-registry/registry)
+   - Fork the [ADB Plugin Registry](https://github.com/adb-plugin-registry/registry)
    - Add your plugin to `plugins.json`
    - Submit a PR
 
@@ -600,5 +600,5 @@ See these existing plugins for reference:
 
 ## Need Help?
 
-- Discord: [VAISH Support Server](https://discord.gg/vaish)
-- GitHub: [VAISH Discord Bot](https://github.com/vaish-bot/discord-bot)
+- Discord: [ADB Support Server](https://discord.gg/ADB_PLACEHOLDER)
+- GitHub: [ADB Discord Bot](https://github.com/DeadIndian/Advanced-Discord-Bot)

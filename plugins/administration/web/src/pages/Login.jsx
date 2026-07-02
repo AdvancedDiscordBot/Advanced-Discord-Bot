@@ -23,7 +23,7 @@ export function Login() {
         <div style={styles.logo}>
           <DiscordLogo />
         </div>
-        <h1 style={styles.title}>VAISH Admin</h1>
+        <h1 style={styles.title}>ADB Admin</h1>
         <p style={styles.subtitle}>
           Manage your Discord bot with a beautiful web interface
         </p>
@@ -33,7 +33,7 @@ export function Login() {
         </a>
         <p style={styles.disclaimer}>
           You must have Administrator or Manage Server permissions in a server
-          where VAISH is present.
+          where ADB is present.
         </p>
       </div>
     </div>

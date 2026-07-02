@@ -12,7 +12,7 @@ export function Header() {
     <header style={styles.header}>
       <div style={styles.brand}>
         <Shield size={24} color="#6366F1" />
-        <span style={styles.brandText}>VAISH Admin</span>
+        <span style={styles.brandText}>ADB Admin</span>
       </div>
       <div style={styles.userInfo}>
         <img

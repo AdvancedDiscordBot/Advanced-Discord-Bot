@@ -1,4 +1,4 @@
-Commands Available in Discord Vaish Bot:
+Commands Available in Discord ADB Bot:
 1. /aiassistant -  Ask the AI assistant anything!
 2. /faq - Ask about FAQS to AI
 3. /antiraid - ️ Simple anti-raid protection
