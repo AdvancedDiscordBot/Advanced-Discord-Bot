@@ -64,7 +64,10 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		return null;
 	}
 
-	const fastify = fastifyFactory({ logger: false });
+	const fastify = fastifyFactory({
+		logger: false,
+		trustProxy: true,
+	});
 
 	const sessionStore = MongoStore.create({
 		mongoUrl: process.env.MONGODB_URI,
@@ -79,13 +82,21 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 			path: "/",
 			httpOnly: true,
 			sameSite: "lax",
-			secure: process.env.NODE_ENV === "production",
+			secure: false, // Temporarily disabled to prevent proxy dropping cookies
 		},
 		store: sessionStore,
 		saveUninitialized: false,
 	});
 
 	fastify.get("/health", async () => ({ status: "ok" }));
+
+	fastify.get("/diag-guilds", async () => {
+		return {
+			status: client.ws.status,
+			ping: client.ws.ping,
+			guilds: client.guilds.cache.map(g => ({ id: g.id, name: g.name })),
+		};
+	});
 
 	fastify.get("/auth/discord", async (request, reply) => {
 		const state = crypto.randomBytes(16).toString("hex");
@@ -103,13 +114,41 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 			state,
 		});
 
-		return reply.redirect(`https://discord.com/api/oauth2/authorize?${params}`);
+		const redirectUrl = `https://discord.com/api/oauth2/authorize?${params}`;
+		logger.info(`Redirecting to Discord: ${redirectUrl}`);
+		return reply.redirect(redirectUrl);
+	});
+
+	fastify.get("/auth/invite", async (request, reply) => {
+		const params = new URLSearchParams({
+			client_id: discordClientId,
+			permissions: "8",
+			scope: "bot applications.commands",
+			integration_type: "0",
+		});
+		const redirectUrl = `https://discord.com/api/oauth2/authorize?${params}`;
+		logger.info(`Redirecting to Bot Invite: ${redirectUrl}`);
+		return reply.redirect(redirectUrl);
 	});
 
 	fastify.get("/auth/discord/callback", async (request, reply) => {
-		const { code, state } = request.query;
+		const { code, state, guild_id } = request.query;
+
+		// If it's a bot invite redirect (contains guild_id), redirect to dashboard.
+		// If we don't have a valid state (e.g. direct link or /invite without state), just redirect
+		// without throwing an OAuth state error.
+		if (guild_id) {
+			if (!code || !state || state !== request.session.oauthState) {
+				return reply.redirect(dashboardRedirect || "/dashboard");
+			}
+		}
 
 		if (!code || !state || state !== request.session.oauthState) {
+			console.error("OAuth state mismatch:", { 
+				queryCode: !!code, 
+				queryState: state, 
+				sessionState: request.session.oauthState 
+			});
 			return reply.code(400).send({ error: "Invalid OAuth state" });
 		}
 

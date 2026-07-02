@@ -164,6 +164,17 @@ client.once("ready", async () => {
 	console.log("🎯 VAISH is fully operational and ready to serve!");
 });
 
+// 🔍 Raw Gateway Event Logger for Debugging Bot Joins
+client.on("raw", (packet) => {
+	if (["GUILD_CREATE", "GUILD_DELETE"].includes(packet.t)) {
+		console.log(`[GATEWAY RAW] ${packet.t} event received:`, {
+			id: packet.d.id,
+			name: packet.d.name,
+			unavailable: packet.d.unavailable,
+		});
+	}
+});
+
 // 🔄 Update Bot Activity Status
 function updateBotActivity() {
 	const activity = activities[currentActivity];

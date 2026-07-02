@@ -71,8 +71,30 @@ export function GuildPicker() {
       </div>
       {guilds.length === 0 && (
         <div style={styles.empty}>
-          No servers found. Make sure ADB is in a server where you have admin
-          permissions.
+          <p style={{ marginBottom: '16px' }}>
+            No servers found. Make sure ADB is in a server where you have admin
+            permissions.
+          </p>
+          <a
+            href="/auth/invite"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: 'inline-block',
+              padding: '10px 20px',
+              backgroundColor: '#6366F1',
+              color: '#ffffff',
+              borderRadius: '8px',
+              textDecoration: 'none',
+              fontWeight: '600',
+              marginTop: '12px',
+              transition: 'background-color 0.2s',
+            }}
+            onMouseOver={(e) => (e.target.style.backgroundColor = '#4f46e5')}
+            onMouseOut={(e) => (e.target.style.backgroundColor = '#6366F1')}
+          >
+            Add ADB to Server
+          </a>
         </div>
       )}
     </div>
