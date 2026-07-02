@@ -1,3 +1,5 @@
+name: adb
+
 services:
   mongo:
     image: mongo:7
