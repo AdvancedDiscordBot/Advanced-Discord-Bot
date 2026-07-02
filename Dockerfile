@@ -1,27 +1,22 @@
-# Lightweight official Nodejs image as base
+# Lightweight official Node.js image as base
 FROM node:24-alpine
 
-# Setting the working directory 
 WORKDIR /app
 
-# COPY package.json and package-lock.json for Docker caching 
+# Install root dependencies first (better layer caching).
+# No package-lock.json is committed, so use `npm install`.
 COPY package*.json ./
-COPY bot/package*.json ./bot/
-COPY server/package*.json ./server/
+RUN npm install --omit=dev
 
-# Install dependencies
-ARG NODE_ENV=production
-ENV NODE_ENV=$NODE_ENV
-RUN if [ "$NODE_ENV" = "production" ]; then \
-    npm install --workspaces --omit=dev; \
-    else \
-    npm install --workspaces; \
-    fi
-
-
-# COPY the rest
+# Copy the rest of the source
 COPY . .
 
-# Run the bot
-WORKDIR /app/bot
-CMD ["npm", "start"]
+# Build the plugin dashboard front-ends (Create-React-App) into the image
+# so the dashboard is served pre-compiled. build-plugins.js installs each
+# plugin web app's own deps and runs its build.
+RUN node scripts/build-plugins.js
+
+# Register slash commands, then start the bot.
+# deploy-commands needs the Discord token + network, so it runs at container
+# start (idempotent) rather than at build time.
+CMD ["sh", "-c", "node deploy-commands.js && node index.js"]
