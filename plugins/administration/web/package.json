@@ -1,7 +1,8 @@
 {
-  "name": "adb-administration-web",
+  "name": "vaish-administration-web",
   "version": "1.0.0",
   "private": true,
+  "homepage": "/dashboard",
   "dependencies": {
     "lucide-react": "^0.294.0",
     "react": "^18.3.1",

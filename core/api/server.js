@@ -43,7 +43,7 @@ function parseCookies(headerValue) {
 	return result;
 }
 
-async function startApiServer({ client, db, pluginManager, hooks }) {
+async function startApiServer({ client, db, pluginManager, hooks, startListening = true }) {
 	const logger = createLogger("ApiServer");
 	const port = Number(process.env.BOT_API_PORT || 3210);
 	const baseUrl = process.env.BOT_API_BASE_URL || `http://localhost:${port}`;
@@ -68,13 +68,13 @@ async function startApiServer({ client, db, pluginManager, hooks }) {
 
 	const sessionStore = MongoStore.create({
 		mongoUrl: process.env.MONGODB_URI,
-		collectionName: "adb_sessions",
+		collectionName: "vaish_sessions",
 	});
 
 	await fastify.register(cookie);
 	await fastify.register(session, {
 		secret: sessionSecret,
-		cookieName: "adb.sid",
+		cookieName: "vaish.sid",
 		cookie: {
 			path: "/",
 			httpOnly: true,
@@ -151,14 +151,7 @@ async function startApiServer({ client, db, pluginManager, hooks }) {
 			return reply.redirect(returnUrl);
 		}
 
-		if (dashboardRedirect) {
-			return reply.redirect(dashboardRedirect);
-		}
-
-		return reply.send({
-			user: request.session.user,
-			guilds: adminGuilds,
-		});
+		return reply.redirect(dashboardRedirect || "/dashboard");
 	});
 
 	fastify.post("/auth/logout", async (request) => {
@@ -171,9 +164,26 @@ async function startApiServer({ client, db, pluginManager, hooks }) {
 			return reply.code(401).send({ error: "unauthorized" });
 		}
 
+		const guildIds = request.session.adminGuildIds || [];
+		const botGuilds = client.guilds.cache;
+		const guilds = guildIds
+			.filter((id) => botGuilds.has(id))
+			.map((id) => {
+				const discordGuild = botGuilds.get(id);
+				return {
+					id: discordGuild.id,
+					name: discordGuild.name,
+					icon: discordGuild.icon || (discordGuild.iconURL ? discordGuild.iconURL() : null),
+				};
+			});
+
+		const ownerIds = parseOwnerIds();
+		const isOwner = ownerIds.includes(request.session.user?.id);
+
 		return {
 			user: request.session.user,
-			guildIds: request.session.adminGuildIds || [],
+			guilds,
+			isOwner,
 		};
 	});
 
@@ -235,7 +245,7 @@ async function startApiServer({ client, db, pluginManager, hooks }) {
 
 		const pluginList = pluginManager.getPluginList();
 		const plugin = pluginList.find(
-			(p) => p.name === packageName || p.name === `adb-plugin-${packageName.replace("adb-plugin-", "")}`,
+			(p) => p.name === packageName || p.name === `vaish-plugin-${packageName.replace("vaish-plugin-", "")}`,
 		);
 
 		if (plugin) {
@@ -303,8 +313,8 @@ async function startApiServer({ client, db, pluginManager, hooks }) {
 			return reply.code(400).send({ error: "Missing required fields" });
 		}
 
-		if (!packageName.startsWith("adb-plugin-")) {
-			return reply.code(400).send({ error: "Package name must start with 'adb-plugin-'" });
+		if (!packageName.startsWith("vaish-plugin-")) {
+			return reply.code(400).send({ error: "Package name must start with 'vaish-plugin-'" });
 		}
 
 		return registry.submitPlugin({ packageName, description, author, category });
@@ -369,13 +379,29 @@ async function startApiServer({ client, db, pluginManager, hooks }) {
 
 		await db.ensureConnection();
 
-		const { serverConfig, pluginConfig, pluginConfigs } = request.body || {};
+		const { serverConfig, pluginConfig, pluginConfigs, antiRaid, economy } = request.body || {};
 
 		let updatedServer = null;
 		if (serverConfig) {
 			updatedServer = await db.updateServerConfig(
 				request.params.guildId,
 				serverConfig,
+			);
+		}
+
+		if (antiRaid) {
+			await db.AntiRaid.findOneAndUpdate(
+				{ guildId: request.params.guildId },
+				{ $set: antiRaid },
+				{ upsert: true, new: true }
+			);
+		}
+
+		if (economy) {
+			await db.GuildEconomy.findOneAndUpdate(
+				{ guildId: request.params.guildId },
+				{ $set: economy },
+				{ upsert: true, new: true }
 			);
 		}
 
@@ -405,6 +431,7 @@ async function startApiServer({ client, db, pluginManager, hooks }) {
 		}
 
 		return {
+			ok: true,
 			serverConfig: updatedServer,
 			pluginConfigs: updatedPlugins,
 		};
@@ -418,18 +445,41 @@ async function startApiServer({ client, db, pluginManager, hooks }) {
 		const guild = client.guilds.cache.get(request.params.guildId);
 		const tickets = await db.getTickets(request.params.guildId);
 
-		const stats = {
-			members: guild?.memberCount || 0,
-			tickets: {
-				total: tickets.length,
-				open: tickets.filter((ticket) => ticket.status === "open").length,
-				inProgress: tickets.filter((ticket) => ticket.status === "in_progress")
-					.length,
-				closed: tickets.filter((ticket) => ticket.status === "closed").length,
+		const userCount = await db.UserProfile.countDocuments({
+			guildId: request.params.guildId,
+		});
+
+		const xpData = await db.UserProfile.aggregate([
+			{ $match: { guildId: request.params.guildId } },
+			{
+				$group: {
+					_id: null,
+					totalXp: { $sum: "$totalXp" },
+					totalMessages: { $sum: "$messageCount" },
+					totalVoiceMinutes: { $sum: "$voiceMinutes" },
+				},
 			},
+		]);
+
+		const stats = xpData[0] || {
+			totalXp: 0,
+			totalMessages: 0,
+			totalVoiceMinutes: 0,
 		};
 
-		return stats;
+		return {
+			members: guild?.memberCount || 0,
+			activeUsers: userCount,
+			totalXp: stats.totalXp,
+			totalMessages: stats.totalMessages,
+			totalVoiceMinutes: stats.totalVoiceMinutes,
+			tickets: {
+				total: tickets.length,
+				open: tickets.filter((t) => t.status === "open").length,
+				inProgress: tickets.filter((t) => t.status === "in_progress").length,
+				closed: tickets.filter((t) => t.status === "closed").length,
+			},
+		};
 	});
 
 	const wss = new WebSocketServer({ server: fastify.server, path: "/ws" });
@@ -437,7 +487,7 @@ async function startApiServer({ client, db, pluginManager, hooks }) {
 
 	const getSessionFromRequest = async (req) => {
 		const cookies = parseCookies(req.headers.cookie || "");
-		const rawSid = cookies["adb.sid"];
+		const rawSid = cookies["vaish.sid"];
 		if (!rawSid) return null;
 
 		const unsigned = fastify.unsignCookie(rawSid);
@@ -507,10 +557,16 @@ async function startApiServer({ client, db, pluginManager, hooks }) {
 		});
 	};
 
-	await fastify.listen({ port, host: "0.0.0.0" });
-	logger.info(`API listening on ${baseUrl}`);
+	const listen = async () => {
+		await fastify.listen({ port, host: "0.0.0.0" });
+		logger.info(`API listening on ${baseUrl}`);
+	};
 
-	return { fastify, wss, broadcastInstallLog, runNpmInstall };
+	if (startListening) {
+		await listen();
+	}
+
+	return { fastify, wss, broadcastInstallLog, runNpmInstall, listen };
 }
 
 async function runNpmInstallInternal(packageName, emitLog) {

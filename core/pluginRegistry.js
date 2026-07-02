@@ -5,7 +5,7 @@ const { createLogger } = require("./logger");
 
 const REGISTRY_URL =
 	process.env.PLUGIN_REGISTRY_URL ||
-	"https://raw.githubusercontent.com/adb-plugin-registry/registry/main/plugins.json";
+	"https://raw.githubusercontent.com/AdvancedDiscordBot/registry/main/plugins.json";
 
 const REGISTRY_CACHE_FILE = path.join(process.cwd(), "data", "plugin-registry.json");
 const SUBMISSIONS_FILE = path.join(process.cwd(), "data", "plugin-submissions.json");

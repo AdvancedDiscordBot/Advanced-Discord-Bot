@@ -1,22 +1,26 @@
-# Lightweight official Node.js image as base
+# Lightweight official Nodejs image as base
 FROM node:24-alpine
 
+# Install git and ssh client (required for git pull in trial mode)
+RUN apk add --no-cache git openssh-client
+
+# Setting the working directory 
 WORKDIR /app
 
-# Install root dependencies first (better layer caching).
-# No package-lock.json is committed, so use `npm install`.
+# COPY package.json and package-lock.json for Docker caching 
 COPY package*.json ./
-RUN npm install --omit=dev
 
-# Copy the rest of the source
+# Install dependencies (both dev and prod dependencies, as react-scripts / build tools are needed to build plugin assets)
+RUN npm install
+
+# COPY the rest of the application files
 COPY . .
 
-# Build the plugin dashboard front-ends (Create-React-App) into the image
-# so the dashboard is served pre-compiled. build-plugins.js installs each
-# plugin web app's own deps and runs its build.
+# Build/compile the plugin web assets (dashboard)
 RUN node scripts/build-plugins.js
 
-# Register slash commands, then start the bot.
-# deploy-commands needs the Discord token + network, so it runs at container
-# start (idempotent) rather than at build time.
-CMD ["sh", "-c", "node deploy-commands.js && node index.js"]
+# Expose the single unified port 3210
+EXPOSE 3210
+
+# Run the bot and web dashboard
+CMD ["npm", "start"]

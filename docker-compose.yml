@@ -1,5 +1,3 @@
-name: adb
-
 services:
   mongo:
     image: mongo:7
@@ -24,25 +22,15 @@ services:
         NODE_ENV: production
     container_name: adb-bot
     restart: unless-stopped
+    ports:
+      - "3210:3210"
     depends_on:
       mongo:
         condition: service_healthy
-    # Secrets (Discord token, Gemini key, OAuth, etc.) come from ./.env
     env_file:
       - ./.env
-    # MONGODB_URI is pinned here so it always targets the bundled mongo
-    # service on the compose network, regardless of what .env contains.
-    environment:
-      MONGODB_URI: mongodb://advance:bot@mongo:27017/adb?authSource=admin
-      NODE_ENV: production
-    # Publish the dashboard/API so the Cloudflare tunnel can reach it.
-    ports:
-      - "3210:3210"
-    # Persist registry cache / runtime scratch across normal restarts.
-    # Wiped by the 5h demo reset via `docker compose down -v`.
-    volumes:
-      - adb-data:/app/data
+    working_dir: /app
+    command: ["npm", "start"]
 
 volumes:
   mongo-data:
-  adb-data:

@@ -38,6 +38,15 @@ class TaskScheduler {
       await this.checkBirthdays();
     });
 
+    // Trial reset every 5 hours (only when TRIAL_MODE is enabled)
+    if (process.env.TRIAL_MODE === "true") {
+      cron.schedule("0 */5 * * *", async () => {
+        console.log("🔄 Running trial reset task (every 5 hours)...");
+        await this.runTrialReset();
+      });
+      console.log("⚖️ Trial mode scheduler active: will reset every 5 hours");
+    }
+
     console.log("⏰ Task scheduler initialized");
   }
 
@@ -410,6 +419,68 @@ class TaskScheduler {
 
   async triggerRoleCheck() {
     await this.checkAllRoleRewards();
+  }
+
+  async runTrialReset() {
+    try {
+      console.log("🔄 Starting trial reset...");
+
+      // 1. Leave all guilds
+      console.log(`Leaving all guilds... current count: ${this.client.guilds.cache.size}`);
+      for (const [id, guild] of this.client.guilds.cache) {
+        try {
+          await guild.leave();
+          console.log(`Successfully left guild: ${guild.name} (${id})`);
+        } catch (err) {
+          console.error(`Failed to leave guild ${guild.name} (${id}):`, err);
+        }
+      }
+
+      // 2. Drop the MongoDB database
+      const mongoose = require("mongoose");
+      if (mongoose.connection && mongoose.connection.db) {
+        console.log("Dropping MongoDB database...");
+        await mongoose.connection.db.dropDatabase();
+        console.log("MongoDB database dropped successfully.");
+      } else {
+        console.warn("Mongoose connection DB is not active. Database drop skipped.");
+      }
+
+      // 3. Pull new commits
+      const { execSync } = require("child_process");
+      try {
+        console.log("Checking git remote URL...");
+        let remoteUrl = execSync("git remote get-url origin", { encoding: "utf8" }).trim();
+        if (remoteUrl.startsWith("git@github.com:")) {
+          const httpsUrl = remoteUrl.replace("git@github.com:", "https://github.com/").replace(/\.git$/, "");
+          console.log(`Converting remote URL from SSH to HTTPS: ${httpsUrl}`);
+          execSync(`git remote set-url origin ${httpsUrl}`, { stdio: "inherit" });
+        }
+        console.log("Executing git pull...");
+        execSync("git pull", { stdio: "inherit" });
+        console.log("Git pull complete.");
+      } catch (gitErr) {
+        console.error("Error executing git pull:", gitErr);
+      }
+
+      // 4. Install dependencies and rebuild plugins
+      try {
+        console.log("Running npm install...");
+        execSync("npm install", { stdio: "inherit" });
+        console.log("Running npm run deploy (rebuild plugins)...");
+        execSync("npm run deploy", { stdio: "inherit" });
+        console.log("Rebuild complete.");
+      } catch (buildErr) {
+        console.error("Error rebuilding assets:", buildErr);
+      }
+
+      // 5. Restart process
+      console.log("Trial reset complete. Exiting process to let Docker restart...");
+      process.exit(0);
+
+    } catch (error) {
+      console.error("Critical error in trial reset:", error);
+    }
   }
 }
 
