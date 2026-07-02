@@ -9,6 +9,17 @@
 ![Plugin Ready](https://img.shields.io/badge/Plugins-Ready-6A5ACD?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 
+<br/>
+
+<a href="https://discord.com/oauth2/authorize?client_id=1522106470018191532&permissions=8&integration_type=0&scope=bot+applications.commands">
+  <img src="screenshots/invite-button.svg" alt="Invite Bot" height="40" />
+</a>
+<a href="https://adb.gollabharath.me">
+  <img src="screenshots/dashboard-button.svg" alt="Dashboard" height="40" />
+</a>
+
+<br/>
+
 **🚀 ADB is a self-hosted Discord bot platform built to become whatever your server needs.**  
 **🔌 Install plugins • 🧩 Build your own modules • 🖥️ Manage everything from a dashboard • 🔓 Own the stack**
 
@@ -61,13 +72,6 @@
 
 ADB is not participating in any open source contribution program at the moment. Contributions are reviewed through regular GitHub issues and pull requests.
 
----
-
-## 🧪 Demo Bot
-
-A public sample bot deployment will be linked here once it is available:
-
-> **Demo Invite:** `COMING_SOON_ADB_SAMPLE_BOT_INVITE`
 
 ---
 

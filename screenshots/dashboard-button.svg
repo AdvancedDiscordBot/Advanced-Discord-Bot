@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="50" viewBox="0 0 220 50">
+  <defs>
+    <linearGradient id="dash-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8E54E9" />
+      <stop offset="100%" stop-color="#4776E6" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+  <rect width="220" height="50" rx="25" fill="url(#dash-grad)" filter="url(#shadow)" />
+  <!-- Dashboard Console Icon -->
+  <g transform="translate(25, 13) scale(1.0)">
+    <path fill="#FFFFFF" d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/>
+  </g>
+  <text x="132" y="31" font-family="'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="16" font-weight="bold" fill="#FFFFFF" text-anchor="middle">Dashboard</text>
+</svg>

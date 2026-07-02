@@ -88,6 +88,51 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		saveUninitialized: false,
 	});
 
+	fastify.get("/", async (request, reply) => {
+		const indexPath = path.join(__dirname, "..", "..", "public", "index.html");
+		if (require("fs").existsSync(indexPath)) {
+			reply.type("text/html");
+			return require("fs").readFileSync(indexPath, "utf8");
+		}
+		reply.type("text/html");
+		return `<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>VAISH - Advanced Discord Bot</title>
+	<style>
+		body { background: #0f172a; color: #f8fafc; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+		a { color: #6366f1; text-decoration: none; font-weight: bold; }
+		a:hover { text-decoration: underline; }
+		.container { text-align: center; }
+	</style>
+</head>
+<body>
+	<div class="container">
+		<h1>VAISH Bot is Loading...</h1>
+		<p>If you see this page, the landing page is currently updating. You can access the <a href="/dashboard">Dashboard here</a>.</p>
+	</div>
+</body>
+</html>`;
+	});
+
+	fastify.get("/api/public-stats", async () => {
+		const totalServers = client.guilds.cache.size;
+		const totalUsers = client.guilds.cache.reduce((a, g) => a + g.memberCount, 0);
+		const botTag = client.user ? client.user.tag : "VAISH#0000";
+		const botAvatar = client.user ? client.user.displayAvatarURL() : null;
+		const pluginCount = pluginManager.getPluginList().length;
+		
+		return {
+			botTag,
+			botAvatar,
+			totalServers,
+			totalUsers,
+			pluginCount,
+			commandsCount: client.commands.size || 27,
+		};
+	});
+
 	fastify.get("/health", async () => ({ status: "ok" }));
 
 	fastify.get("/diag-guilds", async () => {
@@ -228,6 +273,7 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 
 	fastify.addHook("preHandler", async (request, reply) => {
 		if (!request.url.startsWith("/api")) return;
+		if (request.url === "/api/public-stats") return; // Allow public landing page stats
 
 		if (!request.session.user) {
 			return reply.code(401).send({ error: "unauthorized" });
