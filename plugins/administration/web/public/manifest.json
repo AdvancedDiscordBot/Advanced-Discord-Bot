@@ -1,0 +1,9 @@
+{
+  "short_name": "ADB",
+  "name": "Advanced Discord Bot Dashboard",
+  "icons": [],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#6366F1",
+  "background_color": "#1F2937"
+}

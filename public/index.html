@@ -1,0 +1,1160 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="VAISH — A self-hosted, plugin-driven Discord bot. Runs on your machine. No subscriptions. No vendor lock-in.">
+  <title>VAISH — Your Discord Bot, Your Rules</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&display=swap" rel="stylesheet">
+
+  <style>
+    /* ─── TOKENS ─────────────────────────────────────────────────── */
+    :root {
+      --cream:           #FAEBD7;
+      --surface-1:       #F0DCBF;
+      --surface-2:       #E4CBA8;
+      --ink:             #1E1A14;
+      --ink-2:           #4A4033;
+      --ink-muted:       #6B5D4A;
+      --ink-faint:       #9A8D78;
+      --accent:          #7C4B3A;
+      --accent-tint:     #F5E6DF;
+      --cream-on-accent: #FBEEDB;
+      --pine:            #6E8B7F;
+      --hairline:        rgba(30,26,20,0.12);
+      --hairline-strong: rgba(30,26,20,0.20);
+      --r-card: 16px;
+      --r-pill: 100px;
+      --font-display: 'Cormorant Garamond', serif;
+      --font-body:    'DM Sans', sans-serif;
+      /* setup section — hardcoded so it always pops against the page */
+      --setup-bg:   #1E1A14;
+      --setup-text: #FAEBD7;
+      --setup-sub:  rgba(250,235,215,0.45);
+      --setup-term: rgba(0,0,0,0.28);
+      --setup-border: rgba(250,235,215,0.10);
+    }
+
+    [data-theme="dark"] {
+      --cream:           #1C1713;
+      --surface-1:       #241E18;
+      --surface-2:       #2C251D;
+      --ink:             #F5E9D8;
+      --ink-2:           #E4D6C1;
+      --ink-muted:       #9C8E77;
+      --ink-faint:       #6E6252;
+      --accent:          #C98B68;
+      --accent-tint:     #3A2A20;
+      --cream-on-accent: #1C1713;
+      --pine:            #8FAC9F;
+      --hairline:        rgba(245,233,216,0.10);
+      --hairline-strong: rgba(245,233,216,0.18);
+      --setup-bg:   #0E0C09;
+      --setup-text: #F5E9D8;
+      --setup-sub:  rgba(245,233,216,0.40);
+      --setup-term: rgba(0,0,0,0.4);
+      --setup-border: rgba(245,233,216,0.08);
+    }
+
+    /* ─── BASE ───────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--cream);
+      color: var(--ink);
+      font-family: var(--font-body);
+      font-size: 16px;
+      line-height: 1.6;
+      overflow-x: hidden;
+      transition: background 0.22s ease, color 0.22s ease;
+    }
+
+    a { text-decoration: none; color: inherit; }
+    button { font-family: inherit; }
+
+    /* ─── ACCESSIBILITY ──────────────────────────────────────────── */
+    .skip-link {
+      position: absolute;
+      top: -100%;
+      left: 16px;
+      z-index: 9999;
+      background: var(--accent);
+      color: var(--cream-on-accent);
+      padding: 8px 20px;
+      border-radius: var(--r-pill);
+      font-size: 14px;
+      font-weight: 500;
+      transition: top 0.1s;
+    }
+    .skip-link:focus { top: 16px; }
+
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+      border-radius: 4px;
+    }
+
+    /* ─── LAYOUT ─────────────────────────────────────────────────── */
+    .container {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 0 40px;
+    }
+
+    /* ─── NAV ────────────────────────────────────────────────────── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: var(--cream);
+      border-bottom: 1px solid var(--hairline);
+      transition: background 0.22s ease, border-color 0.22s ease;
+    }
+
+    .nav-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 60px;
+      gap: 24px;
+    }
+
+    .logo {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      font-family: var(--font-display);
+      font-size: 19px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      color: var(--ink);
+      flex-shrink: 0;
+      transition: color 0.15s;
+    }
+    .logo:hover, .logo:focus-visible { color: var(--accent); }
+
+    .seal {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      flex-shrink: 0;
+      transition: background 0.22s;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 28px;
+      list-style: none;
+    }
+    .nav-links a {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--ink-muted);
+      transition: color 0.15s;
+    }
+    .nav-links a:hover, .nav-links a:focus-visible { color: var(--ink); }
+
+    .nav-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+
+    .nav-dashboard {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--ink-muted);
+      transition: color 0.15s;
+    }
+    .nav-dashboard:hover { color: var(--ink); }
+
+    .theme-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: none;
+      border: 1.5px solid var(--hairline-strong);
+      border-radius: var(--r-pill);
+      padding: 5px 13px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--ink-muted);
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .theme-btn:hover, .theme-btn:focus-visible {
+      color: var(--ink);
+      border-color: var(--ink-muted);
+    }
+
+    /* ─── BUTTONS ────────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 24px;
+      border-radius: var(--r-pill);
+      font-family: var(--font-body);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1.5px solid transparent;
+      transition: opacity 0.18s, background 0.18s, color 0.18s, border-color 0.18s;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: var(--cream-on-accent);
+      border-color: var(--accent);
+    }
+    .btn-primary:hover, .btn-primary:focus-visible { opacity: 0.84; }
+
+    .btn-secondary {
+      background: transparent;
+      color: var(--ink);
+      border-color: var(--ink);
+    }
+    .btn-secondary:hover, .btn-secondary:focus-visible {
+      background: var(--ink);
+      color: var(--cream);
+    }
+
+    .btn-lg { padding: 14px 32px; font-size: 15px; }
+
+    /* ─── SCROLL REVEAL ──────────────────────────────────────────── */
+    .reveal {
+      transition: opacity 0.65s ease, transform 0.65s ease;
+    }
+    .reveal-hidden {
+      opacity: 0;
+      transform: translateY(18px);
+    }
+    .reveal-hidden.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* ─── HERO ───────────────────────────────────────────────────── */
+    .hero {
+      position: relative;
+      min-height: 92vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 80px 0;
+      overflow: hidden;
+    }
+
+    /* Giant decorative watermark — the signature risk */
+    .hero::before {
+      content: 'V';
+      position: absolute;
+      font-family: var(--font-display);
+      font-size: min(80vw, 900px);
+      font-weight: 300;
+      font-style: italic;
+      color: var(--ink);
+      opacity: 0.028;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -52%);
+      pointer-events: none;
+      user-select: none;
+      line-height: 1;
+      z-index: 0;
+      transition: color 0.22s;
+    }
+
+    .hero-content {
+      position: relative;
+      z-index: 1;
+      animation: heroFadeUp 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+
+    @keyframes heroFadeUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .hero-eyebrow {
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--ink-muted);
+      margin-bottom: 36px;
+    }
+
+    .hero-headline {
+      font-family: var(--font-display);
+      font-size: clamp(48px, 8.5vw, 82px);
+      font-weight: 300;
+      line-height: 1.06;
+      letter-spacing: -0.01em;
+      color: var(--ink);
+      margin-bottom: 30px;
+    }
+    .hero-headline em {
+      font-style: italic;
+      color: var(--accent);
+    }
+
+    .hero-body {
+      font-size: 17px;
+      color: var(--ink-2);
+      max-width: 480px;
+      margin: 0 auto 44px;
+      line-height: 1.75;
+    }
+
+    .hero-actions {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 64px;
+    }
+
+    /* Stats row */
+    .hero-stats {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      border: 1px solid var(--hairline);
+      border-radius: var(--r-card);
+      width: fit-content;
+      margin: 0 auto;
+      overflow: hidden;
+    }
+
+    .stat-item {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      padding: 12px 28px;
+      border-right: 1px solid var(--hairline);
+    }
+    .stat-item:last-child { border-right: none; }
+
+    .stat-num {
+      font-family: var(--font-display);
+      font-size: 26px;
+      font-weight: 400;
+      color: var(--ink);
+      line-height: 1;
+    }
+
+    .stat-label {
+      font-size: 13px;
+      font-weight: 400;
+      color: var(--ink-muted);
+    }
+
+    /* scroll cue */
+    .scroll-cue {
+      position: absolute;
+      bottom: 32px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      color: var(--ink-faint);
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      animation: scrollBob 2.4s ease-in-out infinite;
+    }
+    .scroll-cue svg { opacity: 0.5; }
+
+    @keyframes scrollBob {
+      0%, 100% { transform: translateX(-50%) translateY(0); }
+      50%       { transform: translateX(-50%) translateY(5px); }
+    }
+
+    /* ─── TICKER ─────────────────────────────────────────────────── */
+    .ticker-wrap {
+      border-top: 1px solid var(--hairline);
+      border-bottom: 1px solid var(--hairline);
+      overflow: hidden;
+      padding: 14px 0;
+    }
+
+    .ticker-track {
+      display: flex;
+      width: max-content;
+      animation: tickerScroll 34s linear infinite;
+    }
+    .ticker-wrap:hover .ticker-track { animation-play-state: paused; }
+
+    @keyframes tickerScroll {
+      from { transform: translateX(0); }
+      to   { transform: translateX(-50%); }
+    }
+
+    .ticker-item {
+      display: inline-flex;
+      align-items: center;
+      white-space: nowrap;
+    }
+
+    .ticker-text {
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-muted);
+      padding: 0 22px;
+    }
+
+    .ticker-sep {
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: var(--ink-faint);
+      flex-shrink: 0;
+    }
+
+    /* ─── SHARED SECTION ─────────────────────────────────────────── */
+    .section-label {
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-muted);
+      margin-bottom: 14px;
+    }
+
+    .section-heading {
+      font-family: var(--font-display);
+      font-size: clamp(30px, 4.5vw, 46px);
+      font-weight: 300;
+      color: var(--ink);
+      line-height: 1.12;
+      margin-bottom: 52px;
+    }
+    .section-heading em { font-style: italic; color: var(--accent); }
+
+    /* three-dot section break */
+    .dots-break {
+      text-align: center;
+      color: var(--ink-faint);
+      font-size: 14px;
+      letter-spacing: 0.5em;
+      padding: 8px 0;
+      user-select: none;
+    }
+
+    /* ─── FEATURE BENTO ──────────────────────────────────────────── */
+    .features { padding: 96px 0 80px; }
+
+    .feature-bento {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      grid-template-areas:
+        "a a b"
+        "c d d";
+      gap: 16px;
+    }
+
+    .fc-1 { grid-area: a; }
+    .fc-2 { grid-area: b; }
+    .fc-3 { grid-area: c; }
+    .fc-4 { grid-area: d; }
+
+    .feature-card {
+      background: var(--surface-1);
+      border: 1px solid var(--hairline);
+      border-radius: var(--r-card);
+      padding: 32px 30px 36px;
+      transition: background 0.18s, border-color 0.18s;
+    }
+    .feature-card:hover {
+      background: var(--surface-2);
+      border-color: var(--hairline-strong);
+    }
+
+    .fc-eyebrow {
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--pine);
+      margin-bottom: 14px;
+    }
+
+    .fc-title {
+      font-family: var(--font-display);
+      font-size: 23px;
+      font-weight: 400;
+      color: var(--ink);
+      margin-bottom: 12px;
+      line-height: 1.2;
+    }
+
+    .fc-body {
+      font-size: 15px;
+      color: var(--ink-2);
+      line-height: 1.7;
+    }
+
+    /* ─── PULL QUOTE ─────────────────────────────────────────────── */
+    .pullquote-section {
+      padding: 80px 0;
+      border-top: 1px solid var(--hairline);
+      border-bottom: 1px solid var(--hairline);
+    }
+
+    .pullquote {
+      font-family: var(--font-display);
+      font-style: italic;
+      font-weight: 300;
+      font-size: clamp(28px, 4vw, 42px);
+      line-height: 1.3;
+      color: var(--ink);
+      max-width: 720px;
+      text-align: center;
+      margin: 0 auto;
+    }
+    .pullquote em { color: var(--accent); }
+    .pullquote cite {
+      display: block;
+      font-family: var(--font-body);
+      font-style: normal;
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--ink-muted);
+      margin-top: 28px;
+    }
+
+    /* ─── MODULES ────────────────────────────────────────────────── */
+    .modules { padding: 96px 0; }
+
+    .module-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .module-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 18px;
+      background: var(--surface-1);
+      border: 1px solid var(--hairline);
+      border-radius: var(--r-pill);
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--ink-2);
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+      cursor: default;
+    }
+    .module-tag:hover {
+      background: var(--surface-2);
+      border-color: var(--hairline-strong);
+      color: var(--ink);
+    }
+
+    .module-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--pine);
+      flex-shrink: 0;
+      transition: background 0.22s;
+    }
+
+    /* ─── SETUP (dark inversion) ─────────────────────────────────── */
+    .setup {
+      background: var(--setup-bg);
+      padding: 88px 0;
+      transition: background 0.22s;
+    }
+
+    .setup-label {
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--setup-sub);
+      margin-bottom: 14px;
+    }
+
+    .setup-heading {
+      font-family: var(--font-display);
+      font-size: clamp(30px, 4.5vw, 46px);
+      font-weight: 300;
+      line-height: 1.12;
+      color: var(--setup-text);
+      margin-bottom: 8px;
+    }
+
+    .setup-sub {
+      font-size: 13px;
+      font-weight: 400;
+      color: var(--setup-sub);
+      margin-bottom: 36px;
+      letter-spacing: 0.04em;
+    }
+
+    .terminal {
+      background: var(--setup-term);
+      border: 1px solid var(--setup-border);
+      border-radius: var(--r-card);
+      padding: 24px 28px;
+      max-width: 640px;
+    }
+
+    .terminal-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 5px 0;
+      position: relative;
+    }
+
+    .t-prompt {
+      font-family: 'SFMono-Regular', 'Consolas', 'Monaco', monospace;
+      font-size: 14px;
+      line-height: 1.6;
+      color: #C98B68;
+      user-select: none;
+      flex-shrink: 0;
+    }
+
+    .t-cmd {
+      font-family: 'SFMono-Regular', 'Consolas', 'Monaco', monospace;
+      font-size: 14px;
+      line-height: 1.6;
+      color: #F5E9D8;
+      flex: 1;
+      word-break: break-all;
+    }
+
+    .copy-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: rgba(245,233,216,0.35);
+      padding: 2px 4px;
+      border-radius: 4px;
+      transition: color 0.15s, background 0.15s;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      opacity: 0;
+      transition: opacity 0.15s, color 0.15s;
+    }
+    .copy-btn[data-copied="true"] { color: #8FAC9F; opacity: 1; }
+    .terminal-row:hover .copy-btn { opacity: 1; }
+    .copy-btn:hover { color: rgba(245,233,216,0.8); }
+    .copy-btn:focus-visible {
+      outline: 2px solid rgba(245,233,216,0.5);
+      outline-offset: 2px;
+      opacity: 1;
+    }
+
+    /* ─── CTA ────────────────────────────────────────────────────── */
+    .cta-section {
+      padding: 112px 0;
+      text-align: center;
+    }
+
+    .cta-heading {
+      font-family: var(--font-display);
+      font-size: clamp(36px, 5.5vw, 58px);
+      font-weight: 300;
+      line-height: 1.1;
+      margin-bottom: 40px;
+      color: var(--ink);
+    }
+    .cta-heading em { font-style: italic; color: var(--accent); }
+
+    /* ─── FOOTER ─────────────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--hairline);
+      padding: 32px 0;
+    }
+
+    .footer-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .footer-wordmark {
+      font-family: var(--font-display);
+      font-size: 17px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      color: var(--ink-muted);
+    }
+
+    .footer-meta {
+      font-size: 13px;
+      color: var(--ink-muted);
+      margin-top: 4px;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 24px;
+      list-style: none;
+      flex-wrap: wrap;
+    }
+
+    .footer-links a {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--ink-muted);
+      transition: color 0.15s;
+    }
+    .footer-links a:hover { color: var(--ink); }
+
+    /* ─── RESPONSIVE ─────────────────────────────────────────────── */
+    @media (max-width: 900px) {
+      .feature-bento {
+        grid-template-columns: 1fr 1fr;
+        grid-template-areas:
+          "a b"
+          "c d";
+      }
+      .nav-links { display: none; }
+    }
+
+    @media (max-width: 600px) {
+      .container { padding: 0 20px; }
+
+      .feature-bento {
+        grid-template-columns: 1fr;
+        grid-template-areas: "a" "b" "c" "d";
+      }
+
+      .hero { min-height: 88vh; padding: 60px 0 80px; }
+
+      .hero-stats {
+        border: none;
+        border-radius: 0;
+        flex-direction: row;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 0;
+        width: auto;
+      }
+      .stat-item {
+        border-right: none;
+        border-bottom: 1px solid var(--hairline);
+        padding: 8px 20px;
+        flex: 0 0 50%;
+        justify-content: center;
+      }
+      .stat-item:nth-child(odd) { border-right: 1px solid var(--hairline); }
+      .stat-item:nth-last-child(-n+2) { border-bottom: none; }
+
+      .hero-actions { flex-direction: column; align-items: center; }
+      .hero-actions .btn { width: 100%; justify-content: center; max-width: 280px; }
+
+      .setup { padding: 60px 0; }
+      .terminal { padding: 18px 18px; }
+      .t-cmd { font-size: 13px; word-break: break-all; }
+
+      .cta-section { padding: 72px 0; }
+      .features { padding: 64px 0 56px; }
+      .modules { padding: 64px 0; }
+      .pullquote-section { padding: 56px 0; }
+
+      .scroll-cue { display: none; }
+      .dots-break { padding: 4px 0; }
+    }
+
+    @media (max-width: 360px) {
+      .hero-headline { font-size: 38px; }
+      .stat-item { flex: 0 0 100%; border-right: none; }
+      .stat-item:nth-child(odd) { border-right: none; }
+      .stat-item { border-bottom: 1px solid var(--hairline); }
+      .stat-item:last-child { border-bottom: none; }
+    }
+
+    /* ─── REDUCED MOTION ─────────────────────────────────────────── */
+    @media (prefers-reduced-motion: reduce) {
+      .hero-content,
+      .scroll-cue,
+      .ticker-track,
+      .reveal { animation: none !important; transition: none !important; }
+      .reveal-hidden { opacity: 1 !important; transform: none !important; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- SKIP LINK -->
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <!-- NAV -->
+  <nav aria-label="Site navigation">
+    <div class="container">
+      <div class="nav-inner">
+        <a class="logo" href="/" aria-label="VAISH home">
+          <span class="seal" aria-hidden="true"></span>VAISH
+        </a>
+
+        <ul class="nav-links" role="list">
+          <li><a href="#features">Why self-host</a></li>
+          <li><a href="#modules">Plugins</a></li>
+          <li><a href="#setup">Setup</a></li>
+          <li>
+            <a href="https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot"
+               target="_blank" rel="noopener noreferrer">GitHub</a>
+          </li>
+        </ul>
+
+        <div class="nav-right">
+          <a class="nav-dashboard" href="/dashboard">Dashboard →</a>
+          <button class="theme-btn" id="themeToggle" aria-label="Toggle colour theme">
+            <span id="themeIcon" aria-hidden="true">◐</span>
+            <span id="themeLabel">Dark</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- MAIN -->
+  <main id="main">
+
+    <!-- HERO -->
+    <section class="hero" aria-labelledby="hero-heading">
+      <div class="container">
+        <div class="hero-content">
+          <p class="hero-eyebrow" aria-hidden="true">
+            Open source &nbsp;·&nbsp; Self-hosted &nbsp;·&nbsp; Plugin-driven
+          </p>
+          <h1 class="hero-headline" id="hero-heading">
+            Your community,<br>on your own <em>terms.</em>
+          </h1>
+          <p class="hero-body">
+            A Discord bot platform that runs on your machine, stores your data,
+            and does exactly what you configure — nothing more.
+          </p>
+          <div class="hero-actions">
+            <a class="btn btn-primary"
+               href="https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot"
+               target="_blank" rel="noopener noreferrer">
+              Get started →
+            </a>
+            <a class="btn btn-secondary" href="/dashboard">Open dashboard</a>
+          </div>
+
+          <div class="hero-stats" id="heroStats" role="list" aria-label="Bot statistics" style="display:none">
+            <!-- filled by JS -->
+          </div>
+        </div>
+      </div>
+
+      <div class="scroll-cue" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <path d="M12 5v14M5 12l7 7 7-7"/>
+        </svg>
+      </div>
+    </section>
+
+    <!-- TICKER -->
+    <div class="ticker-wrap" aria-hidden="true" role="presentation">
+      <div class="ticker-track" id="ticker"></div>
+    </div>
+
+    <!-- FEATURES -->
+    <section class="features" id="features" aria-labelledby="features-heading">
+      <div class="container">
+        <p class="section-label reveal">Why self-host</p>
+        <h2 class="section-heading reveal" id="features-heading">
+          Built for owners<br>who need <em>control.</em>
+        </h2>
+
+        <div class="feature-bento">
+          <article class="feature-card fc-1 reveal" aria-labelledby="fc1-title">
+            <p class="fc-eyebrow">Ownership</p>
+            <h3 class="fc-title" id="fc1-title">Runs on your machine.</h3>
+            <p class="fc-body">No monthly fees. No shared rate limits. No telemetry leaving your network. Your members' data belongs to you, stored wherever you put it — full stop.</p>
+          </article>
+
+          <article class="feature-card fc-2 reveal" aria-labelledby="fc2-title">
+            <p class="fc-eyebrow">Intelligence</p>
+            <h3 class="fc-title" id="fc2-title">AI that listens.</h3>
+            <p class="fc-body">Bring your own model — OpenAI, a local LLM, or anything with an API. Context-aware. Guild-specific. Always under your control.</p>
+          </article>
+
+          <article class="feature-card fc-3 reveal" aria-labelledby="fc3-title">
+            <p class="fc-eyebrow">Extensibility</p>
+            <h3 class="fc-title" id="fc3-title">Grows with plugins.</h3>
+            <p class="fc-body">Every capability is a plugin. Install only what your server needs, remove what it doesn't, and ship your own in under 50 lines of JavaScript.</p>
+          </article>
+
+          <article class="feature-card fc-4 reveal" aria-labelledby="fc4-title">
+            <p class="fc-eyebrow">Administration</p>
+            <h3 class="fc-title" id="fc4-title">A full admin panel, included.</h3>
+            <p class="fc-body">Every setting your server needs — XP thresholds, ticket flows, anti-raid rules, economy rates — exposed through a clean web dashboard. No Discord commands needed. Guild-by-guild, all in one place.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- PULL QUOTE -->
+    <div class="dots-break" aria-hidden="true">· · ·</div>
+
+    <section class="pullquote-section reveal" aria-label="Philosophy">
+      <div class="container">
+        <blockquote class="pullquote">
+          "No fees. No lock-in.<br>
+          Just your community, running exactly<br>
+          the way <em>you want it to.</em>"
+          <cite>The whole point of self-hosting</cite>
+        </blockquote>
+      </div>
+    </section>
+
+    <div class="dots-break" aria-hidden="true">· · ·</div>
+
+    <!-- MODULES -->
+    <section class="modules" id="modules" aria-labelledby="modules-heading">
+      <div class="container">
+        <p class="section-label reveal">What's included</p>
+        <h2 class="section-heading reveal" id="modules-heading">
+          Everything you'd pay<br>for elsewhere — <em>included.</em>
+        </h2>
+
+        <div class="module-tags reveal" role="list" aria-label="Available plugins">
+          <span class="module-tag" role="listitem"><span class="module-dot" aria-hidden="true"></span>AI Assistant</span>
+          <span class="module-tag" role="listitem"><span class="module-dot" aria-hidden="true"></span>XP &amp; Levels</span>
+          <span class="module-tag" role="listitem"><span class="module-dot" aria-hidden="true"></span>Ticket System</span>
+          <span class="module-tag" role="listitem"><span class="module-dot" aria-hidden="true"></span>Anti-Raid</span>
+          <span class="module-tag" role="listitem"><span class="module-dot" aria-hidden="true"></span>Economy</span>
+          <span class="module-tag" role="listitem"><span class="module-dot" aria-hidden="true"></span>Birthdays</span>
+          <span class="module-tag" role="listitem"><span class="module-dot" aria-hidden="true"></span>Activity Logs</span>
+          <span class="module-tag" role="listitem"><span class="module-dot" aria-hidden="true"></span>Web Dashboard</span>
+          <span class="module-tag" role="listitem"><span class="module-dot" aria-hidden="true"></span>Scheduler</span>
+          <span class="module-tag" role="listitem"><span class="module-dot" aria-hidden="true"></span>Plugin Marketplace</span>
+          <span class="module-tag" role="listitem"><span class="module-dot" aria-hidden="true"></span>Custom Commands</span>
+          <span class="module-tag" role="listitem"><span class="module-dot" aria-hidden="true"></span>Per-guild Config</span>
+          <span class="module-tag" role="listitem"><span class="module-dot" aria-hidden="true"></span>Welcome Messages</span>
+          <span class="module-tag" role="listitem"><span class="module-dot" aria-hidden="true"></span>Role Management</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- SETUP -->
+    <div class="setup" id="setup">
+      <div class="container">
+        <p class="setup-label">Get running</p>
+        <h2 class="setup-heading">Up in three commands.</h2>
+        <p class="setup-sub">Node.js · MongoDB · nothing else required.</p>
+
+        <div class="terminal" role="region" aria-label="Setup instructions">
+          <div class="terminal-row">
+            <span class="t-prompt" aria-hidden="true">$</span>
+            <code class="t-cmd">git clone https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot</code>
+            <button class="copy-btn" aria-label="Copy git clone command"
+                    data-cmd="git clone https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <rect x="9" y="9" width="13" height="13" rx="2"/>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+              </svg>
+            </button>
+          </div>
+          <div class="terminal-row">
+            <span class="t-prompt" aria-hidden="true">$</span>
+            <code class="t-cmd">npm install &amp;&amp; cp .env.example .env</code>
+            <button class="copy-btn" aria-label="Copy npm install command"
+                    data-cmd="npm install && cp .env.example .env">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <rect x="9" y="9" width="13" height="13" rx="2"/>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+              </svg>
+            </button>
+          </div>
+          <div class="terminal-row">
+            <span class="t-prompt" aria-hidden="true">$</span>
+            <code class="t-cmd">npm start</code>
+            <button class="copy-btn" aria-label="Copy npm start command" data-cmd="npm start">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <rect x="9" y="9" width="13" height="13" rx="2"/>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CTA -->
+    <section class="cta-section" aria-labelledby="cta-heading">
+      <div class="container">
+        <h2 class="cta-heading reveal" id="cta-heading">
+          Full control of your<br>community, <em>today.</em>
+        </h2>
+        <div class="reveal">
+          <a class="btn btn-primary btn-lg"
+             href="https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot"
+             target="_blank" rel="noopener noreferrer">
+            Get started free →
+          </a>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="container">
+      <div class="footer-inner">
+        <div>
+          <p class="footer-wordmark">VAISH</p>
+          <p class="footer-meta">MIT License · Built with care.</p>
+        </div>
+        <ul class="footer-links" role="list">
+          <li>
+            <a href="https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot"
+               target="_blank" rel="noopener noreferrer">GitHub</a>
+          </li>
+          <li><a href="/dashboard">Dashboard</a></li>
+          <li>
+            <a href="https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot/issues"
+               target="_blank" rel="noopener noreferrer">Issues</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    /* ── THEME ──────────────────────────────────────────────────── */
+    const html = document.documentElement;
+
+    function applyTheme(theme) {
+      html.setAttribute('data-theme', theme);
+      document.getElementById('themeLabel').textContent = theme === 'dark' ? 'Light' : 'Dark';
+    }
+
+    function toggleTheme() {
+      const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('vaish-theme', next);
+      applyTheme(next);
+    }
+
+    // Init — stored > system preference
+    const storedTheme = localStorage.getItem('vaish-theme');
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    applyTheme(storedTheme || (prefersDark ? 'dark' : 'light'));
+
+    document.getElementById('themeToggle').addEventListener('click', toggleTheme);
+
+    /* ── TICKER ─────────────────────────────────────────────────── */
+    const FEATURES = [
+      'AI Assistant', 'XP & Levels', 'Ticket System', 'Anti-Raid',
+      'Economy', 'Birthdays', 'Activity Logs', 'Web Dashboard',
+      'Scheduler', 'Plugin Marketplace', 'Custom Commands', 'Per-guild Config',
+    ];
+
+    (function buildTicker() {
+      const track = document.getElementById('ticker');
+      const doubled = [...FEATURES, ...FEATURES];
+      track.innerHTML = doubled.map(name =>
+        `<span class="ticker-item">
+          <span class="ticker-text">${name}</span>
+          <span class="ticker-sep"></span>
+        </span>`
+      ).join('');
+    })();
+
+    /* ── LIVE STATS ─────────────────────────────────────────────── */
+    (async function loadStats() {
+      try {
+        const res = await fetch('/api/public-stats');
+        if (!res.ok) return;
+        const d = await res.json();
+
+        const items = [
+          { num: d.totalServers ?? 0,                  label: (d.totalServers === 1) ? 'server' : 'servers' },
+          { num: (d.totalUsers ?? 0).toLocaleString(), label: 'members' },
+          { num: d.pluginCount ?? 0,                   label: 'plugins' },
+          { num: d.commandsCount ?? 0,                 label: 'commands' },
+        ];
+
+        const el = document.getElementById('heroStats');
+        el.innerHTML = items.map(item =>
+          `<div class="stat-item" role="listitem">
+            <span class="stat-num">${item.num}</span>
+            <span class="stat-label">${item.label}</span>
+          </div>`
+        ).join('');
+        el.style.display = 'flex';
+      } catch (_) { /* supplementary — silent fail */ }
+    })();
+
+    /* ── SCROLL REVEAL ──────────────────────────────────────────── */
+    (function initReveal() {
+      const motionOk = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (!motionOk) return;
+
+      const els = document.querySelectorAll('.reveal');
+
+      // Stagger feature cards as a group
+      const bentoCards = document.querySelectorAll('.feature-bento .reveal');
+      bentoCards.forEach((el, i) => {
+        el.style.transitionDelay = `${i * 90}ms`;
+      });
+
+      els.forEach(el => el.classList.add('reveal-hidden'));
+
+      const observer = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('visible');
+            observer.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+
+      els.forEach(el => observer.observe(el));
+    })();
+
+    /* ── COPY BUTTONS ───────────────────────────────────────────── */
+    document.querySelectorAll('.copy-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const cmd = btn.dataset.cmd;
+        try {
+          await navigator.clipboard.writeText(cmd);
+          btn.dataset.copied = 'true';
+          btn.setAttribute('aria-label', 'Copied!');
+          setTimeout(() => {
+            btn.dataset.copied = 'false';
+            btn.setAttribute('aria-label', btn.getAttribute('aria-label').replace('Copied!',
+              btn.closest('.terminal-row').querySelector('.t-cmd').textContent.slice(0, 20) + '…'));
+          }, 2000);
+        } catch (_) { /* clipboard unavailable */ }
+      });
+    });
+  </script>
+</body>
+</html>
