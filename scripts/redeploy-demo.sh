@@ -17,9 +17,9 @@
 set -euo pipefail
 
 # --- config ---------------------------------------------------------------
-REPO_DIR="/home/dead/Projects/Advanced-Discord-Bot"
+REPO_DIR="/home/dead/Prod/Advanced-Discord-Bot"
 BRANCH="main"
-PROJECT="adb"                       # must match `name:` in docker-compose.yml
+PROJECT="adb-prod"                       # must match `name:` in docker-compose.yml
 LOG_FILE="${REPO_DIR}/logs/redeploy-demo.log"
 LOCK_FILE="/tmp/adb-redeploy.lock"
 
