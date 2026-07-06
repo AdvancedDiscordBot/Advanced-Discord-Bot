@@ -1,0 +1,86 @@
+/* signature-ui — dark mode token layer
+   Light mode values live on :root, dark mode values are re-pointed
+   under [data-theme="dark"]. Everything else (radius, spacing, type
+   scale, button roles) is identical between modes — only color changes.
+   Do not hardcode hex values in components; always go through theme.js. */
+
+:root {
+  --cream: #FAEBD7;
+  --surface1: #F0DCBF;
+  --surface2: #E4CBA8;
+
+  --ink: #1E1A14;
+  --ink2: #4A4033;
+  --inkMuted: #6B5D4A;
+  --inkFaint: #9A8D78;
+
+  --accent: #7C4B3A;
+  --accentTint: #F5E6DF;
+  --accentOnTint: #5A2E20;
+  --creamOnAccent: #FBEEDB;
+
+  --pine: #6E8B7F;
+  --pineStrong: #3F4D46;
+  --pineTint: #E1E9E5;
+  --pineOnTint: #2C3934;
+
+  --success: #3F4D46;
+  --successTint: #E1E9E5;
+  --successText: #2C3934;
+
+  --warning: #A6772B;
+  --warningTint: #F7ECD9;
+  --warningText: #6B4B12;
+
+  --danger: #9C3B2E;
+  --dangerTint: #F5E1DD;
+  --dangerText: #6B241A;
+
+  --hairline: rgba(30, 26, 20, 0.12);
+  --hairlineStrong: rgba(30, 26, 20, 0.20);
+
+  color-scheme: light;
+}
+
+[data-theme='dark'] {
+  --cream: #1C1713;
+  --surface1: #241E18;
+  --surface2: #2C251D;
+
+  --ink: #F5E9D8;
+  --ink2: #E4D6C1;
+  --inkMuted: #9C8E77;
+  --inkFaint: #6E6252;
+
+  --accent: #C98B68;
+  --accentTint: #3A2A20;
+  --accentOnTint: #F0C9A8;
+  --creamOnAccent: #1C1713;
+
+  --pine: #8FAC9F;
+  --pineStrong: #B9D2C6;
+  --pineTint: #223028;
+  --pineOnTint: #C9E0D5;
+
+  --success: #8FAC9F;
+  --successTint: #223028;
+  --successText: #C9E0D5;
+
+  --warning: #D9A85C;
+  --warningTint: #332711;
+  --warningText: #F0CE94;
+
+  --danger: #D98D7A;
+  --dangerTint: #3A211C;
+  --dangerText: #F0B8A8;
+
+  --hairline: rgba(245, 233, 216, 0.12);
+  --hairlineStrong: rgba(245, 233, 216, 0.20);
+
+  color-scheme: dark;
+}
+
+body {
+  background: var(--cream);
+  transition: background-color .18s ease;
+}

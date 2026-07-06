@@ -56,6 +56,11 @@ function loadEventsFromDir(dirPath, ctx) {
 }
 
 async function load(ctx) {
+	if (!process.env.GEMINI_API_KEY) {
+		ctx.logger.warn("GEMINI_API_KEY not set — AI plugin disabled");
+		return;
+	}
+
 	loadCommandsFromDir(path.join(__dirname, "commands"), ctx);
 	loadEventsFromDir(path.join(__dirname, "events"), ctx);
 	ctx.logger.info("AI plugin loaded");

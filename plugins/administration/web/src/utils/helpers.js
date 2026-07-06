@@ -1,3 +1,5 @@
+import { colors } from '../theme';
+
 export function formatNumber(num) {
   if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
   if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
@@ -23,13 +25,20 @@ export function formatDate(date) {
   });
 }
 
+// Returns a { bg, text } tint pair from the signature-ui token set for a
+// given ticket status, used for status badges.
 export function getStatusColor(status) {
   switch (status) {
-    case 'open': return '#10B981';
-    case 'in_progress': return '#F59E0B';
-    case 'closed': return '#6B7280';
-    case 'resolved': return '#3B82F6';
-    default: return '#6B7280';
+    case 'open':
+      return { bg: colors.successTint, text: colors.successText };
+    case 'in_progress':
+      return { bg: colors.warningTint, text: colors.warningText };
+    case 'resolved':
+      return { bg: colors.successTint, text: colors.successText };
+    case 'closed':
+      return { bg: colors.surface1, text: colors.inkMuted };
+    default:
+      return { bg: colors.surface1, text: colors.inkMuted };
   }
 }
 

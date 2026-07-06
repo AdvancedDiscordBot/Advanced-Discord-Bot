@@ -1,10 +1,11 @@
 import React from 'react';
+import { colors, fonts, radius, fontSize } from '../theme';
 
-export function StatCard({ icon: Icon, label, value, subValue, color = '#6366F1' }) {
+export function StatCard({ icon: Icon, label, value, subValue }) {
   return (
     <div style={styles.card}>
-      <div style={{ ...styles.iconWrap, backgroundColor: `${color}20` }}>
-        <Icon size={24} color={color} />
+      <div style={styles.iconWrap}>
+        <Icon size={22} color={colors.accent} />
       </div>
       <div style={styles.content}>
         <div style={styles.label}>{label}</div>
@@ -15,9 +16,9 @@ export function StatCard({ icon: Icon, label, value, subValue, color = '#6366F1'
   );
 }
 
-export function Card({ title, children, actions }) {
+export function Card({ title, children, actions, style }) {
   return (
-    <div style={styles.cardBlock}>
+    <div style={{ ...styles.cardBlock, ...style }}>
       {(title || actions) && (
         <div style={styles.cardHeader}>
           {title && <h3 style={styles.cardTitle}>{title}</h3>}
@@ -54,14 +55,14 @@ export function Toggle({ checked, onChange, label, description }) {
   );
 }
 
-export function Select({ value, onChange, options, label, placeholder }) {
+export function Select({ value, onChange, options, label, placeholder, style }) {
   return (
     <div style={styles.selectWrap}>
       {label && <label style={styles.selectLabel}>{label}</label>}
       <select
         value={value || ''}
         onChange={(e) => onChange(e.target.value || null)}
-        style={styles.select}
+        style={{ ...styles.select, ...style }}
       >
         {placeholder && <option value="">{placeholder}</option>}
         {options.map((opt) => (
@@ -90,15 +91,22 @@ export function Input({ value, onChange, label, type = 'text', placeholder, ...p
   );
 }
 
-export function Button({ children, onClick, variant = 'primary', loading, disabled }) {
+export function Button({ children, onClick, variant = 'primary', loading, disabled, style }) {
+  const variantStyle =
+    variant === 'secondary'
+      ? styles.buttonSecondary
+      : variant === 'danger'
+      ? styles.buttonDanger
+      : styles.buttonPrimary;
   return (
     <button
       onClick={onClick}
       disabled={disabled || loading}
       style={{
         ...styles.button,
-        ...(variant === 'secondary' ? styles.buttonSecondary : styles.buttonPrimary),
+        ...variantStyle,
         ...(disabled ? styles.buttonDisabled : {}),
+        ...style,
       }}
     >
       {loading ? 'Saving...' : children}
@@ -112,40 +120,47 @@ const styles = {
     alignItems: 'center',
     gap: '16px',
     padding: '16px',
-    background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
-    borderRadius: '12px',
-    border: '1px solid #334155',
+    background: colors.surface1,
+    borderRadius: `${radius.card}px`,
+    border: `1.5px solid ${colors.hairline}`,
   },
   iconWrap: {
     width: '48px',
     height: '48px',
-    borderRadius: '12px',
+    borderRadius: `${radius.card}px`,
+    background: colors.accentTint,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   content: {
     flex: 1,
+    minWidth: 0,
   },
   label: {
-    color: '#94a3b8',
-    fontSize: '13px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
+    fontWeight: 500,
     marginBottom: '4px',
   },
   value: {
-    color: '#f1f5f9',
-    fontSize: '24px',
+    color: colors.ink,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.heading}px`,
     fontWeight: 700,
   },
   subValue: {
-    color: '#64748b',
-    fontSize: '12px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
     marginTop: '2px',
   },
   cardBlock: {
-    background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
-    borderRadius: '12px',
-    border: '1px solid #334155',
+    background: colors.surface1,
+    borderRadius: `${radius.card}px`,
+    border: `1.5px solid ${colors.hairline}`,
     marginBottom: '16px',
   },
   cardHeader: {
@@ -153,12 +168,13 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: '16px',
-    borderBottom: '1px solid #334155',
+    borderBottom: `1.5px solid ${colors.hairline}`,
   },
   cardTitle: {
-    color: '#f1f5f9',
-    fontSize: '16px',
-    fontWeight: 600,
+    color: colors.ink,
+    fontFamily: fonts.display,
+    fontSize: `${fontSize.title}px`,
+    fontWeight: 400,
     margin: 0,
   },
   cardActions: {
@@ -173,35 +189,37 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: '12px 0',
-    borderBottom: '1px solid #334155',
+    borderBottom: `1.5px solid ${colors.hairline}`,
   },
   toggleInfo: {
     flex: 1,
   },
   toggleLabel: {
-    color: '#f1f5f9',
-    fontSize: '14px',
+    color: colors.ink,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
     fontWeight: 500,
   },
   toggleDesc: {
-    color: '#64748b',
-    fontSize: '12px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
     marginTop: '2px',
   },
   toggle: {
     width: '44px',
     height: '24px',
-    borderRadius: '12px',
+    borderRadius: `${radius.pill}px`,
     border: 'none',
     cursor: 'pointer',
     position: 'relative',
     transition: 'background 0.2s',
   },
   toggleOff: {
-    background: '#475569',
+    background: colors.hairlineStrong,
   },
   toggleOn: {
-    background: '#10B981',
+    background: colors.accent,
   },
   toggleKnob: {
     position: 'absolute',
@@ -210,7 +228,7 @@ const styles = {
     width: '20px',
     height: '20px',
     borderRadius: '50%',
-    background: '#ffffff',
+    background: colors.cream,
     transition: 'transform 0.2s',
   },
   toggleKnobOn: {
@@ -221,18 +239,22 @@ const styles = {
   },
   selectLabel: {
     display: 'block',
-    color: '#94a3b8',
-    fontSize: '13px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
+    fontWeight: 500,
     marginBottom: '6px',
   },
   select: {
     width: '100%',
-    padding: '10px 12px',
-    background: '#0f172a',
-    border: '1px solid #334155',
-    borderRadius: '8px',
-    color: '#e2e8f0',
-    fontSize: '14px',
+    padding: '11px 14px',
+    background: colors.cream,
+    border: `1.5px solid ${colors.hairlineStrong}`,
+    borderRadius: `${radius.control}px`,
+    color: colors.ink,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
+    fontWeight: 400,
     outline: 'none',
   },
   inputWrap: {
@@ -240,36 +262,50 @@ const styles = {
   },
   inputLabel: {
     display: 'block',
-    color: '#94a3b8',
-    fontSize: '13px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
+    fontWeight: 500,
     marginBottom: '6px',
   },
   input: {
     width: '100%',
-    padding: '10px 12px',
-    background: '#0f172a',
-    border: '1px solid #334155',
-    borderRadius: '8px',
-    color: '#e2e8f0',
-    fontSize: '14px',
+    padding: '11px 14px',
+    background: colors.cream,
+    border: `1.5px solid ${colors.hairlineStrong}`,
+    borderRadius: `${radius.control}px`,
+    color: colors.ink,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
+    fontWeight: 400,
     outline: 'none',
   },
   button: {
-    padding: '10px 16px',
-    borderRadius: '8px',
-    fontWeight: 600,
-    fontSize: '14px',
-    border: 'none',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '12px 24px',
+    borderRadius: `${radius.pill}px`,
+    fontFamily: fonts.body,
+    fontWeight: 500,
+    fontSize: `${fontSize.caption}px`,
     cursor: 'pointer',
-    transition: 'opacity 0.2s',
+    transition: 'opacity .18s, background .18s, color .18s',
   },
   buttonPrimary: {
-    background: 'linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)',
-    color: '#ffffff',
+    background: colors.accent,
+    color: colors.creamOnAccent,
+    border: `1.5px solid ${colors.accent}`,
   },
   buttonSecondary: {
-    background: '#334155',
-    color: '#e2e8f0',
+    background: 'transparent',
+    color: colors.ink,
+    border: `1.5px solid ${colors.ink}`,
+  },
+  buttonDanger: {
+    background: colors.danger,
+    color: colors.creamOnAccent,
+    border: `1.5px solid ${colors.danger}`,
   },
   buttonDisabled: {
     opacity: 0.5,

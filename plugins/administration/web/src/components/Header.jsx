@@ -1,7 +1,9 @@
 import React from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { getAvatarUrl } from '../utils/helpers';
-import { LogOut, Shield } from 'lucide-react';
+import { LogOut } from 'lucide-react';
+import { colors, fonts, fontSize } from '../theme';
+import { ThemeToggle } from './ThemeToggle';
 
 export function Header() {
   const { user, logout } = useAuth();
@@ -11,10 +13,11 @@ export function Header() {
   return (
     <header style={styles.header}>
       <div style={styles.brand}>
-        <Shield size={24} color="#6366F1" />
+        <span style={styles.seal} />
         <span style={styles.brandText}>ADB Admin</span>
       </div>
       <div style={styles.userInfo}>
+        <ThemeToggle />
         <img
           src={getAvatarUrl(user.user)}
           alt="Avatar"
@@ -37,18 +40,26 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: '12px 24px',
-    background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
-    borderBottom: '1px solid #334155',
+    background: colors.surface1,
+    borderBottom: `1.5px solid ${colors.hairline}`,
   },
   brand: {
     display: 'flex',
     alignItems: 'center',
     gap: '10px',
   },
+  seal: {
+    width: '8px',
+    height: '8px',
+    borderRadius: '50%',
+    background: colors.accent,
+    flexShrink: 0,
+  },
   brandText: {
-    fontSize: '18px',
+    fontFamily: fonts.display,
+    fontSize: `${fontSize.title}px`,
     fontWeight: 600,
-    color: '#f1f5f9',
+    color: colors.ink,
   },
   userInfo: {
     display: 'flex',
@@ -61,18 +72,19 @@ const styles = {
     borderRadius: '50%',
   },
   username: {
-    color: '#e2e8f0',
-    fontSize: '14px',
+    color: colors.ink2,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
   },
   logoutBtn: {
     background: 'transparent',
     border: 'none',
-    color: '#94a3b8',
+    color: colors.inkMuted,
     cursor: 'pointer',
     padding: '4px',
     display: 'flex',
     alignItems: 'center',
     borderRadius: '4px',
-    transition: 'color 0.2s, background 0.2s',
+    transition: 'color .18s, background .18s',
   },
 };

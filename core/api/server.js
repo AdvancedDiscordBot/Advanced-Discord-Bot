@@ -71,13 +71,13 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 
 	const sessionStore = MongoStore.create({
 		mongoUrl: process.env.MONGODB_URI,
-		collectionName: "vaish_sessions",
+		collectionName: "adb_sessions",
 	});
 
 	await fastify.register(cookie);
 	await fastify.register(session, {
 		secret: sessionSecret,
-		cookieName: "vaish.sid",
+		cookieName: "adb.sid",
 		cookie: {
 			path: "/",
 			httpOnly: true,
@@ -96,22 +96,152 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		}
 		reply.type("text/html");
 		return `<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 	<meta charset="utf-8">
-	<title>VAISH - Advanced Discord Bot</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="theme-color" content="#FAEBD7">
+	<title>ADB - Advanced Discord Bot</title>
+	<script>
+		// Apply the stored/preferred theme before first paint to avoid a
+		// light->dark flash.
+		(function () {
+			try {
+				var stored = localStorage.getItem('adb-theme');
+				var theme = stored || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+				document.documentElement.setAttribute('data-theme', theme);
+			} catch (e) {}
+		})();
+	</script>
 	<style>
-		body { background: #0f172a; color: #f8fafc; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-		a { color: #6366f1; text-decoration: none; font-weight: bold; }
-		a:hover { text-decoration: underline; }
-		.container { text-align: center; }
+		@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:wght@400;500;700&display=swap');
+
+		:root {
+			--cream: #FAEBD7;
+			--ink: #1E1A14;
+			--ink2: #4A4033;
+			--inkMuted: #6B5D4A;
+			--accent: #7C4B3A;
+			--accentTint: #F5E6DF;
+			--accentOnTint: #5A2E20;
+			--creamOnAccent: #FBEEDB;
+			--hairlineStrong: rgba(30,26,20,0.20);
+			color-scheme: light;
+		}
+		[data-theme='dark'] {
+			--cream: #1C1713;
+			--ink: #F5E9D8;
+			--ink2: #E4D6C1;
+			--inkMuted: #9C8E77;
+			--accent: #C98B68;
+			--accentTint: #3A2A20;
+			--accentOnTint: #F0C9A8;
+			--creamOnAccent: #1C1713;
+			--hairlineStrong: rgba(245,233,216,0.20);
+			color-scheme: dark;
+		}
+
+		body {
+			background: var(--cream);
+			color: var(--ink2);
+			font-family: 'DM Sans', sans-serif;
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			height: 100vh;
+			margin: 0;
+			padding: 24px;
+			box-sizing: border-box;
+			transition: background-color .18s ease, color .18s ease;
+		}
+		.theme-toggle {
+			position: fixed;
+			top: 24px;
+			right: 24px;
+			width: 32px;
+			height: 32px;
+			border-radius: 10px;
+			border: 1.5px solid var(--hairlineStrong);
+			background: transparent;
+			color: var(--inkMuted);
+			cursor: pointer;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			font-size: 16px;
+			line-height: 1;
+			transition: color .18s, border-color .18s, background .18s;
+		}
+		.container {
+			text-align: center;
+			max-width: 480px;
+		}
+		h1 {
+			font-family: 'Cormorant Garamond', serif;
+			font-weight: 300;
+			font-size: 39px;
+			color: var(--ink);
+			margin: 0 0 16px;
+		}
+		p {
+			font-size: 16px;
+			line-height: 1.5;
+			margin: 0 0 32px;
+		}
+		.btn-primary {
+			display: inline-flex;
+			align-items: center;
+			padding: 12px 24px;
+			border-radius: 100px;
+			background: var(--accent);
+			color: var(--creamOnAccent);
+			text-decoration: none;
+			font-family: 'DM Sans', sans-serif;
+			font-weight: 500;
+			font-size: 14px;
+			transition: opacity .18s;
+		}
+		.btn-primary:hover { opacity: 0.85; }
+		.hosting-note {
+			margin-top: 48px;
+			padding: 10px 16px;
+			background: var(--accentTint);
+			border-radius: 16px;
+			font-size: 13px;
+			font-weight: 500;
+			color: var(--accentOnTint);
+			display: inline-block;
+		}
+		.hosting-note strong { color: var(--accent); }
 	</style>
 </head>
 <body>
+	<button class="theme-toggle" id="theme-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">&#9788;</button>
 	<div class="container">
-		<h1>VAISH Bot is Loading...</h1>
-		<p>If you see this page, the landing page is currently updating. You can access the <a href="/dashboard">Dashboard here</a>.</p>
+		<h1>ADB is loading...</h1>
+		<p>If you see this page, the landing page is currently updating. You can head straight to the dashboard below.</p>
+		<a class="btn-primary" href="/dashboard">Dashboard</a>
+		<div>
+			<div class="hosting-note">Want managed hosting? DM <strong>@deadindian</strong> on Discord.</div>
+		</div>
 	</div>
+	<script>
+		(function () {
+			var btn = document.getElementById('theme-toggle');
+			function render() {
+				var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+				btn.innerHTML = isDark ? '&#9789;' : '&#9788;';
+			}
+			btn.addEventListener('click', function () {
+				var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+				document.documentElement.setAttribute('data-theme', next);
+				try { localStorage.setItem('adb-theme', next); } catch (e) {}
+				render();
+			});
+			render();
+		})();
+	</script>
 </body>
 </html>`;
 	});
@@ -119,7 +249,7 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 	fastify.get("/api/public-stats", async () => {
 		const totalServers = client.guilds.cache.size;
 		const totalUsers = client.guilds.cache.reduce((a, g) => a + g.memberCount, 0);
-		const botTag = client.user ? client.user.tag : "VAISH#0000";
+		const botTag = client.user ? client.user.tag : "ADB#0000";
 		const botAvatar = client.user ? client.user.displayAvatarURL() : null;
 		const pluginCount = pluginManager.getPluginList().length;
 		
@@ -330,7 +460,7 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 
 		const pluginList = pluginManager.getPluginList();
 		const plugin = pluginList.find(
-			(p) => p.name === packageName || p.name === `vaish-plugin-${packageName.replace("vaish-plugin-", "")}`,
+			(p) => p.name === packageName || p.name === `adb-plugin-${packageName.replace("adb-plugin-", "")}`,
 		);
 
 		if (plugin) {
@@ -398,8 +528,8 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 			return reply.code(400).send({ error: "Missing required fields" });
 		}
 
-		if (!packageName.startsWith("vaish-plugin-")) {
-			return reply.code(400).send({ error: "Package name must start with 'vaish-plugin-'" });
+		if (!packageName.startsWith("adb-plugin-")) {
+			return reply.code(400).send({ error: "Package name must start with 'adb-plugin-'" });
 		}
 
 		return registry.submitPlugin({ packageName, description, author, category });
@@ -572,7 +702,7 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 
 	const getSessionFromRequest = async (req) => {
 		const cookies = parseCookies(req.headers.cookie || "");
-		const rawSid = cookies["vaish.sid"];
+		const rawSid = cookies["adb.sid"];
 		if (!rawSid) return null;
 
 		const unsigned = fastify.unsignCookie(rawSid);

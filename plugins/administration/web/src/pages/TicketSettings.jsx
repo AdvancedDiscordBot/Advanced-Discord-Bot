@@ -5,6 +5,7 @@ import { useApi } from '../hooks/useApi';
 import { useApiFetch } from '../hooks/useApi';
 import { Ticket, User, Clock } from 'lucide-react';
 import { formatDate, getStatusColor } from '../utils/helpers';
+import { colors, fonts, radius, fontSize } from '../theme';
 
 export function TicketSettings() {
   const { guildData, refreshGuild } = useOutletContext();
@@ -68,13 +69,13 @@ export function TicketSettings() {
           <div style={styles.statLabel}>Total Tickets</div>
         </div>
         <div style={styles.stat}>
-          <div style={{ ...styles.statValue, color: '#10B981' }}>
+          <div style={{ ...styles.statValue, color: colors.successText }}>
             {openTickets.length}
           </div>
           <div style={styles.statLabel}>Open</div>
         </div>
         <div style={styles.stat}>
-          <div style={{ ...styles.statValue, color: '#F59E0B' }}>
+          <div style={{ ...styles.statValue, color: colors.warningText }}>
             {inProgressTickets.length}
           </div>
           <div style={styles.statLabel}>In Progress</div>
@@ -115,32 +116,35 @@ export function TicketSettings() {
         <Card title="Recent Tickets">
           {tickets.length > 0 ? (
             <div style={styles.ticketsList}>
-              {tickets.slice(0, 10).map((ticket) => (
-                <div key={ticket._id} style={styles.ticketRow}>
-                  <div style={styles.ticketHeader}>
-                    <span style={styles.ticketTitle}>{ticket.title}</span>
-                    <span
-                      style={{
-                        ...styles.ticketStatus,
-                        backgroundColor: `${getStatusColor(ticket.status)}20`,
-                        color: getStatusColor(ticket.status),
-                      }}
-                    >
-                      {ticket.status}
-                    </span>
+              {tickets.slice(0, 10).map((ticket) => {
+                const statusColor = getStatusColor(ticket.status);
+                return (
+                  <div key={ticket._id} style={styles.ticketRow}>
+                    <div style={styles.ticketHeader}>
+                      <span style={styles.ticketTitle}>{ticket.title}</span>
+                      <span
+                        style={{
+                          ...styles.ticketStatus,
+                          backgroundColor: statusColor.bg,
+                          color: statusColor.text,
+                        }}
+                      >
+                        {ticket.status}
+                      </span>
+                    </div>
+                    <div style={styles.ticketMeta}>
+                      <span style={styles.ticketMetaItem}>
+                        <User size={14} />
+                        <span>Ticket #{ticket._id.slice(-6)}</span>
+                      </span>
+                      <span style={styles.ticketMetaItem}>
+                        <Clock size={14} />
+                        <span>{formatDate(ticket.createdAt)}</span>
+                      </span>
+                    </div>
                   </div>
-                  <div style={styles.ticketMeta}>
-                    <span style={styles.ticketMetaItem}>
-                      <User size={14} />
-                      <span>Ticket #{ticket._id.slice(-6)}</span>
-                    </span>
-                    <span style={styles.ticketMetaItem}>
-                      <Clock size={14} />
-                      <span>{formatDate(ticket.createdAt)}</span>
-                    </span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div style={styles.empty}>No tickets yet</div>
@@ -156,14 +160,16 @@ const styles = {
     maxWidth: '900px',
   },
   pageTitle: {
-    color: '#f1f5f9',
-    fontSize: '24px',
-    fontWeight: 700,
+    color: colors.ink,
+    fontFamily: fonts.display,
+    fontSize: `${fontSize.heading}px`,
+    fontWeight: 400,
     marginBottom: '4px',
   },
   pageSubtitle: {
-    color: '#64748b',
-    fontSize: '14px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
     marginBottom: '24px',
   },
   statsRow: {
@@ -171,20 +177,23 @@ const styles = {
     gap: '24px',
     marginBottom: '24px',
     padding: '16px',
-    background: '#1e293b',
-    borderRadius: '12px',
+    background: colors.surface1,
+    borderRadius: `${radius.card}px`,
+    border: `1.5px solid ${colors.hairline}`,
   },
   stat: {
     textAlign: 'center',
   },
   statValue: {
-    color: '#f1f5f9',
-    fontSize: '28px',
+    color: colors.ink,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.heading}px`,
     fontWeight: 700,
   },
   statLabel: {
-    color: '#64748b',
-    fontSize: '12px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
     marginTop: '4px',
   },
   grid: {
@@ -193,8 +202,9 @@ const styles = {
     gap: '16px',
   },
   fieldDesc: {
-    color: '#64748b',
-    fontSize: '12px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
     marginTop: '-8px',
     marginBottom: '12px',
   },
@@ -208,9 +218,9 @@ const styles = {
   },
   ticketRow: {
     padding: '12px',
-    background: '#0f172a',
-    borderRadius: '8px',
-    border: '1px solid #334155',
+    background: colors.cream,
+    borderRadius: `${radius.control}px`,
+    border: `1.5px solid ${colors.hairline}`,
   },
   ticketHeader: {
     display: 'flex',
@@ -219,22 +229,25 @@ const styles = {
     marginBottom: '8px',
   },
   ticketTitle: {
-    color: '#f1f5f9',
-    fontSize: '14px',
+    color: colors.ink,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
     fontWeight: 500,
   },
   ticketStatus: {
-    padding: '4px 8px',
-    borderRadius: '4px',
+    padding: '4px 10px',
+    borderRadius: `${radius.pill}px`,
+    fontFamily: fonts.body,
     fontSize: '11px',
-    fontWeight: 600,
+    fontWeight: 700,
     textTransform: 'uppercase',
   },
   ticketMeta: {
     display: 'flex',
     gap: '16px',
-    color: '#64748b',
-    fontSize: '12px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
   },
   ticketMetaItem: {
     display: 'flex',
@@ -242,7 +255,9 @@ const styles = {
     gap: '4px',
   },
   empty: {
-    color: '#64748b',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
     textAlign: 'center',
     padding: '24px',
   },

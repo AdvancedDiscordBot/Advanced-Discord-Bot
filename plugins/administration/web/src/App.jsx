@@ -14,6 +14,7 @@ import { ActivityLogs } from './pages/ActivityLogs';
 import { GuildSettings } from './pages/Settings';
 import { Plugins } from './pages/Plugins';
 import { GuildPicker } from './components/GuildPicker';
+import { colors } from './theme';
 
 function AppRoutes() {
   const { user, loading } = useAuth();
@@ -74,14 +75,14 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     gap: '16px',
-    color: '#94a3b8',
-    background: '#0f172a',
+    color: colors.inkMuted,
+    background: colors.cream,
   },
   spinner: {
     width: '40px',
     height: '40px',
-    border: '3px solid #334155',
-    borderTopColor: '#6366F1',
+    border: `3px solid ${colors.hairlineStrong}`,
+    borderTopColor: colors.accent,
     borderRadius: '50%',
     animation: 'spin 1s linear infinite',
   },

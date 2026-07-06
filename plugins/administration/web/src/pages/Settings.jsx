@@ -3,6 +3,7 @@ import { useOutletContext } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { Server, Github, Shield, RotateCcw } from 'lucide-react';
 import { Button } from '../components/UI';
+import { colors, fonts, radius, fontSize } from '../theme';
 
 export function GuildSettings() {
   const { guildData } = useOutletContext();
@@ -148,14 +149,16 @@ const styles = {
     maxWidth: '900px',
   },
   pageTitle: {
-    color: '#f1f5f9',
-    fontSize: '24px',
-    fontWeight: 700,
+    color: colors.ink,
+    fontFamily: fonts.display,
+    fontSize: `${fontSize.heading}px`,
+    fontWeight: 400,
     marginBottom: '4px',
   },
   pageSubtitle: {
-    color: '#64748b',
-    fontSize: '14px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
     marginBottom: '24px',
   },
   grid: {
@@ -164,15 +167,16 @@ const styles = {
     gap: '16px',
   },
   card: {
-    background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
-    borderRadius: '12px',
-    border: '1px solid #334155',
+    background: colors.surface1,
+    borderRadius: `${radius.card}px`,
+    border: `1.5px solid ${colors.hairline}`,
     padding: '16px',
   },
   cardTitle: {
-    color: '#f1f5f9',
-    fontSize: '16px',
-    fontWeight: 600,
+    color: colors.ink,
+    fontFamily: fonts.display,
+    fontSize: `${fontSize.title}px`,
+    fontWeight: 400,
     marginBottom: '16px',
   },
   infoList: {
@@ -185,28 +189,31 @@ const styles = {
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: '8px 0',
-    borderBottom: '1px solid #334155',
+    borderBottom: `1.5px solid ${colors.hairline}`,
   },
   infoLabel: {
-    color: '#94a3b8',
-    fontSize: '14px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
   },
   infoValue: {
-    color: '#f1f5f9',
-    fontSize: '14px',
+    color: colors.ink,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
     fontWeight: 500,
   },
   exportDesc: {
-    color: '#64748b',
-    fontSize: '13px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
     marginBottom: '12px',
   },
   codeBlock: {
-    background: '#0f172a',
-    border: '1px solid #334155',
-    borderRadius: '8px',
+    background: colors.cream,
+    border: `1.5px solid ${colors.hairline}`,
+    borderRadius: `${radius.control}px`,
     padding: '12px',
-    color: '#e2e8f0',
+    color: colors.ink2,
     fontSize: '12px',
     fontFamily: 'monospace',
     overflow: 'auto',
@@ -223,11 +230,12 @@ const styles = {
     alignItems: 'center',
     gap: '12px',
     padding: '12px',
-    background: '#0f172a',
-    borderRadius: '8px',
-    color: '#6366F1',
+    background: colors.cream,
+    borderRadius: `${radius.control}px`,
+    color: colors.accent,
     textDecoration: 'none',
-    fontSize: '14px',
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
     border: 'none',
     cursor: 'pointer',
     textAlign: 'left',

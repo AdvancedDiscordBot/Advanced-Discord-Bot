@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { getGuildIcon } from '../utils/helpers';
 import { Server, ChevronRight } from 'lucide-react';
+import { colors, fonts, radius, fontSize } from '../theme';
 
 export function GuildPicker() {
   const navigate = useNavigate();
@@ -35,7 +36,7 @@ export function GuildPicker() {
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <Server size={32} color="#6366F1" />
+        <Server size={32} color={colors.accent} />
         <h1 style={styles.title}>Select a Server</h1>
         <p style={styles.subtitle}>
           Choose a server where you have admin permissions to manage ADB
@@ -47,6 +48,8 @@ export function GuildPicker() {
             key={guild.id}
             onClick={() => navigate(`/guild/${guild.id}`)}
             style={styles.guildCard}
+            onMouseEnter={(e) => (e.currentTarget.style.background = colors.surface2)}
+            onMouseLeave={(e) => (e.currentTarget.style.background = colors.surface1)}
           >
             {guild.icon ? (
               <img
@@ -56,7 +59,7 @@ export function GuildPicker() {
               />
             ) : (
               <div style={styles.guildPlaceholder}>
-                <Server size={32} />
+                <Server size={32} color={colors.inkMuted} />
               </div>
             )}
             <div style={styles.guildInfo}>
@@ -65,7 +68,7 @@ export function GuildPicker() {
                 {guild.memberCount?.toLocaleString()} members
               </div>
             </div>
-            <ChevronRight size={20} color="#64748b" />
+            <ChevronRight size={20} color={colors.inkMuted} />
           </button>
         ))}
       </div>
@@ -79,19 +82,9 @@ export function GuildPicker() {
             href="/auth/invite"
             target="_blank"
             rel="noopener noreferrer"
-            style={{
-              display: 'inline-block',
-              padding: '10px 20px',
-              backgroundColor: '#6366F1',
-              color: '#ffffff',
-              borderRadius: '8px',
-              textDecoration: 'none',
-              fontWeight: '600',
-              marginTop: '12px',
-              transition: 'background-color 0.2s',
-            }}
-            onMouseOver={(e) => (e.target.style.backgroundColor = '#4f46e5')}
-            onMouseOut={(e) => (e.target.style.backgroundColor = '#6366F1')}
+            style={styles.inviteButton}
+            onMouseEnter={(e) => (e.target.style.opacity = 0.85)}
+            onMouseLeave={(e) => (e.target.style.opacity = 1)}
           >
             Add ADB to Server
           </a>
@@ -119,22 +112,24 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     padding: '24px',
-    background: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)',
+    background: colors.cream,
   },
   header: {
     textAlign: 'center',
     marginBottom: '32px',
   },
   title: {
-    color: '#f1f5f9',
-    fontSize: '28px',
-    fontWeight: 700,
+    color: colors.ink,
+    fontFamily: fonts.display,
+    fontSize: `${fontSize.display}px`,
+    fontWeight: 300,
     marginTop: '16px',
     marginBottom: '8px',
   },
   subtitle: {
-    color: '#94a3b8',
-    fontSize: '16px',
+    color: colors.ink2,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.body}px`,
   },
   grid: {
     display: 'grid',
@@ -148,49 +143,69 @@ const styles = {
     alignItems: 'center',
     gap: '16px',
     padding: '16px',
-    background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
-    borderRadius: '12px',
-    border: '1px solid #334155',
+    background: colors.surface1,
+    borderRadius: `${radius.card}px`,
+    border: `1.5px solid ${colors.hairline}`,
     cursor: 'pointer',
-    transition: 'all 0.2s',
+    transition: 'background .18s',
     textAlign: 'left',
     width: '100%',
   },
   guildIcon: {
     width: '56px',
     height: '56px',
-    borderRadius: '12px',
+    borderRadius: `${radius.card}px`,
   },
   guildPlaceholder: {
     width: '56px',
     height: '56px',
-    borderRadius: '12px',
-    background: '#334155',
+    borderRadius: `${radius.card}px`,
+    background: colors.surface2,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    color: '#64748b',
+    color: colors.inkMuted,
   },
   guildInfo: {
     flex: 1,
   },
   guildName: {
-    color: '#f1f5f9',
-    fontSize: '16px',
-    fontWeight: 600,
+    color: colors.ink,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.body}px`,
+    fontWeight: 500,
     marginBottom: '4px',
   },
   guildMembers: {
-    color: '#64748b',
-    fontSize: '13px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
   },
   empty: {
-    color: '#64748b',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
     textAlign: 'center',
     marginTop: '24px',
   },
   loading: {
-    color: '#94a3b8',
-    fontSize: '16px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.body}px`,
+  },
+  inviteButton: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '12px 24px',
+    background: colors.accent,
+    color: colors.creamOnAccent,
+    borderRadius: `${radius.pill}px`,
+    textDecoration: 'none',
+    fontFamily: fonts.body,
+    fontWeight: 500,
+    fontSize: `${fontSize.caption}px`,
+    marginTop: '12px',
+    transition: 'opacity .18s',
   },
 };

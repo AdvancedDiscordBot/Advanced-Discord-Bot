@@ -3,6 +3,7 @@ import { useOutletContext } from 'react-router-dom';
 import { Card, Toggle, Button, Select } from '../components/UI';
 import { useApiFetch } from '../hooks/useApi';
 import { Cake } from 'lucide-react';
+import { colors, fonts, radius, fontSize } from '../theme';
 
 export function BirthdaySettings() {
   const { guildData, refreshGuild } = useOutletContext();
@@ -56,7 +57,7 @@ export function BirthdaySettings() {
         <Card title="Birthday Settings">
           <div style={styles.header}>
             <div style={styles.headerIcon}>
-              <Cake size={28} />
+              <Cake size={28} color={colors.accent} />
             </div>
             <div>
               <h3 style={styles.cardTitle}>Birthday Celebrations</h3>
@@ -150,14 +151,16 @@ const styles = {
     maxWidth: '800px',
   },
   pageTitle: {
-    color: '#f1f5f9',
-    fontSize: '24px',
-    fontWeight: 700,
+    color: colors.ink,
+    fontFamily: fonts.display,
+    fontSize: `${fontSize.heading}px`,
+    fontWeight: 400,
     marginBottom: '4px',
   },
   pageSubtitle: {
-    color: '#64748b',
-    fontSize: '14px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
     marginBottom: '24px',
   },
   grid: {
@@ -170,32 +173,34 @@ const styles = {
     alignItems: 'center',
     gap: '16px',
     paddingBottom: '16px',
-    borderBottom: '1px solid #334155',
+    borderBottom: `1.5px solid ${colors.hairline}`,
     marginBottom: '16px',
   },
   headerIcon: {
     width: '56px',
     height: '56px',
-    borderRadius: '12px',
-    background: 'linear-gradient(135deg, #EC4899 0%, #DB2777 100%)',
+    borderRadius: `${radius.card}px`,
+    background: colors.accentTint,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    color: '#fff',
   },
   cardTitle: {
-    color: '#f1f5f9',
-    fontSize: '16px',
-    fontWeight: 600,
+    color: colors.ink,
+    fontFamily: fonts.display,
+    fontSize: `${fontSize.title}px`,
+    fontWeight: 400,
     marginBottom: '4px',
   },
   cardDesc: {
-    color: '#64748b',
-    fontSize: '13px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
   },
   fieldDesc: {
-    color: '#64748b',
-    fontSize: '12px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
     marginTop: '-8px',
     marginBottom: '16px',
   },
@@ -213,27 +218,30 @@ const styles = {
     width: '28px',
     height: '28px',
     borderRadius: '50%',
-    background: '#334155',
-    color: '#f1f5f9',
+    background: colors.accentTint,
+    color: colors.accentOnTint,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    fontWeight: 600,
-    fontSize: '14px',
+    fontFamily: fonts.body,
+    fontWeight: 700,
+    fontSize: `${fontSize.caption}px`,
     flexShrink: 0,
   },
   stepContent: {
     flex: 1,
   },
   stepTitle: {
-    color: '#f1f5f9',
-    fontSize: '14px',
+    color: colors.ink,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
     fontWeight: 500,
     marginBottom: '2px',
   },
   stepDesc: {
-    color: '#64748b',
-    fontSize: '13px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
   },
   actions: {
     display: 'flex',

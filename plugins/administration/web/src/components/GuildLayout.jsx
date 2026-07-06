@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, Outlet, useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { Sidebar } from '../components/Sidebar';
+import { colors, fonts, fontSize } from '../theme';
 
 export function GuildLayout() {
   const { guildId } = useParams();
@@ -77,7 +78,7 @@ const styles = {
     minHeight: '100vh',
     display: 'flex',
     flexDirection: 'column',
-    background: '#0f172a',
+    background: colors.cream,
   },
   container: {
     display: 'flex',
@@ -96,13 +97,15 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     gap: '16px',
-    color: '#94a3b8',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
   },
   spinner: {
     width: '40px',
     height: '40px',
-    border: '3px solid #334155',
-    borderTopColor: '#6366F1',
+    border: `3px solid ${colors.hairlineStrong}`,
+    borderTopColor: colors.accent,
     borderRadius: '50%',
     animation: 'spin 1s linear infinite',
   },

@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { Card, Toggle, Button, Select } from '../components/UI';
 import { useApiFetch } from '../hooks/useApi';
-import { Bot, Brain, MessageSquare } from 'lucide-react';
+import { Brain, MessageSquare } from 'lucide-react';
+import { colors, fonts, radius, fontSize } from '../theme';
 
 export function AISettings() {
   const { guildData, refreshGuild } = useOutletContext();
@@ -67,7 +68,7 @@ export function AISettings() {
           <div style={styles.content}>
             <div style={styles.header}>
               <div style={styles.headerIcon}>
-                <Brain size={28} />
+                <Brain size={28} color={colors.accent} />
               </div>
               <div>
                 <h3 style={styles.cardTitle}>Google Gemini AI</h3>
@@ -115,7 +116,7 @@ export function AISettings() {
 
         <Card title="AI Context / FAQ">
           <div style={styles.contextInfo}>
-            <MessageSquare size={20} color="#64748b" />
+            <MessageSquare size={18} color={colors.inkMuted} />
             <span>
               Provide context or frequently asked questions for the AI to use
             </span>
@@ -150,14 +151,16 @@ const styles = {
     maxWidth: '800px',
   },
   pageTitle: {
-    color: '#f1f5f9',
-    fontSize: '24px',
-    fontWeight: 700,
+    color: colors.ink,
+    fontFamily: fonts.display,
+    fontSize: `${fontSize.heading}px`,
+    fontWeight: 400,
     marginBottom: '4px',
   },
   pageSubtitle: {
-    color: '#64748b',
-    fontSize: '14px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
     marginBottom: '24px',
   },
   grid: {
@@ -175,32 +178,34 @@ const styles = {
     alignItems: 'center',
     gap: '16px',
     paddingBottom: '16px',
-    borderBottom: '1px solid #334155',
+    borderBottom: `1.5px solid ${colors.hairline}`,
     marginBottom: '8px',
   },
   headerIcon: {
     width: '56px',
     height: '56px',
-    borderRadius: '12px',
-    background: 'linear-gradient(135deg, #8B5CF6 0%, #6366F1 100%)',
+    borderRadius: `${radius.card}px`,
+    background: colors.accentTint,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    color: '#fff',
   },
   cardTitle: {
-    color: '#f1f5f9',
-    fontSize: '16px',
-    fontWeight: 600,
+    color: colors.ink,
+    fontFamily: fonts.display,
+    fontSize: `${fontSize.title}px`,
+    fontWeight: 400,
     marginBottom: '4px',
   },
   cardDesc: {
-    color: '#64748b',
-    fontSize: '13px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
   },
   modeDesc: {
-    color: '#64748b',
-    fontSize: '12px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
     marginBottom: '16px',
     lineHeight: 1.5,
   },
@@ -208,26 +213,28 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
-    color: '#64748b',
-    fontSize: '13px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
     marginBottom: '12px',
   },
   textarea: {
     width: '100%',
     minHeight: '200px',
-    padding: '12px',
-    background: '#0f172a',
-    border: '1px solid #334155',
-    borderRadius: '8px',
-    color: '#e2e8f0',
-    fontSize: '14px',
+    padding: '12px 14px',
+    background: colors.cream,
+    border: `1.5px solid ${colors.hairlineStrong}`,
+    borderRadius: `${radius.control}px`,
+    color: colors.ink,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
     resize: 'vertical',
     outline: 'none',
-    fontFamily: 'inherit',
   },
   charCount: {
-    color: '#64748b',
-    fontSize: '12px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
     textAlign: 'right',
   },
   actions: {

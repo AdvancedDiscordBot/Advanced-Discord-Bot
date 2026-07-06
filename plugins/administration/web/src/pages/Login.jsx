@@ -1,4 +1,6 @@
 import React from 'react';
+import { colors, fonts, radius, fontSize } from '../theme';
+import { ThemeToggle } from '../components/ThemeToggle';
 
 function DiscordLogo({ size = 40 }) {
   return (
@@ -19,15 +21,26 @@ function DiscordLogo({ size = 40 }) {
 export function Login() {
   return (
     <div style={styles.container}>
+      <div style={styles.themeToggleWrap}>
+        <ThemeToggle />
+      </div>
       <div style={styles.card}>
-        <div style={styles.logo}>
-          <DiscordLogo />
+        <div style={styles.wordmark}>
+          <span style={styles.seal} />
+          <span style={styles.wordmarkText}>ADB</span>
         </div>
-        <h1 style={styles.title}>ADB Admin</h1>
+        <h1 style={styles.title}>
+          Sign in to <em style={styles.emphasis}>your</em> dashboard
+        </h1>
         <p style={styles.subtitle}>
-          Manage your Discord bot with a beautiful web interface
+          Manage your Discord bot with a calm, focused admin interface
         </p>
-        <a href="/auth/discord" style={styles.button}>
+        <a
+          href="/auth/discord"
+          style={styles.button}
+          onMouseEnter={(e) => (e.currentTarget.style.opacity = 0.85)}
+          onMouseLeave={(e) => (e.currentTarget.style.opacity = 1)}
+        >
           <DiscordLogo size={20} />
           <span>Sign in with Discord</span>
         </a>
@@ -42,58 +55,89 @@ export function Login() {
 
 const styles = {
   container: {
-    minHeight: "100vh",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    background: "linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)",
-    padding: "24px",
+    minHeight: '100vh',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: colors.cream,
+    padding: '24px',
+    position: 'relative',
+  },
+  themeToggleWrap: {
+    position: 'absolute',
+    top: '24px',
+    right: '24px',
   },
   card: {
-    background: "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)",
-    borderRadius: "16px",
-    border: "1px solid #334155",
-    padding: "48px",
-    maxWidth: "400px",
-    width: "100%",
-    textAlign: "center",
+    background: colors.surface1,
+    borderRadius: `${radius.card}px`,
+    border: `1.5px solid ${colors.hairline}`,
+    padding: '48px',
+    maxWidth: '440px',
+    width: '100%',
+    textAlign: 'center',
   },
-  logo: {
-    color: "#5865F2",
-    marginBottom: "16px",
-    display: "flex",
-    justifyContent: "center",
+  wordmark: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    marginBottom: '24px',
+  },
+  seal: {
+    width: '8px',
+    height: '8px',
+    borderRadius: '50%',
+    background: colors.accent,
+    flexShrink: 0,
+  },
+  wordmarkText: {
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
+    fontWeight: 700,
+    letterSpacing: '2px',
+    color: colors.inkMuted,
   },
   title: {
-    color: "#f1f5f9",
-    fontSize: "28px",
-    fontWeight: 700,
-    marginBottom: "8px",
+    color: colors.ink,
+    fontFamily: fonts.display,
+    fontSize: `${fontSize.display}px`,
+    fontWeight: 300,
+    marginBottom: '12px',
+    lineHeight: 1.15,
+  },
+  emphasis: {
+    color: colors.accent,
+    fontStyle: 'italic',
   },
   subtitle: {
-    color: "#64748b",
-    fontSize: "14px",
-    marginBottom: "32px",
+    color: colors.ink2,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.body}px`,
+    marginBottom: '32px',
   },
   button: {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: "12px",
-    width: "100%",
-    padding: "14px 24px",
-    background: "#5865F2",
-    color: "#fff",
-    borderRadius: "12px",
-    fontSize: "16px",
-    fontWeight: 600,
-    textDecoration: "none",
-    transition: "background 0.2s, transform 0.2s",
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '12px',
+    width: '100%',
+    padding: '14px 24px',
+    background: colors.accent,
+    color: colors.creamOnAccent,
+    borderRadius: `${radius.pill}px`,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
+    fontWeight: 500,
+    textDecoration: 'none',
+    transition: 'opacity .18s',
+    boxSizing: 'border-box',
   },
   disclaimer: {
-    color: "#64748b",
-    fontSize: "12px",
-    marginTop: "24px",
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
+    marginTop: '24px',
     lineHeight: 1.5,
   },
 };

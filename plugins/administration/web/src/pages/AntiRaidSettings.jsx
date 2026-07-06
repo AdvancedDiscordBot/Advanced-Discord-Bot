@@ -3,6 +3,7 @@ import { useOutletContext } from 'react-router-dom';
 import { Card, Toggle, Button, Select, Input } from '../components/UI';
 import { useApiFetch } from '../hooks/useApi';
 import { Shield, AlertTriangle, Clock, Users } from 'lucide-react';
+import { colors, fonts, radius, fontSize } from '../theme';
 
 export function AntiRaidSettings() {
   const { guildData, refreshGuild } = useOutletContext();
@@ -61,7 +62,7 @@ export function AntiRaidSettings() {
         <Card title="Raid Protection">
           <div style={styles.header}>
             <div style={styles.headerIcon}>
-              <Shield size={28} />
+              <Shield size={28} color={colors.accent} />
             </div>
             <div>
               <h3 style={styles.cardTitle}>Automatic Raid Detection</h3>
@@ -132,7 +133,7 @@ export function AntiRaidSettings() {
           <div style={styles.steps}>
             <div style={styles.step}>
               <div style={styles.stepIcon}>
-                <Users size={18} />
+                <Users size={18} color={colors.ink} />
               </div>
               <div style={styles.stepContent}>
                 <div style={styles.stepTitle}>Monitor Joins</div>
@@ -143,7 +144,7 @@ export function AntiRaidSettings() {
             </div>
             <div style={styles.step}>
               <div style={styles.stepIcon}>
-                <Clock size={18} />
+                <Clock size={18} color={colors.ink} />
               </div>
               <div style={styles.stepContent}>
                 <div style={styles.stepTitle}>Detect Anomaly</div>
@@ -154,7 +155,7 @@ export function AntiRaidSettings() {
             </div>
             <div style={styles.step}>
               <div style={styles.stepIcon}>
-                <AlertTriangle size={18} />
+                <AlertTriangle size={18} color={colors.ink} />
               </div>
               <div style={styles.stepContent}>
                 <div style={styles.stepTitle}>Auto Response</div>
@@ -184,14 +185,16 @@ const styles = {
     maxWidth: '800px',
   },
   pageTitle: {
-    color: '#f1f5f9',
-    fontSize: '24px',
-    fontWeight: 700,
+    color: colors.ink,
+    fontFamily: fonts.display,
+    fontSize: `${fontSize.heading}px`,
+    fontWeight: 400,
     marginBottom: '4px',
   },
   pageSubtitle: {
-    color: '#64748b',
-    fontSize: '14px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
     marginBottom: '24px',
   },
   grid: {
@@ -204,32 +207,34 @@ const styles = {
     alignItems: 'center',
     gap: '16px',
     paddingBottom: '16px',
-    borderBottom: '1px solid #334155',
+    borderBottom: `1.5px solid ${colors.hairline}`,
     marginBottom: '16px',
   },
   headerIcon: {
     width: '56px',
     height: '56px',
-    borderRadius: '12px',
-    background: 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)',
+    borderRadius: `${radius.card}px`,
+    background: colors.accentTint,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    color: '#fff',
   },
   cardTitle: {
-    color: '#f1f5f9',
-    fontSize: '16px',
-    fontWeight: 600,
+    color: colors.ink,
+    fontFamily: fonts.display,
+    fontSize: `${fontSize.title}px`,
+    fontWeight: 400,
     marginBottom: '4px',
   },
   cardDesc: {
-    color: '#64748b',
-    fontSize: '13px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
   },
   fieldDesc: {
-    color: '#64748b',
-    fontSize: '12px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
     marginTop: '-8px',
     marginBottom: '16px',
   },
@@ -246,9 +251,8 @@ const styles = {
   stepIcon: {
     width: '32px',
     height: '32px',
-    borderRadius: '8px',
-    background: '#334155',
-    color: '#f1f5f9',
+    borderRadius: `${radius.control}px`,
+    background: colors.surface2,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -258,14 +262,16 @@ const styles = {
     flex: 1,
   },
   stepTitle: {
-    color: '#f1f5f9',
-    fontSize: '14px',
+    color: colors.ink,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
     fontWeight: 500,
     marginBottom: '2px',
   },
   stepDesc: {
-    color: '#64748b',
-    fontSize: '13px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
   },
   actions: {
     display: 'flex',

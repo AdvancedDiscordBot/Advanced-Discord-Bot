@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useOutletContext } from "react-router-dom";
 import { Card, Button, Toggle, Input, Select } from "../components/UI";
 import { useApiFetch } from "../hooks/useApi";
+import { colors, fonts, radius, fontSize } from "../theme";
 import {
 	Package,
 	Search,
@@ -9,12 +10,8 @@ import {
 	Trash2,
 	ExternalLink,
 	Settings,
-	Check,
-	X,
-	AlertCircle,
 	Puzzle,
 	Shield,
-	Github,
 } from "lucide-react";
 
 export function Plugins() {
@@ -216,7 +213,7 @@ export function Plugins() {
 			) : installedPlugins.length === 0 ? (
 				<Card>
 					<div style={styles.empty}>
-						<Puzzle size={48} color="#64748b" />
+						<Puzzle size={48} color={colors.inkMuted} />
 						<p>No plugins installed</p>
 						<p style={styles.emptyHint}>
 							Browse the marketplace below to add plugins
@@ -247,7 +244,7 @@ export function Plugins() {
 			<h2 style={styles.sectionTitle}>Marketplace</h2>
 			<div style={styles.searchBar}>
 				<div style={styles.searchInput}>
-					<Search size={18} color="#64748b" />
+					<Search size={18} color={colors.inkMuted} />
 					<input
 						type="text"
 						placeholder="Search plugins..."
@@ -332,7 +329,6 @@ function PluginCard({
 	installing,
 	guildId,
 }) {
-	const [showDashboard, setShowDashboard] = useState(false);
 	const hasDashboard = plugin.manifest?.port || plugin.port;
 	const hasSettings = plugin.manifest?.configSchema || plugin.configSchema;
 
@@ -344,7 +340,7 @@ function PluginCard({
 		<Card style={styles.pluginCard}>
 			<div style={styles.pluginHeader}>
 				<div style={styles.pluginIcon}>
-					<Package size={24} />
+					<Package size={24} color={colors.accent} />
 				</div>
 				<div style={styles.pluginInfo}>
 					<h3 style={styles.pluginName}>{plugin.displayName || plugin.name}</h3>
@@ -352,7 +348,7 @@ function PluginCard({
 				</div>
 				{plugin.verified && (
 					<div style={styles.verifiedBadge}>
-						<Shield size={14} />
+						<Shield size={14} color={colors.cream} />
 					</div>
 				)}
 			</div>
@@ -422,7 +418,7 @@ function PluginSettingsModal({ plugin, settings, onClose, onChange, onSave }) {
 
 				{Object.keys(properties).length === 0 ? (
 					<div style={styles.noSettings}>
-						<Settings size={32} color="#64748b" />
+						<Settings size={32} color={colors.inkMuted} />
 						<p>This plugin doesn't have configurable settings</p>
 					</div>
 				) : (
@@ -452,12 +448,13 @@ function PluginSettingsModal({ plugin, settings, onClose, onChange, onSave }) {
 function renderSettingInput(key, prop, value, onChange) {
 	const baseInput = {
 		width: "100%",
-		padding: "10px 12px",
-		background: "#0f172a",
-		border: "1px solid #334155",
-		borderRadius: "8px",
-		color: "#e2e8f0",
-		fontSize: "14px",
+		padding: "11px 14px",
+		background: colors.cream,
+		border: `1.5px solid ${colors.hairlineStrong}`,
+		borderRadius: `${radius.control}px`,
+		color: colors.ink,
+		fontFamily: fonts.body,
+		fontSize: `${fontSize.meta}px`,
 		outline: "none",
 	};
 
@@ -519,24 +516,29 @@ const styles = {
 		gap: 12,
 	},
 	pageTitle: {
-		color: "#f1f5f9",
-		fontSize: "24px",
-		fontWeight: 700,
+		color: colors.ink,
+		fontFamily: fonts.display,
+		fontSize: `${fontSize.heading}px`,
+		fontWeight: 400,
 		marginBottom: 4,
 	},
 	pageSubtitle: {
-		color: "#64748b",
-		fontSize: "14px",
+		color: colors.inkMuted,
+		fontFamily: fonts.body,
+		fontSize: `${fontSize.meta}px`,
 	},
 	sectionTitle: {
-		color: "#f1f5f9",
-		fontSize: "18px",
-		fontWeight: 600,
+		color: colors.ink,
+		fontFamily: fonts.display,
+		fontSize: `${fontSize.title}px`,
+		fontWeight: 400,
 		marginBottom: 16,
 		marginTop: 32,
 	},
 	loading: {
-		color: "#64748b",
+		color: colors.inkMuted,
+		fontFamily: fonts.body,
+		fontSize: `${fontSize.meta}px`,
 		textAlign: "center",
 		padding: 40,
 	},
@@ -546,10 +548,12 @@ const styles = {
 		alignItems: "center",
 		gap: 12,
 		padding: 40,
-		color: "#64748b",
+		color: colors.inkMuted,
+		fontFamily: fonts.body,
+		fontSize: `${fontSize.meta}px`,
 	},
 	emptyHint: {
-		fontSize: "13px",
+		fontSize: `${fontSize.caption}px`,
 	},
 	pluginGrid: {
 		display: "grid",
@@ -569,40 +573,41 @@ const styles = {
 	pluginIcon: {
 		width: 48,
 		height: 48,
-		borderRadius: 12,
-		background: "linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)",
+		borderRadius: radius.card,
+		background: colors.accentTint,
 		display: "flex",
 		alignItems: "center",
 		justifyContent: "center",
-		color: "#fff",
 	},
 	pluginInfo: {
 		flex: 1,
 	},
 	pluginName: {
-		color: "#f1f5f9",
-		fontSize: "16px",
-		fontWeight: 600,
+		color: colors.ink,
+		fontFamily: fonts.display,
+		fontSize: `${fontSize.title}px`,
+		fontWeight: 400,
 		margin: 0,
 	},
 	pluginVersion: {
-		color: "#64748b",
-		fontSize: "12px",
+		color: colors.inkMuted,
+		fontFamily: fonts.body,
+		fontSize: `${fontSize.caption}px`,
 		margin: 0,
 	},
 	verifiedBadge: {
 		width: 24,
 		height: 24,
 		borderRadius: 6,
-		background: "#10B981",
+		background: colors.pineStrong,
 		display: "flex",
 		alignItems: "center",
 		justifyContent: "center",
-		color: "#fff",
 	},
 	pluginDesc: {
-		color: "#94a3b8",
-		fontSize: "13px",
+		color: colors.ink2,
+		fontFamily: fonts.body,
+		fontSize: `${fontSize.caption}px`,
 		lineHeight: 1.5,
 		margin: 0,
 	},
@@ -610,16 +615,18 @@ const styles = {
 		display: "flex",
 		alignItems: "center",
 		gap: 12,
-		fontSize: "12px",
-		color: "#64748b",
+		fontFamily: fonts.body,
+		fontSize: `${fontSize.caption}px`,
+		color: colors.inkMuted,
 	},
 	metaItem: {},
 	restartBadge: {
 		padding: "2px 8px",
-		background: "#F59E0B",
-		color: "#fff",
-		borderRadius: 4,
-		fontSize: "11px",
+		background: colors.warningTint,
+		color: colors.warningText,
+		borderRadius: radius.pill,
+		fontSize: '11px',
+		fontWeight: 500,
 	},
 	pluginActions: {
 		display: "flex",
@@ -638,16 +645,17 @@ const styles = {
 		alignItems: "center",
 		gap: 8,
 		padding: "10px 16px",
-		background: "#1e293b",
-		borderRadius: 8,
-		border: "1px solid #334155",
+		background: colors.cream,
+		borderRadius: radius.control,
+		border: `1.5px solid ${colors.hairlineStrong}`,
 	},
 	searchField: {
 		flex: 1,
 		background: "transparent",
 		border: "none",
-		color: "#e2e8f0",
-		fontSize: "14px",
+		color: colors.ink,
+		fontFamily: fonts.body,
+		fontSize: `${fontSize.meta}px`,
 		outline: "none",
 	},
 	modalOverlay: {
@@ -656,15 +664,16 @@ const styles = {
 		left: 0,
 		right: 0,
 		bottom: 0,
-		background: "rgba(0, 0, 0, 0.7)",
+		background: "rgba(30, 26, 20, 0.45)",
 		display: "flex",
 		alignItems: "center",
 		justifyContent: "center",
 		zIndex: 1000,
 	},
 	modal: {
-		background: "#1e293b",
-		borderRadius: 16,
+		background: colors.surface1,
+		border: `1.5px solid ${colors.hairline}`,
+		borderRadius: radius.card,
 		padding: 24,
 		width: "90%",
 		maxWidth: 500,
@@ -672,14 +681,16 @@ const styles = {
 		overflow: "auto",
 	},
 	modalTitle: {
-		color: "#f1f5f9",
-		fontSize: "20px",
-		fontWeight: 700,
+		color: colors.ink,
+		fontFamily: fonts.display,
+		fontSize: `${fontSize.heading}px`,
+		fontWeight: 400,
 		marginBottom: 8,
 	},
 	modalHint: {
-		color: "#64748b",
-		fontSize: "14px",
+		color: colors.inkMuted,
+		fontFamily: fonts.body,
+		fontSize: `${fontSize.meta}px`,
 		marginBottom: 20,
 	},
 	modalActions: {
@@ -693,22 +704,11 @@ const styles = {
 	},
 	label: {
 		display: "block",
-		color: "#94a3b8",
-		fontSize: "13px",
+		color: colors.inkMuted,
+		fontFamily: fonts.body,
+		fontSize: `${fontSize.caption}px`,
+		fontWeight: 500,
 		marginBottom: 6,
-	},
-	textarea: {
-		width: "100%",
-		minHeight: 100,
-		padding: "12px",
-		background: "#0f172a",
-		border: "1px solid #334155",
-		borderRadius: "8px",
-		color: "#e2e8f0",
-		fontSize: "14px",
-		resize: "vertical",
-		outline: "none",
-		fontFamily: "inherit",
 	},
 	settingsForm: {
 		display: "flex",
@@ -721,6 +721,8 @@ const styles = {
 		alignItems: "center",
 		gap: 12,
 		padding: 24,
-		color: "#64748b",
+		color: colors.inkMuted,
+		fontFamily: fonts.body,
+		fontSize: `${fontSize.meta}px`,
 	},
 };

@@ -4,6 +4,7 @@ import { Card, Button, Input, Select } from '../components/UI';
 import { useApi } from '../hooks/useApi';
 import { useApiFetch } from '../hooks/useApi';
 import { Coins } from 'lucide-react';
+import { colors, fonts, radius, fontSize } from '../theme';
 
 export function EconomySettings() {
   const { guildData, refreshGuild } = useOutletContext();
@@ -92,7 +93,7 @@ export function EconomySettings() {
         <Card title="Work Settings">
           <div style={styles.header}>
             <div style={styles.headerIcon}>
-              <Coins size={28} />
+              <Coins size={28} color={colors.accent} />
             </div>
             <div>
               <h3 style={styles.cardTitle}>Currency Settings</h3>
@@ -215,14 +216,16 @@ const styles = {
     maxWidth: '900px',
   },
   pageTitle: {
-    color: '#f1f5f9',
-    fontSize: '24px',
-    fontWeight: 700,
+    color: colors.ink,
+    fontFamily: fonts.display,
+    fontSize: `${fontSize.heading}px`,
+    fontWeight: 400,
     marginBottom: '4px',
   },
   pageSubtitle: {
-    color: '#64748b',
-    fontSize: '14px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
     marginBottom: '24px',
   },
   grid: {
@@ -235,32 +238,34 @@ const styles = {
     alignItems: 'center',
     gap: '16px',
     paddingBottom: '16px',
-    borderBottom: '1px solid #334155',
+    borderBottom: `1.5px solid ${colors.hairline}`,
     marginBottom: '16px',
   },
   headerIcon: {
     width: '56px',
     height: '56px',
-    borderRadius: '12px',
-    background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
+    borderRadius: `${radius.card}px`,
+    background: colors.accentTint,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    color: '#fff',
   },
   cardTitle: {
-    color: '#f1f5f9',
-    fontSize: '16px',
-    fontWeight: 600,
+    color: colors.ink,
+    fontFamily: fonts.display,
+    fontSize: `${fontSize.title}px`,
+    fontWeight: 400,
     marginBottom: '4px',
   },
   cardDesc: {
-    color: '#64748b',
-    fontSize: '13px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
   },
   fieldDesc: {
-    color: '#64748b',
-    fontSize: '12px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
     marginTop: '-8px',
     marginBottom: '16px',
   },
@@ -274,8 +279,9 @@ const styles = {
     marginBottom: '16px',
   },
   shopCount: {
-    color: '#64748b',
-    fontSize: '13px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
   },
   shopList: {
     display: 'flex',
@@ -287,27 +293,31 @@ const styles = {
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: '12px',
-    background: '#0f172a',
-    borderRadius: '8px',
-    border: '1px solid #334155',
+    background: colors.cream,
+    borderRadius: `${radius.control}px`,
+    border: `1.5px solid ${colors.hairline}`,
   },
   shopItemInfo: {
     flex: 1,
   },
   shopItemName: {
-    color: '#f1f5f9',
-    fontSize: '14px',
+    color: colors.ink,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
     fontWeight: 500,
     display: 'block',
   },
   shopItemPrice: {
-    color: '#10B981',
-    fontSize: '12px',
+    color: colors.accent,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
     marginTop: '2px',
     display: 'block',
   },
   empty: {
-    color: '#64748b',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
     textAlign: 'center',
     padding: '24px',
   },

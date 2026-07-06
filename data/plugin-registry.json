@@ -1,0 +1,63 @@
+{
+  "plugins": [
+    {
+      "name": "vaish-plugin-economy",
+      "displayName": "Economy System",
+      "description": "Complete economy system with coins, work commands, shop, and leaderboards",
+      "author": "VAISH",
+      "version": "1.0.0",
+      "category": "features",
+      "permissions": [
+        "db.read",
+        "db.write",
+        "commands.register"
+      ],
+      "requiresRestart": false,
+      "verified": true,
+      "npmPackage": "vaish-plugin-economy"
+    },
+    {
+      "name": "vaish-plugin-moderation",
+      "displayName": "Advanced Moderation",
+      "description": "Auto-mod, logs, slowmode, and advanced moderation tools",
+      "author": "VAISH",
+      "version": "1.0.0",
+      "category": "moderation",
+      "permissions": [
+        "db.read",
+        "db.write",
+        "commands.register"
+      ],
+      "requiresRestart": false,
+      "verified": true,
+      "npmPackage": "vaish-plugin-moderation"
+    },
+    {
+      "name": "adb-plugin-reminders",
+      "displayName": "Reminders",
+      "version": "1.0.1",
+      "description": "Adds /remind to set, list, and cancel personal reminders. Delivers via DM with a channel fallback.",
+      "author": "DeadIndian",
+      "main": "index.js",
+      "requiresRestart": false,
+      "permissions": [
+        "db.read",
+        "db.write",
+        "commands.register"
+      ],
+      "configSchema": {
+        "type": "object",
+        "properties": {
+          "maxPerUser": {
+            "type": "number",
+            "default": 25,
+            "minimum": 1,
+            "maximum": 200,
+            "description": "Max active reminders a single user can have per server"
+          }
+        }
+      }
+    }
+  ],
+  "lastFetch": 1783095359267
+}

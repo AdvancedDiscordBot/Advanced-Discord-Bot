@@ -3,6 +3,7 @@ import { useOutletContext } from 'react-router-dom';
 import { Card, Toggle, Button, Select, Input } from '../components/UI';
 import { useApiFetch } from '../hooks/useApi';
 import { Zap } from 'lucide-react';
+import { colors, fonts, radius, fontSize } from '../theme';
 
 export function XPSettings() {
   const { guildData, refreshGuild } = useOutletContext();
@@ -86,7 +87,7 @@ export function XPSettings() {
         <Card title="XP Settings">
           <div style={styles.header}>
             <div style={styles.headerIcon}>
-              <Zap size={28} />
+              <Zap size={28} color={colors.accent} />
             </div>
             <div>
               <h3 style={styles.cardTitle}>Experience System</h3>
@@ -209,14 +210,16 @@ const styles = {
     maxWidth: '800px',
   },
   pageTitle: {
-    color: '#f1f5f9',
-    fontSize: '24px',
-    fontWeight: 700,
+    color: colors.ink,
+    fontFamily: fonts.display,
+    fontSize: `${fontSize.heading}px`,
+    fontWeight: 400,
     marginBottom: '4px',
   },
   pageSubtitle: {
-    color: '#64748b',
-    fontSize: '14px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
     marginBottom: '24px',
   },
   grid: {
@@ -229,39 +232,41 @@ const styles = {
     alignItems: 'center',
     gap: '16px',
     paddingBottom: '16px',
-    borderBottom: '1px solid #334155',
+    borderBottom: `1.5px solid ${colors.hairline}`,
     marginBottom: '8px',
   },
   headerIcon: {
     width: '56px',
     height: '56px',
-    borderRadius: '12px',
-    background: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
+    borderRadius: `${radius.card}px`,
+    background: colors.accentTint,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    color: '#fff',
   },
   cardTitle: {
-    color: '#f1f5f9',
-    fontSize: '16px',
-    fontWeight: 600,
+    color: colors.ink,
+    fontFamily: fonts.display,
+    fontSize: `${fontSize.title}px`,
+    fontWeight: 400,
     marginBottom: '4px',
   },
   cardDesc: {
-    color: '#64748b',
-    fontSize: '13px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
   },
   fieldDesc: {
-    color: '#64748b',
-    fontSize: '12px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
     marginTop: '-8px',
     marginBottom: '12px',
   },
   rewardsSection: {
     marginTop: '16px',
     paddingTop: '16px',
-    borderTop: '1px solid #334155',
+    borderTop: `1.5px solid ${colors.hairline}`,
   },
   rewardsList: {
     display: 'flex',

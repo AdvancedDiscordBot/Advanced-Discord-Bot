@@ -4,7 +4,34 @@ const Database = require("./database");
 class TaskScheduler {
   constructor(client) {
     this.client = client;
+    this.pluginTasks = new Map();
     this.setupTasks();
+  }
+
+  // Generic cron API exposed to plugins via ctx.scheduler.schedule(name, cronExpr, fn)
+  schedule(name, cronExpression, fn) {
+    if (this.pluginTasks.has(name)) {
+      this.pluginTasks.get(name).stop();
+    }
+
+    const task = cron.schedule(cronExpression, async () => {
+      try {
+        await fn();
+      } catch (error) {
+        console.error(`Error in plugin scheduled task "${name}":`, error);
+      }
+    });
+
+    this.pluginTasks.set(name, task);
+    return task;
+  }
+
+  unschedule(name) {
+    const task = this.pluginTasks.get(name);
+    if (!task) return false;
+    task.stop();
+    this.pluginTasks.delete(name);
+    return true;
   }
 
   setupTasks() {

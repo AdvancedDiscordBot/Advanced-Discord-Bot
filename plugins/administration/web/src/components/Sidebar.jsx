@@ -12,6 +12,7 @@ import {
   Settings,
   Puzzle,
 } from 'lucide-react';
+import { colors, fonts, radius, fontSize } from '../theme';
 
 const navItems = [
   { to: '', icon: LayoutDashboard, label: 'Dashboard' },
@@ -60,6 +61,13 @@ export function Sidebar({ guild }) {
           );
         })}
       </nav>
+
+      <div style={styles.footer}>
+        <div style={styles.hostingCard}>
+          Want managed hosting? DM{' '}
+          <span style={styles.hostingHandle}>@deadindian</span> on Discord.
+        </div>
+      </div>
     </aside>
   );
 }
@@ -67,25 +75,27 @@ export function Sidebar({ guild }) {
 const styles = {
   sidebar: {
     width: '240px',
-    background: 'linear-gradient(180deg, #1e293b 0%, #0f172a 100%)',
-    borderRight: '1px solid #334155',
+    background: colors.surface1,
+    borderRight: `1.5px solid ${colors.hairline}`,
     display: 'flex',
     flexDirection: 'column',
     flexShrink: 0,
   },
   selectPrompt: {
     padding: '24px 16px',
-    color: '#64748b',
-    fontSize: '14px',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
     textAlign: 'center',
   },
   guildInfo: {
     padding: '16px',
-    borderBottom: '1px solid #334155',
+    borderBottom: `1.5px solid ${colors.hairline}`,
   },
   guildName: {
-    color: '#f1f5f9',
-    fontSize: '16px',
+    color: colors.ink,
+    fontFamily: fonts.display,
+    fontSize: `${fontSize.title}px`,
     fontWeight: 600,
     marginBottom: '4px',
     whiteSpace: 'nowrap',
@@ -93,9 +103,9 @@ const styles = {
     textOverflow: 'ellipsis',
   },
   guildId: {
-    color: '#64748b',
+    color: colors.inkMuted,
+    fontFamily: fonts.body,
     fontSize: '11px',
-    fontFamily: 'monospace',
   },
   nav: {
     flex: 1,
@@ -107,15 +117,36 @@ const styles = {
     alignItems: 'center',
     gap: '12px',
     padding: '10px 12px',
-    borderRadius: '8px',
-    color: '#94a3b8',
+    borderRadius: `${radius.control}px`,
+    color: colors.ink2,
     textDecoration: 'none',
-    fontSize: '14px',
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
+    fontWeight: 400,
     marginBottom: '2px',
-    transition: 'all 0.2s',
+    transition: 'background .18s, color .18s',
   },
   navLinkActive: {
-    background: 'linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)',
-    color: '#ffffff',
+    background: colors.accentTint,
+    color: colors.accentOnTint,
+    fontWeight: 500,
+  },
+  footer: {
+    padding: '12px',
+    borderTop: `1.5px solid ${colors.hairline}`,
+  },
+  hostingCard: {
+    background: colors.accentTint,
+    borderRadius: `${radius.card}px`,
+    padding: '10px 12px',
+    color: colors.accentOnTint,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
+    fontWeight: 400,
+    lineHeight: 1.4,
+  },
+  hostingHandle: {
+    color: colors.accent,
+    fontWeight: 700,
   },
 };
