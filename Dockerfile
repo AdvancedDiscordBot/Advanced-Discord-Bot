@@ -20,7 +20,7 @@ COPY . .
 RUN node scripts/build-plugins.js
 
 # Expose the single unified port 3210
-EXPOSE 3210
+EXPOSE 3000
 
 # Run the bot and web dashboard
 CMD ["npm", "start"]

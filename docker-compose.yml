@@ -1,15 +1,17 @@
-name: adb
+name: adb-prod
 
 services:
   mongo:
     image: mongo:7
-    container_name: adb-mongo
+    container_name: adb-prod-mongo
     restart: unless-stopped
     environment:
       MONGO_INITDB_ROOT_USERNAME: advance
       MONGO_INITDB_ROOT_PASSWORD: bot
+    ports:
+      - "27018:27017"
     volumes:
-      - mongo-data:/data/db
+      - mongo-prod-data:/data/db
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.runCommand({ ping: 1 })"]
       interval: 10s
@@ -22,10 +24,10 @@ services:
       dockerfile: Dockerfile
       args:
         NODE_ENV: production
-    container_name: adb-bot
+    container_name: adb-prod-bot
     restart: unless-stopped
     ports:
-      - "3210:3210"
+      - "3000:3000"
     depends_on:
       mongo:
         condition: service_healthy
@@ -35,4 +37,4 @@ services:
     command: ["npm", "start"]
 
 volumes:
-  mongo-data:
+  mongo-prod-data:
