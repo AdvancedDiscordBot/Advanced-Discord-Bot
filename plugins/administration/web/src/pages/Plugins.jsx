@@ -12,6 +12,8 @@ import {
 	Settings,
 	Puzzle,
 	Shield,
+	Info,
+	X,
 } from "lucide-react";
 
 export function Plugins() {
@@ -32,6 +34,9 @@ export function Plugins() {
 	const [customPackage, setCustomPackage] = useState("");
 	const [selectedPlugin, setSelectedPlugin] = useState(null);
 	const [pluginSettings, setPluginSettings] = useState({});
+	const [brochurePlugin, setBrochurePlugin] = useState(null);
+	const [brochureContent, setBrochureContent] = useState("");
+	const [brochureLoading, setBrochureLoading] = useState(false);
 
 	const { request } = useApiFetch();
 
@@ -146,6 +151,20 @@ export function Plugins() {
 		setCustomPackage("");
 	}
 
+	async function openBrochure(plugin) {
+		setBrochurePlugin(plugin);
+		setBrochureContent("");
+		setBrochureLoading(true);
+		try {
+			const res = await request(`/api/plugins/${plugin.name}/brochure`);
+			setBrochureContent(res?.content || "");
+		} catch (err) {
+			console.error("Failed to load brochure:", err);
+		} finally {
+			setBrochureLoading(false);
+		}
+	}
+
 	async function loadPluginSettings(pluginName) {
 		try {
 			const res = await request(`/api/plugins/config/${pluginName}?guildId=${guildId}`);
@@ -235,6 +254,7 @@ export function Plugins() {
 								setSelectedPlugin(plugin);
 								loadPluginSettings(plugin.name);
 							}}
+							onAbout={() => openBrochure(plugin)}
 							guildId={guildId}
 						/>
 					))}
@@ -315,6 +335,15 @@ export function Plugins() {
 					onSave={() => savePluginSettings(selectedPlugin.name)}
 				/>
 			)}
+
+			{brochurePlugin && (
+				<BrochureModal
+					plugin={brochurePlugin}
+					content={brochureContent}
+					loading={brochureLoading}
+					onClose={() => setBrochurePlugin(null)}
+				/>
+			)}
 		</div>
 	);
 }
@@ -326,6 +355,7 @@ function PluginCard({
 	onUninstall,
 	onInstall,
 	onSettings,
+	onAbout,
 	installing,
 	guildId,
 }) {
@@ -384,6 +414,16 @@ function PluginCard({
 							Dashboard
 						</Button>
 					)}
+					{plugin.hasBrochure && (
+						<Button
+							variant="secondary"
+							size="small"
+							onClick={onAbout}
+						>
+							<Info size={14} style={{ marginRight: 4 }} />
+							About
+						</Button>
+					)}
 					<div style={{ flex: 1 }} />
 					<Button
 						variant="danger"
@@ -438,6 +478,140 @@ function PluginSettingsModal({ plugin, settings, onClose, onChange, onSave }) {
 					</Button>
 					{Object.keys(properties).length > 0 && (
 						<Button onClick={onSave}>Save Settings</Button>
+					)}
+				</div>
+			</div>
+		</div>
+	);
+}
+
+function parseMarkdown(md) {
+	const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+	const inline = (s) => {
+		s = esc(s);
+		s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+		s = s.replace(/\*(.+?)\*/g, "<em>$1</em>");
+		s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
+		s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+		return s;
+	};
+
+	const lines = md.split("\n");
+	let out = "";
+	let inCode = false;
+	let codeBuf = [];
+	let inTable = false;
+	let tableHead = true;
+	let inList = false;
+
+	const closeList = () => { if (inList) { out += "</ul>"; inList = false; } };
+	const closeTable = () => { if (inTable) { out += "</tbody></table>"; inTable = false; tableHead = true; } };
+
+	for (const line of lines) {
+		if (line.startsWith("```")) {
+			if (inCode) {
+				out += `<pre><code>${esc(codeBuf.join("\n"))}</code></pre>`;
+				codeBuf = [];
+				inCode = false;
+			} else {
+				closeList();
+				closeTable();
+				inCode = true;
+			}
+			continue;
+		}
+		if (inCode) { codeBuf.push(line); continue; }
+
+		if (line.startsWith("|")) {
+			if (line.match(/^\|[\s\-|:]+\|$/)) {
+				// separator — close thead, open tbody
+				if (inTable && tableHead) {
+					out += "</tr></thead><tbody>";
+					tableHead = false;
+				}
+				continue;
+			}
+			const cells = line.split("|").slice(1, -1).map((c) => c.trim());
+			if (!inTable) {
+				closeList();
+				out += "<table><thead><tr>";
+				out += cells.map((c) => `<th>${inline(c)}</th>`).join("");
+				inTable = true;
+				tableHead = true;
+			} else if (tableHead) {
+				out += cells.map((c) => `<th>${inline(c)}</th>`).join("");
+			} else {
+				out += "<tr>" + cells.map((c) => `<td>${inline(c)}</td>`).join("") + "</tr>";
+			}
+			continue;
+		}
+		closeTable();
+
+		if (line.match(/^[-*] /)) {
+			if (!inList) { out += "<ul>"; inList = true; }
+			out += `<li>${inline(line.slice(2))}</li>`;
+			continue;
+		}
+		closeList();
+
+		if (line.startsWith("### ")) { out += `<h3>${inline(line.slice(4))}</h3>`; continue; }
+		if (line.startsWith("## ")) { out += `<h2>${inline(line.slice(3))}</h2>`; continue; }
+		if (line.startsWith("# ")) { out += `<h1>${inline(line.slice(2))}</h1>`; continue; }
+		if (line.startsWith("> ")) { out += `<blockquote>${inline(line.slice(2))}</blockquote>`; continue; }
+		if (line.trim() === "") { out += "<br>"; continue; }
+		out += `<p>${inline(line)}</p>`;
+	}
+	closeList();
+	closeTable();
+	return out;
+}
+
+function BrochureModal({ plugin, content, loading, onClose }) {
+	const html = content ? parseMarkdown(content) : "";
+	const title = plugin.displayName || plugin.name;
+
+	return (
+		<div style={styles.modalOverlay} onClick={onClose}>
+			<div style={styles.brochureModal} onClick={(e) => e.stopPropagation()}>
+				<style>{`
+					.brochure-body h1 { font-family: 'Cormorant Garamond', serif; font-size: 28px; font-weight: 400; margin: 0 0 8px; color: var(--ink); }
+					.brochure-body h2 { font-family: 'Cormorant Garamond', serif; font-size: 21px; font-weight: 400; margin: 24px 0 8px; color: var(--ink); border-bottom: 1px solid var(--hairline); padding-bottom: 6px; }
+					.brochure-body h3 { font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 600; margin: 20px 0 6px; color: var(--ink); text-transform: uppercase; letter-spacing: 0.04em; }
+					.brochure-body p { font-family: 'DM Sans', sans-serif; font-size: 14px; line-height: 1.6; color: var(--ink2); margin: 0 0 10px; }
+					.brochure-body ul { padding-left: 20px; margin: 0 0 12px; }
+					.brochure-body li { font-family: 'DM Sans', sans-serif; font-size: 14px; line-height: 1.7; color: var(--ink2); }
+					.brochure-body strong { font-weight: 600; color: var(--ink); }
+					.brochure-body em { font-style: italic; }
+					.brochure-body code { font-family: 'Fira Code', 'Fira Mono', 'Courier New', monospace; font-size: 13px; background: var(--surface2); padding: 2px 6px; border-radius: 4px; color: var(--accent); }
+					.brochure-body pre { background: var(--surface2); border-radius: 8px; padding: 16px; overflow-x: auto; margin: 12px 0; }
+					.brochure-body pre code { background: none; padding: 0; color: var(--ink); }
+					.brochure-body blockquote { border-left: 3px solid var(--accent); margin: 12px 0; padding: 8px 16px; background: var(--accentTint); border-radius: 0 6px 6px 0; }
+					.brochure-body blockquote p { margin: 0; color: var(--ink2); }
+					.brochure-body table { width: 100%; border-collapse: collapse; margin: 12px 0; font-family: 'DM Sans', sans-serif; font-size: 13px; }
+					.brochure-body th { text-align: left; padding: 8px 12px; background: var(--surface2); color: var(--ink); font-weight: 600; border-bottom: 1px solid var(--hairlineStrong); }
+					.brochure-body td { padding: 8px 12px; color: var(--ink2); border-bottom: 1px solid var(--hairline); }
+					.brochure-body a { color: var(--accent); text-decoration: none; }
+					.brochure-body a:hover { text-decoration: underline; }
+					.brochure-body br { display: block; height: 4px; content: ''; }
+				`}</style>
+				<div style={styles.brochureHeader}>
+					<div>
+						<h2 style={styles.brochureTitle}>{title}</h2>
+						{plugin.version && <span style={styles.brochureVersion}>v{plugin.version}</span>}
+					</div>
+					<button style={styles.brochureClose} onClick={onClose}>
+						<X size={18} />
+					</button>
+				</div>
+				<div style={styles.brochureBody}>
+					{loading ? (
+						<div style={styles.brochureLoading}>Loading...</div>
+					) : (
+						<div
+							className="brochure-body"
+							// eslint-disable-next-line react/no-danger
+							dangerouslySetInnerHTML={{ __html: html }}
+						/>
 					)}
 				</div>
 			</div>
@@ -724,5 +898,58 @@ const styles = {
 		color: colors.inkMuted,
 		fontFamily: fonts.body,
 		fontSize: `${fontSize.meta}px`,
+	},
+	brochureModal: {
+		background: colors.surface1,
+		border: `1.5px solid ${colors.hairline}`,
+		borderRadius: radius.card,
+		width: "90%",
+		maxWidth: 720,
+		maxHeight: "85vh",
+		display: "flex",
+		flexDirection: "column",
+		overflow: "hidden",
+	},
+	brochureHeader: {
+		display: "flex",
+		justifyContent: "space-between",
+		alignItems: "flex-start",
+		padding: "20px 24px 16px",
+		borderBottom: `1px solid ${colors.hairline}`,
+		flexShrink: 0,
+	},
+	brochureTitle: {
+		color: colors.ink,
+		fontFamily: fonts.display,
+		fontSize: `${fontSize.heading}px`,
+		fontWeight: 400,
+		margin: 0,
+	},
+	brochureVersion: {
+		color: colors.inkMuted,
+		fontFamily: fonts.body,
+		fontSize: `${fontSize.caption}px`,
+	},
+	brochureClose: {
+		background: "none",
+		border: "none",
+		cursor: "pointer",
+		color: colors.inkMuted,
+		padding: 4,
+		display: "flex",
+		alignItems: "center",
+		borderRadius: radius.control,
+	},
+	brochureBody: {
+		padding: "20px 24px",
+		overflowY: "auto",
+		flex: 1,
+	},
+	brochureLoading: {
+		color: colors.inkMuted,
+		fontFamily: fonts.body,
+		fontSize: `${fontSize.meta}px`,
+		textAlign: "center",
+		padding: 40,
 	},
 };

@@ -1,25 +1,9 @@
 const { Events, EmbedBuilder, AttachmentBuilder } = require("discord.js");
 const Database = require("../utils/database");
-const { checkRaidDetection } = require("../commands/antimodules/antiraid");
 
 module.exports = {
   name: Events.GuildMemberAdd,
   async execute(member, client) {
-    // 🛡️ Check for anti-raid detection first
-    try {
-      const db = await Database.getInstance();
-      const raidDetected = await checkRaidDetection(member.guild, member, db);
-
-      if (raidDetected) {
-        console.log(
-          `🚨 Raid detected in ${member.guild.name} - ${member.user.tag} was part of rapid joining`
-        );
-        return; // Don't send welcome message if user was kicked/banned for raiding
-      }
-    } catch (error) {
-      console.error("❌ Error checking anti-raid:", error);
-    }
-
     // 🎂 Check for birthday today
     try {
       const db = await Database.getInstance();

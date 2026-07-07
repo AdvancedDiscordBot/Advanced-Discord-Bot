@@ -513,6 +513,14 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		return { categories: registry.getCategories() };
 	});
 
+	fastify.get("/api/plugins/:name/brochure", async (request, reply) => {
+		const content = pluginManager.getBrochure(request.params.name);
+		if (content === null) {
+			return reply.code(404).send({ error: "No brochure found" });
+		}
+		return { content };
+	});
+
 	fastify.get("/api/plugins/registry/:packageName", async (request, reply) => {
 		const plugin = await registry.getPluginDetails(request.params.packageName);
 		if (!plugin) {

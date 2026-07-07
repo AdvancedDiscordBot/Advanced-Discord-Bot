@@ -487,6 +487,8 @@ class PluginManager {
 	getPluginList() {
 		return Array.from(this.plugins.values()).map((plugin) => ({
 			name: plugin.name,
+			displayName: plugin.manifest?.displayName,
+			author: plugin.manifest?.author,
 			version: plugin.manifest?.version,
 			description: plugin.manifest?.description,
 			requiresRestart: !!plugin.manifest?.requiresRestart,
@@ -495,7 +497,16 @@ class PluginManager {
 			lastError: plugin.lastError,
 			overrides: Array.from(plugin.overrides.keys()),
 			commands: Array.from(plugin.commandNames),
+			hasBrochure: !!(plugin.path && fs.existsSync(path.join(plugin.path, "Brochure.md"))),
 		}));
+	}
+
+	getBrochure(pluginName) {
+		const plugin = this.plugins.get(pluginName);
+		if (!plugin?.path) return null;
+		const brochurePath = path.join(plugin.path, "Brochure.md");
+		if (!fs.existsSync(brochurePath)) return null;
+		return fs.readFileSync(brochurePath, "utf8");
 	}
 }
 

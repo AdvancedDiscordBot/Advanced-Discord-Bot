@@ -74,7 +74,9 @@ function loadPluginCommands(pluginsDir) {
 }
 
 // Load all commands
-loadCommandsFromDirectory(commandsPath);
+if (existsSync(commandsPath)) {
+	loadCommandsFromDirectory(commandsPath);
+}
 loadPluginCommands(pluginsPath);
 
 // 🌐 Initialize REST client
