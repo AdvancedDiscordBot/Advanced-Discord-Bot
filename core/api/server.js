@@ -26,6 +26,13 @@ function parseOwnerIds() {
 		.filter(Boolean);
 }
 
+// Only allow installing/updating ADB plugin packages. Blocks shell metacharacters
+// and non-plugin packages before the name ever reaches npm.
+const PLUGIN_PACKAGE_RE = /^(@[\w.-]+\/)?adb-plugin-[\w.-]+(@[\w.~+-]+)?$/;
+function isValidPluginPackage(name) {
+	return typeof name === "string" && PLUGIN_PACKAGE_RE.test(name);
+}
+
 function hasGuildPermission(guild) {
 	if (guild.owner) return true;
 	const permissions = Number(guild.permissions || 0);
@@ -421,6 +428,15 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		}
 	});
 
+	const requireOwner = (request, reply) => {
+		const ownerIds = parseOwnerIds();
+		if (!ownerIds.includes(request.session.user?.id)) {
+			reply.code(403).send({ error: "Only bot owners can manage plugins" });
+			return false;
+		}
+		return true;
+	};
+
 	const requireGuildAccess = (request, reply) => {
 		const guildId = request.params.guildId;
 		const ownerIds = request.session.ownerIds || [];
@@ -445,9 +461,15 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 	}));
 
 	fastify.post("/api/plugins/install", async (request, reply) => {
+		if (!requireOwner(request, reply)) return;
 		const { packageName } = request.body || {};
 		if (!packageName) {
 			return reply.code(400).send({ error: "Package name required" });
+		}
+		if (!isValidPluginPackage(packageName)) {
+			return reply.code(400).send({
+				error: "Invalid package name. Must be an adb-plugin-* package.",
+			});
 		}
 
 		const result = await runNpmInstall(
@@ -464,6 +486,7 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 	});
 
 	fastify.post("/api/plugins/uninstall", async (request, reply) => {
+		if (!requireOwner(request, reply)) return;
 		const { packageName, confirm } = request.body || {};
 		if (!packageName) {
 			return reply.code(400).send({ error: "Package name required" });
@@ -495,7 +518,14 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 			await pluginManager.unloadPlugin(plugin.name, "uninstall");
 		}
 
-		const result = await runNpmUninstall(packageName, logger, broadcastInstallLog);
+		const npmTarget = plugin?.npmPackage || packageName;
+		if (!isValidPluginPackage(npmTarget)) {
+			return reply.code(400).send({
+				error: "Invalid package name. Must be an adb-plugin-* package.",
+			});
+		}
+
+		const result = await runNpmUninstall(npmTarget, logger, broadcastInstallLog);
 		if (!result.ok) {
 			return reply.code(500).send({ error: result.error });
 		}
@@ -506,6 +536,7 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 	});
 
 	fastify.post("/api/plugins/unload/:name", async (request, reply) => {
+		if (!requireOwner(request, reply)) return;
 		const ok = await pluginManager.unloadPlugin(request.params.name, "api");
 		if (!ok) {
 			return reply.code(404).send({ error: "Plugin not unloaded" });
@@ -515,6 +546,7 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 	});
 
 	fastify.post("/api/plugins/reload/:name", async (request, reply) => {
+		if (!requireOwner(request, reply)) return;
 		const ok = await pluginManager.reloadPlugin(request.params.name);
 		if (!ok) {
 			return reply.code(409).send({ error: "Plugin not reloadable" });
@@ -546,6 +578,7 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 	});
 
 	fastify.post("/api/plugins/update", async (request, reply) => {
+		if (!requireOwner(request, reply)) return;
 		const { packageName, confirm } = request.body || {};
 		if (!packageName) {
 			return reply.code(400).send({ error: "Package name required" });
@@ -573,6 +606,9 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		}
 
 		const target = `${details.npmPackage}@${details.version}`;
+		if (!isValidPluginPackage(target)) {
+			return reply.code(400).send({ error: "Invalid package in registry entry." });
+		}
 		const result = await runNpmInstall(
 			target,
 			pluginManager,
@@ -910,7 +946,6 @@ async function runNpmInstallInternal(packageName, emitLog) {
 	return new Promise((resolve) => {
 		const child = spawn("npm", ["install", packageName], {
 			cwd: process.cwd(),
-			shell: true,
 		});
 
 		child.stdout.on("data", (data) => {
@@ -950,7 +985,6 @@ async function runNpmUninstall(packageName, logger, emitLog) {
 	return new Promise((resolve) => {
 		const child = spawn("npm", ["uninstall", packageName], {
 			cwd: process.cwd(),
-			shell: true,
 		});
 
 		child.stdout.on("data", (data) => {

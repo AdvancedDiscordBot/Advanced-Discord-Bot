@@ -516,7 +516,7 @@ class PluginManager {
 			name: plugin.name,
 			displayName: plugin.manifest?.displayName,
 			author: plugin.manifest?.author,
-			version: plugin.manifest?.version || "0.0.0",
+			version: plugin.manifest?.version || null,
 			description: plugin.manifest?.description,
 			requiresRestart: !!plugin.manifest?.requiresRestart,
 			category: plugin.manifest?.category || null,
