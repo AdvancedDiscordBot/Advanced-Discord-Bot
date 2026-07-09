@@ -492,6 +492,8 @@ class PluginManager {
 			version: plugin.manifest?.version,
 			description: plugin.manifest?.description,
 			requiresRestart: !!plugin.manifest?.requiresRestart,
+			category: plugin.manifest?.category || null,
+			npmPackage: plugin.manifest?.npmPackage || null,
 			enabled: plugin.enabled,
 			hotReloadEligible: plugin.hotReloadEligible,
 			lastError: plugin.lastError,

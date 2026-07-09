@@ -9,6 +9,7 @@ const { WebSocketServer } = require("ws");
 const { spawn, fork } = require("child_process");
 const { createLogger } = require("../logger");
 const { registry } = require("../pluginRegistry");
+const adminPlugin = require("../adminPlugin");
 
 const ADMIN_PERMISSION = 0x8;
 const MANAGE_GUILD_PERMISSION = 0x20;
@@ -401,6 +402,8 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		};
 	});
 
+	await adminPlugin.register(fastify, { client, db });
+
 	fastify.addHook("preHandler", async (request, reply) => {
 		if (!request.url.startsWith("/api")) return;
 		if (request.url === "/api/public-stats") return; // Allow public landing page stats
@@ -702,6 +705,19 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 				inProgress: tickets.filter((t) => t.status === "in_progress").length,
 				closed: tickets.filter((t) => t.status === "closed").length,
 			},
+		};
+	});
+
+	fastify.get("/api/guild/:guildId/server-stats", async (request, reply) => {
+		if (!requireGuildAccess(request, reply)) return;
+		const guild = client.guilds.cache.get(request.params.guildId);
+		if (!guild) return reply.code(404).send({ error: "Guild not found" });
+		return {
+			members: guild.memberCount || 0,
+			botPing: client.ws.ping || 0,
+			pluginCount: pluginManager.getPluginList().filter((p) => p.enabled).length,
+			commandCount: client.commands.size || 0,
+			uptime: process.uptime(),
 		};
 	});
 

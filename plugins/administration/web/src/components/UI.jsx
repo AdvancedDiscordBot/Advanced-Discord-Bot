@@ -312,3 +312,111 @@ const styles = {
     cursor: 'not-allowed',
   },
 };
+
+export function Badge({ label, variant = 'default' }) {
+  const variantMap = {
+    default: { bg: colors.surface2,    text: colors.inkMuted   },
+    success: { bg: colors.successTint, text: colors.successText },
+    warning: { bg: colors.warningTint, text: colors.warningText },
+    danger:  { bg: colors.dangerTint,  text: colors.dangerText  },
+  };
+  const v = variantMap[variant] || variantMap.default;
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center',
+      padding: '2px 8px', borderRadius: `${radius.pill}px`,
+      background: v.bg, color: v.text,
+      fontFamily: fonts.body, fontSize: '11px', fontWeight: 600,
+      letterSpacing: '0.04em', textTransform: 'uppercase', whiteSpace: 'nowrap',
+    }}>
+      {label}
+    </span>
+  );
+}
+
+export function StatusDot({ status }) {
+  const colorMap = {
+    ok:       colors.pine,
+    error:    colors.danger,
+    disabled: colors.inkFaint,
+  };
+  return (
+    <span style={{
+      display: 'inline-block', width: '8px', height: '8px',
+      borderRadius: '50%', background: colorMap[status] || colorMap.disabled,
+      flexShrink: 0,
+    }} />
+  );
+}
+
+export function EmptyState({ icon, title, body, action }) {
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center',
+      justifyContent: 'center', padding: '48px 24px', textAlign: 'center',
+      color: colors.inkMuted,
+    }}>
+      {icon && <div style={{ marginBottom: '16px', opacity: 0.5 }}>{icon}</div>}
+      <div style={{ fontFamily: fonts.display, fontSize: `${fontSize.title}px`, fontWeight: 400, color: colors.ink, marginBottom: '8px' }}>
+        {title}
+      </div>
+      {body && (
+        <p style={{ fontFamily: fonts.body, fontSize: `${fontSize.meta}px`, color: colors.inkMuted, maxWidth: '360px', lineHeight: 1.6, marginBottom: action ? '24px' : 0 }}>
+          {body}
+        </p>
+      )}
+      {action}
+    </div>
+  );
+}
+
+export function SlideOver({ open, onClose, title, children }) {
+  React.useEffect(() => {
+    if (!open) return;
+    const handler = (e) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <>
+      <div
+        onClick={onClose}
+        style={{
+          position: 'fixed', inset: 0, background: 'rgba(30,26,20,0.45)',
+          zIndex: 200, backdropFilter: 'blur(2px)',
+        }}
+      />
+      <div style={{
+        position: 'fixed', top: 0, right: 0, bottom: 0, width: '480px', maxWidth: '100vw',
+        background: colors.cream, borderLeft: `1.5px solid ${colors.hairline}`,
+        zIndex: 201, display: 'flex', flexDirection: 'column',
+        boxShadow: '-8px 0 32px rgba(0,0,0,0.12)',
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '20px 24px', borderBottom: `1.5px solid ${colors.hairline}`,
+          flexShrink: 0,
+        }}>
+          <span style={{ fontFamily: fonts.display, fontSize: `${fontSize.title}px`, fontWeight: 400, color: colors.ink }}>
+            {title}
+          </span>
+          <button onClick={onClose} style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            color: colors.inkMuted, padding: '4px', borderRadius: `${radius.control}px`,
+            display: 'flex', alignItems: 'center',
+          }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
+          {children}
+        </div>
+      </div>
+    </>
+  );
+}

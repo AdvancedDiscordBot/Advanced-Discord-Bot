@@ -1,253 +1,291 @@
-import React from 'react';
-import { useOutletContext } from 'react-router-dom';
-import { useApi } from '../hooks/useApi';
-import { StatCard } from '../components/UI';
-import { formatNumber, formatTime } from '../utils/helpers';
-import { colors, fonts, radius, fontSize } from '../theme';
-import {
-  Users,
-  Zap,
-  MessageSquare,
-  Clock,
-  Ticket,
-  Bot,
-} from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { useOutletContext, useParams } from 'react-router-dom';
+import { Users, Wifi, Puzzle, Zap, Clock, LayoutGrid } from 'lucide-react';
+import { colors, fonts, fontSize, radius } from '../theme';
+import { EmptyState } from '../components/UI';
 
-export function Dashboard() {
-  const { guildData } = useOutletContext();
-  const { guild, config } = guildData || {};
+function formatUptime(seconds) {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
 
-  const { data: statsData } = useApi(
-    guild?.id ? `/api/guild/${guild.id}/stats` : null
+function StatTile({ icon: Icon, label, value }) {
+  return (
+    <div style={styles.statTile}>
+      <div style={styles.statIcon}>
+        <Icon size={16} />
+      </div>
+      <div style={styles.statValue}>{value}</div>
+      <div style={styles.statLabel}>{label}</div>
+    </div>
   );
+}
 
-  const { data: leaderboardData } = useApi(
-    guild?.id ? `/api/guild/${guild.id}/leaderboard?limit=5` : null
-  );
+function ServerStatsWidget({ guildId }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  if (!guild) return null;
+  useEffect(() => {
+    if (!guildId) return;
+    let cancelled = false;
 
-  const stats = statsData || {};
-  const leaderboard = leaderboardData?.users || [];
+    async function load() {
+      try {
+        const res = await fetch(`/api/guild/${guildId}/server-stats`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        if (!cancelled) { setData(json); setError(null); }
+      } catch (err) {
+        if (!cancelled) setError(err.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    load();
+    const interval = setInterval(load, 30000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [guildId]);
 
   return (
-    <div style={styles.container}>
-      <h1 style={styles.pageTitle}>Dashboard</h1>
-      <p style={styles.pageSubtitle}>Overview of {guild.name}</p>
-
-      <div style={styles.statsGrid}>
-        <StatCard
-          icon={Users}
-          label="Members"
-          value={formatNumber(stats.members)}
-          subValue={`${formatNumber(stats.activeUsers)} active`}
-        />
-        <StatCard
-          icon={Zap}
-          label="Total XP"
-          value={formatNumber(stats.totalXp)}
-          subValue="Server total"
-        />
-        <StatCard
-          icon={MessageSquare}
-          label="Messages"
-          value={formatNumber(stats.totalMessages)}
-          subValue="All time"
-        />
-        <StatCard
-          icon={Clock}
-          label="Voice Time"
-          value={formatTime(stats.totalVoiceMinutes)}
-          subValue="Total minutes"
-        />
-        <StatCard
-          icon={Ticket}
-          label="Tickets"
-          value={stats.tickets?.total || 0}
-          subValue={`${stats.tickets?.open || 0} open`}
-        />
-        <StatCard
-          icon={Bot}
-          label="AI Status"
-          value={config?.aiEnabled ? 'Active' : 'Disabled'}
-          subValue={`Mode: ${config?.aiMode || 'disabled'}`}
-        />
+    <div style={styles.widget}>
+      <div style={styles.widgetHeader}>
+        <div style={styles.widgetTitle}>
+          <div style={styles.widgetDot} />
+          Server Stats
+        </div>
+        {data && <span style={styles.liveBadge}>Live</span>}
       </div>
 
-      <div style={styles.columns}>
-        <div style={styles.column}>
-          <div style={styles.card}>
-            <h3 style={styles.cardTitle}>Quick Stats</h3>
-            <div style={styles.quickStats}>
-              <div style={styles.quickStatRow}>
-                <span>XP Enabled</span>
-                <span style={config?.xpEnabled ? styles.enabled : styles.disabled}>
-                  {config?.xpEnabled ? 'Yes' : 'No'}
-                </span>
-              </div>
-              <div style={styles.quickStatRow}>
-                <span>XP per Message</span>
-                <span style={styles.statValue}>{config?.xpPerMessage || 1}</span>
-              </div>
-              <div style={styles.quickStatRow}>
-                <span>XP per Voice Minute</span>
-                <span style={styles.statValue}>{config?.xpPerVoiceMinute || 2}</span>
-              </div>
-              <div style={styles.quickStatRow}>
-                <span>Role Automation</span>
-                <span style={config?.roleAutomation ? styles.enabled : styles.disabled}>
-                  {config?.roleAutomation ? 'Enabled' : 'Disabled'}
-                </span>
-              </div>
-              <div style={styles.quickStatRow}>
-                <span>Birthday System</span>
-                <span style={config?.birthdayEnabled ? styles.enabled : styles.disabled}>
-                  {config?.birthdayEnabled ? 'Enabled' : 'Disabled'}
-                </span>
-              </div>
-            </div>
-          </div>
+      {loading && (
+        <div style={styles.widgetLoading}>
+          <div style={styles.spinner} />
         </div>
+      )}
 
-        <div style={styles.column}>
-          <div style={styles.card}>
-            <h3 style={styles.cardTitle}>Top Users</h3>
-            {leaderboard.length > 0 ? (
-              <div style={styles.leaderboard}>
-                {leaderboard.map((user, i) => (
-                  <div key={user.userId} style={styles.leaderboardRow}>
-                    <div style={styles.rank}>#{i + 1}</div>
-                    <div style={styles.userInfo}>
-                      <span style={styles.username}>{user.username || 'Unknown'}</span>
-                      <span style={styles.level}>Level {user.level}</span>
-                    </div>
-                    <div style={styles.xp}>{formatNumber(user.totalXp)} XP</div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div style={styles.empty}>No user data yet</div>
-            )}
+      {error && !loading && (
+        <div style={styles.widgetError}>Failed to load stats</div>
+      )}
+
+      {data && !loading && (
+        <>
+          <div style={styles.statsGrid}>
+            <StatTile icon={Users} label="Members" value={data.members.toLocaleString()} />
+            <StatTile icon={Wifi} label="Bot Ping" value={`${data.botPing}ms`} />
+            <StatTile icon={Puzzle} label="Plugins" value={data.pluginCount} />
+            <StatTile icon={Zap} label="Commands" value={data.commandCount} />
           </div>
+          <div style={styles.uptimeRow}>
+            <Clock size={13} style={{ color: colors.inkFaint, flexShrink: 0 }} />
+            <span style={styles.uptimeLabel}>Uptime</span>
+            <span style={styles.uptimeValue}>{formatUptime(data.uptime)}</span>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function AddWidgetPlaceholder() {
+  return (
+    <div style={{ ...styles.widget, ...styles.placeholderWidget }}>
+      <EmptyState
+        icon={<LayoutGrid size={32} />}
+        title="Add a widget"
+        body="Plugins can contribute widgets to your dashboard."
+      />
+    </div>
+  );
+}
+
+export function Dashboard() {
+  const { guildId } = useParams();
+  const { guildData } = useOutletContext();
+  const guild = guildData?.guild;
+
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}>
+        <h1 style={styles.pageTitle}>Dashboard</h1>
+        {guild && (
+          <p style={styles.pageSubtitle}>
+            {guild.name} · {(guild.memberCount || 0).toLocaleString()} members
+          </p>
+        )}
+      </div>
+
+      <div style={styles.widgetGrid}>
+        <div style={styles.widgetSpan2}>
+          <ServerStatsWidget guildId={guildId} />
         </div>
+        <AddWidgetPlaceholder />
       </div>
     </div>
   );
 }
 
 const styles = {
-  container: {
-    maxWidth: '1200px',
+  page: {
+    maxWidth: '1100px',
+  },
+  pageHeader: {
+    marginBottom: '24px',
   },
   pageTitle: {
-    color: colors.ink,
     fontFamily: fonts.display,
-    fontSize: `${fontSize.heading}px`,
-    fontWeight: 400,
-    marginBottom: '4px',
+    fontSize: `${fontSize.display}px`,
+    fontWeight: 600,
+    color: colors.ink,
+    margin: 0,
+    lineHeight: 1.1,
   },
   pageSubtitle: {
-    color: colors.inkMuted,
     fontFamily: fonts.body,
     fontSize: `${fontSize.meta}px`,
-    marginBottom: '24px',
+    color: colors.inkMuted,
+    margin: '4px 0 0',
+  },
+  widgetGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, 1fr)',
+    gap: '16px',
+    alignItems: 'start',
+  },
+  widgetSpan2: {
+    gridColumn: 'span 2',
+  },
+  widget: {
+    background: colors.surface1,
+    border: `1.5px solid ${colors.hairline}`,
+    borderRadius: `${radius.card}px`,
+    padding: '20px',
+    overflow: 'hidden',
+  },
+  placeholderWidget: {
+    minHeight: '220px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    border: `1.5px dashed ${colors.hairlineStrong}`,
+    background: 'transparent',
+  },
+  widgetHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: '16px',
+  },
+  widgetTitle: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
+    fontWeight: 600,
+    color: colors.ink2,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+  },
+  widgetDot: {
+    width: '6px',
+    height: '6px',
+    borderRadius: '50%',
+    background: colors.accent,
+    flexShrink: 0,
+  },
+  liveBadge: {
+    fontFamily: fonts.body,
+    fontSize: '10px',
+    fontWeight: 600,
+    color: colors.pineOnTint,
+    background: colors.pineTint,
+    borderRadius: `${radius.pill}px`,
+    padding: '2px 8px',
+    letterSpacing: '0.06em',
+    textTransform: 'uppercase',
+  },
+  widgetLoading: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    minHeight: '120px',
+  },
+  spinner: {
+    width: '28px',
+    height: '28px',
+    border: `2.5px solid ${colors.hairlineStrong}`,
+    borderTopColor: colors.accent,
+    borderRadius: '50%',
+    animation: 'spin 1s linear infinite',
+  },
+  widgetError: {
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
+    color: colors.dangerText,
+    textAlign: 'center',
+    padding: '24px',
   },
   statsGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-    gap: '16px',
-    marginBottom: '24px',
-  },
-  columns: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))',
-    gap: '16px',
-  },
-  column: {
-    minWidth: 0,
-  },
-  card: {
-    background: colors.surface1,
-    borderRadius: `${radius.card}px`,
-    border: `1.5px solid ${colors.hairline}`,
-    padding: '16px',
-  },
-  cardTitle: {
-    color: colors.ink,
-    fontFamily: fonts.display,
-    fontSize: `${fontSize.title}px`,
-    fontWeight: 400,
+    gridTemplateColumns: '1fr 1fr',
+    gap: '12px',
     marginBottom: '16px',
   },
-  quickStats: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-  },
-  quickStatRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '8px 0',
-    borderBottom: `1.5px solid ${colors.hairline}`,
-    color: colors.ink2,
-    fontFamily: fonts.body,
-    fontSize: `${fontSize.meta}px`,
-  },
-  statValue: {
-    color: colors.ink,
-    fontWeight: 500,
-  },
-  enabled: {
-    color: colors.successText,
-    fontWeight: 500,
-  },
-  disabled: {
-    color: colors.inkMuted,
-    fontWeight: 500,
-  },
-  leaderboard: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-  },
-  leaderboardRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-    padding: '8px',
+  statTile: {
     background: colors.cream,
     borderRadius: `${radius.control}px`,
+    padding: '14px 16px',
+    border: `1px solid ${colors.hairline}`,
   },
-  rank: {
+  statIcon: {
+    width: '30px',
+    height: '30px',
+    borderRadius: `${radius.control - 2}px`,
+    background: colors.accentTint,
     color: colors.accent,
-    fontWeight: 700,
-    width: '32px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: '10px',
   },
-  userInfo: {
-    flex: 1,
-  },
-  username: {
+  statValue: {
+    fontFamily: fonts.display,
+    fontSize: `${fontSize.heading}px`,
+    fontWeight: 600,
     color: colors.ink,
-    fontFamily: fonts.body,
-    fontSize: `${fontSize.meta}px`,
-    fontWeight: 500,
-    display: 'block',
+    lineHeight: 1,
+    marginBottom: '4px',
   },
-  level: {
+  statLabel: {
+    fontFamily: fonts.body,
+    fontSize: '11px',
+    fontWeight: 600,
     color: colors.inkMuted,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+  },
+  uptimeRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    paddingTop: '12px',
+    borderTop: `1px solid ${colors.hairline}`,
+  },
+  uptimeLabel: {
     fontFamily: fonts.body,
     fontSize: `${fontSize.caption}px`,
-  },
-  xp: {
-    color: colors.accent,
-    fontWeight: 600,
-  },
-  empty: {
     color: colors.inkMuted,
+    flex: 1,
+  },
+  uptimeValue: {
     fontFamily: fonts.body,
-    fontSize: `${fontSize.meta}px`,
-    textAlign: 'center',
-    padding: '16px',
+    fontSize: `${fontSize.caption}px`,
+    fontWeight: 600,
+    color: colors.ink2,
   },
 };

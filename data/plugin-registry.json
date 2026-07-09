@@ -1,36 +1,165 @@
 {
   "plugins": [
     {
-      "name": "vaish-plugin-economy",
-      "displayName": "Economy System",
-      "description": "Complete economy system with coins, work commands, shop, and leaderboards",
-      "author": "VAISH",
+      "name": "adb-plugin-aegis",
+      "displayName": "Aegis",
       "version": "1.0.0",
-      "category": "features",
+      "description": "Automated threat detection: anti-raid, anti-spam, anti-link, anti-alt. Each module independently toggleable.",
+      "author": "dead",
+      "main": "index.js",
+      "requiresRestart": false,
       "permissions": [
         "db.read",
         "db.write",
         "commands.register"
       ],
-      "requiresRestart": false,
-      "verified": true,
-      "npmPackage": "vaish-plugin-economy"
+      "configSchema": {
+        "type": "object",
+        "properties": {
+          "log_channel_id": {
+            "type": "string",
+            "default": null
+          },
+          "raid_joins": {
+            "type": "number",
+            "default": 10
+          },
+          "raid_seconds": {
+            "type": "number",
+            "default": 10
+          },
+          "spam_messages": {
+            "type": "number",
+            "default": 5
+          },
+          "spam_seconds": {
+            "type": "number",
+            "default": 3
+          },
+          "spam_action": {
+            "type": "string",
+            "enum": [
+              "warn",
+              "mute",
+              "kick",
+              "ban"
+            ],
+            "default": "mute"
+          },
+          "alt_min_age_days": {
+            "type": "number",
+            "default": 7
+          },
+          "alt_action": {
+            "type": "string",
+            "enum": [
+              "flag",
+              "kick"
+            ],
+            "default": "flag"
+          }
+        }
+      }
     },
     {
-      "name": "vaish-plugin-moderation",
-      "displayName": "Advanced Moderation",
-      "description": "Auto-mod, logs, slowmode, and advanced moderation tools",
-      "author": "VAISH",
+      "name": "adb-plugin-levels",
+      "displayName": "Levels & XP System",
       "version": "1.0.0",
-      "category": "moderation",
+      "description": "Track user activity with XP, levels, and role rewards",
+      "author": "dead",
+      "main": "index.js",
+      "requiresRestart": false,
+      "permissions": [
+        "db.read",
+        "db.write",
+        "commands.register",
+        "events.register"
+      ],
+      "configSchema": {
+        "type": "object",
+        "properties": {
+          "xpPerMessage": {
+            "type": "number",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 50
+          },
+          "xpCooldown": {
+            "type": "number",
+            "default": 60,
+            "minimum": 10,
+            "maximum": 300
+          },
+          "xpPerMinuteLimit": {
+            "type": "number",
+            "default": 100,
+            "minimum": 10,
+            "maximum": 1000
+          },
+          "levelUpChannelId": {
+            "type": "string",
+            "default": null
+          }
+        }
+      }
+    },
+    {
+      "name": "adb-plugin-moderation",
+      "displayName": "Basic Moderation",
+      "version": "1.0.0",
+      "description": "Core moderation commands: ban, kick, timeout, warn, purge, tickets, and case logging.",
+      "author": "dead",
+      "main": "index.js",
+      "requiresRestart": true,
       "permissions": [
         "db.read",
         "db.write",
         "commands.register"
       ],
-      "requiresRestart": false,
-      "verified": true,
-      "npmPackage": "vaish-plugin-moderation"
+      "configSchema": {
+        "type": "object",
+        "properties": {
+          "log_channel_id": {
+            "type": "string",
+            "default": null
+          },
+          "ticket_category_id": {
+            "type": "string",
+            "default": null
+          },
+          "ticket_support_role_id": {
+            "type": "string",
+            "default": null
+          },
+          "ticket_log_channel_id": {
+            "type": "string",
+            "default": null
+          },
+          "warn_thresholds": {
+            "type": "object",
+            "default": {
+              "3": {
+                "action": "timeout",
+                "duration": "1h"
+              },
+              "5": {
+                "action": "timeout",
+                "duration": "24h"
+              },
+              "7": {
+                "action": "kick"
+              },
+              "10": {
+                "action": "ban"
+              }
+            }
+          },
+          "dm_on_action": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      }
     },
     {
       "name": "adb-plugin-reminders",
@@ -59,5 +188,5 @@
       }
     }
   ],
-  "lastFetch": 1783396510311
+  "lastFetch": 1783586511123
 }

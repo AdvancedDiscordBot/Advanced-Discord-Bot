@@ -1,30 +1,12 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import {
-  LayoutDashboard,
-  Bot,
-  Zap,
-  Ticket,
-  Coins,
-  Cake,
-  ShieldAlert,
-  Activity,
-  Settings,
-  Puzzle,
-} from 'lucide-react';
+import { LayoutDashboard, Puzzle, Settings } from 'lucide-react';
 import { colors, fonts, radius, fontSize } from '../theme';
 
-const navItems = [
-  { to: '', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: 'ai', icon: Bot, label: 'AI Assistant' },
-  { to: 'xp', icon: Zap, label: 'XP & Leveling' },
-  { to: 'tickets', icon: Ticket, label: 'Tickets' },
-  { to: 'economy', icon: Coins, label: 'Economy' },
-  { to: 'birthdays', icon: Cake, label: 'Birthdays' },
-  { to: 'antiraid', icon: ShieldAlert, label: 'Anti-Raid' },
-  { to: 'logs', icon: Activity, label: 'Activity Logs' },
-  { to: 'plugins', icon: Puzzle, label: 'Plugins' },
-  { to: 'settings', icon: Settings, label: 'Settings' },
+const NAV = [
+  { to: '',         icon: LayoutDashboard, label: 'Dashboard' },
+  { to: 'plugins',  icon: Puzzle,          label: 'Plugins'   },
+  { to: 'settings', icon: Settings,        label: 'Settings'  },
 ];
 
 export function Sidebar({ guild }) {
@@ -40,31 +22,33 @@ export function Sidebar({ guild }) {
     <aside style={styles.sidebar}>
       <div style={styles.guildInfo}>
         <div style={styles.guildName}>{guild.name}</div>
-        <div style={styles.guildId}>ID: {guild.id}</div>
+        <div style={styles.guildId}>{guild.id}</div>
       </div>
+
       <nav style={styles.nav}>
-        {navItems.map((item) => {
-          const path = item.to ? `/guild/${guild.id}/${item.to}` : `/guild/${guild.id}`;
+        <p style={styles.navSection}>CORE</p>
+        {NAV.map(({ to, icon: Icon, label }) => {
+          const path = to ? `/guild/${guild.id}/${to}` : `/guild/${guild.id}`;
           return (
-          <NavLink
-            key={item.to}
-            to={path}
-            end={item.to === ''}
-            style={({ isActive }) => ({
-              ...styles.navLink,
-              ...(isActive ? styles.navLinkActive : {}),
-            })}
-          >
-            <item.icon size={18} />
-            <span>{item.label}</span>
-          </NavLink>
+            <NavLink
+              key={to}
+              to={path}
+              end={to === ''}
+              style={({ isActive }) => ({ ...styles.navLink, ...(isActive ? styles.navLinkActive : {}) })}
+            >
+              <Icon size={16} />
+              <span>{label}</span>
+            </NavLink>
           );
         })}
+
+        {/* Plugin-injected nav items land here in future */}
+        <div id="plugin-nav-items" />
       </nav>
 
       <div style={styles.footer}>
         <div style={styles.hostingCard}>
-          Want managed hosting? DM{' '}
+          Managed hosting?{' '}
           <span style={styles.hostingHandle}>@deadindian</span> on Discord.
         </div>
       </div>
@@ -74,7 +58,7 @@ export function Sidebar({ guild }) {
 
 const styles = {
   sidebar: {
-    width: '240px',
+    width: '220px',
     background: colors.surface1,
     borderRight: `1.5px solid ${colors.hairline}`,
     display: 'flex',
@@ -94,29 +78,39 @@ const styles = {
   },
   guildName: {
     color: colors.ink,
-    fontFamily: fonts.display,
-    fontSize: `${fontSize.title}px`,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.meta}px`,
     fontWeight: 600,
-    marginBottom: '4px',
+    marginBottom: '2px',
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
   },
   guildId: {
-    color: colors.inkMuted,
+    color: colors.inkFaint,
     fontFamily: fonts.body,
     fontSize: '11px',
   },
   nav: {
     flex: 1,
-    padding: '8px',
+    padding: '12px 8px',
     overflowY: 'auto',
+  },
+  navSection: {
+    fontFamily: fonts.body,
+    fontSize: '10px',
+    fontWeight: 600,
+    letterSpacing: '0.12em',
+    color: colors.inkFaint,
+    padding: '0 8px',
+    marginBottom: '4px',
+    marginTop: '4px',
   },
   navLink: {
     display: 'flex',
     alignItems: 'center',
-    gap: '12px',
-    padding: '10px 12px',
+    gap: '10px',
+    padding: '9px 10px',
     borderRadius: `${radius.control}px`,
     color: colors.ink2,
     textDecoration: 'none',
@@ -124,7 +118,7 @@ const styles = {
     fontSize: `${fontSize.meta}px`,
     fontWeight: 400,
     marginBottom: '2px',
-    transition: 'background .18s, color .18s',
+    transition: 'background .15s, color .15s',
   },
   navLinkActive: {
     background: colors.accentTint,
@@ -142,7 +136,6 @@ const styles = {
     color: colors.accentOnTint,
     fontFamily: fonts.body,
     fontSize: `${fontSize.caption}px`,
-    fontWeight: 400,
     lineHeight: 1.4,
   },
   hostingHandle: {

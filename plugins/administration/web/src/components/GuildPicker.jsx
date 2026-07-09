@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../hooks/useAuth';
+
 import { getGuildIcon } from '../utils/helpers';
 import { Server, ChevronRight } from 'lucide-react';
 import { colors, fonts, radius, fontSize } from '../theme';

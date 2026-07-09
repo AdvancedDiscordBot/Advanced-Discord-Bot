@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, Outlet, useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { Sidebar } from '../components/Sidebar';
+import { CommandPalette } from '../components/CommandPalette';
 import { colors, fonts, fontSize } from '../theme';
 
 export function GuildLayout() {
@@ -9,6 +10,18 @@ export function GuildLayout() {
   const navigate = useNavigate();
   const [guildData, setGuildData] = useState(null);
   const [loading, setLoading] = useState(!!guildId);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setPaletteOpen(true);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   useEffect(() => {
     if (!guildId) {
@@ -40,7 +53,8 @@ export function GuildLayout() {
   if (!guildId) {
     return (
       <div style={styles.layout}>
-        <Header />
+        <Header onOpenPalette={() => setPaletteOpen(true)} />
+        <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} guild={null} />
         <div style={styles.main}>
           <Outlet context={{ guildData: null }} />
         </div>
@@ -51,7 +65,8 @@ export function GuildLayout() {
   if (loading) {
     return (
       <div style={styles.layout}>
-        <Header />
+        <Header onOpenPalette={() => setPaletteOpen(true)} />
+        <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} guild={null} />
         <div style={styles.loading}>
           <div style={styles.spinner}></div>
           <span>Loading server data...</span>
@@ -62,7 +77,8 @@ export function GuildLayout() {
 
   return (
     <div style={styles.layout}>
-      <Header />
+      <Header onOpenPalette={() => setPaletteOpen(true)} />
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} guild={guildData?.guild} />
       <div style={styles.container}>
         <Sidebar guild={guildData?.guild} />
         <main style={styles.main}>
