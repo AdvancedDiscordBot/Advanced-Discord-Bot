@@ -6,8 +6,20 @@ import { colors, fonts, fontSize, radius } from "../theme";
 import {
   Package, Search, Download, Trash2,
   Puzzle, Shield, X, BookOpen, Zap, Gamepad2, Wrench, BarChart2,
-  AlertCircle, RefreshCw, ArrowUpRight,
+  AlertCircle, RefreshCw, ArrowUpRight, Lock, Power, Copy, ArrowUpCircle,
 } from "lucide-react";
+
+const FLAG_LABELS = {
+  BanMembers: "Ban Members", KickMembers: "Kick Members", ModerateMembers: "Timeout Members",
+  ManageMessages: "Manage Messages", ManageChannels: "Manage Channels", ManageRoles: "Manage Roles",
+  ManageGuild: "Manage Server", ManageWebhooks: "Manage Webhooks", ManageNicknames: "Manage Nicknames",
+  ViewAuditLog: "View Audit Log", SendMessages: "Send Messages", EmbedLinks: "Embed Links",
+  AttachFiles: "Attach Files", AddReactions: "Add Reactions", ReadMessageHistory: "Read Message History",
+  MentionEveryone: "Mention Everyone", ViewChannel: "View Channels",
+};
+function humanizeFlag(flag) {
+  return FLAG_LABELS[flag] || flag.replace(/([a-z])([A-Z])/g, "$1 $2");
+}
 
 const TABS = ["Installed", "Browse", "Core"];
 
@@ -35,6 +47,11 @@ export function Plugins() {
   const [detailPlugin, setDetailPlugin] = useState(null);
   const [brochureContent, setBrochureContent] = useState("");
   const [brochureLoading, setBrochureLoading] = useState(false);
+  const [permissions, setPermissions] = useState({ integer: "0", byPlugin: [] });
+  const [restarting, setRestarting] = useState(false);
+  const [deployLog, setDeployLog] = useState([]);
+  const [confirmDialog, setConfirmDialog] = useState(null); // { message, onConfirm }
+  const [copied, setCopied] = useState(false);
 
   const { request } = useApiFetch();
 
@@ -49,6 +66,8 @@ export function Plugins() {
       setCategories(catRes?.categories || []);
       const marketRes = await request("/api/plugins/marketplace").catch(() => ({ plugins: [] }));
       setMarket(marketRes?.plugins || []);
+      const permsRes = await request("/api/plugins/permissions").catch(() => ({ integer: "0", byPlugin: [] }));
+      setPermissions(permsRes || { integer: "0", byPlugin: [] });
     } catch (err) {
       console.error("Failed to load plugins:", err);
     } finally {
@@ -70,18 +89,83 @@ export function Plugins() {
     }
   }
 
-  async function handleUninstall(pkgName) {
-    if (!window.confirm(`Uninstall ${pkgName}? This removes all its data.`)) return;
+  async function handleUninstall(pkgName, confirm = false) {
+    if (!confirm && !window.confirm(`Uninstall ${pkgName}? This removes all its data.`)) return;
     setOperating(pkgName);
     try {
-      await request("/api/plugins/uninstall", { method: "POST", body: JSON.stringify({ packageName: pkgName }) });
+      await request("/api/plugins/uninstall", {
+        method: "POST",
+        body: JSON.stringify({ packageName: pkgName, confirm }),
+      });
       if (detailPlugin?.name === pkgName) setDetailPlugin(null);
       await loadAll();
     } catch (err) {
-      console.error("Uninstall failed:", err);
+      if (err.message && err.message.includes("depend")) {
+        setConfirmDialog({
+          message: err.message,
+          onConfirm: () => { setConfirmDialog(null); handleUninstall(pkgName, true); },
+        });
+      } else {
+        console.error("Uninstall failed:", err);
+      }
     } finally {
       setOperating(null);
     }
+  }
+
+  async function handleUpdate(pkgName, confirm = false) {
+    setOperating(pkgName);
+    try {
+      await request("/api/plugins/update", {
+        method: "POST",
+        body: JSON.stringify({ packageName: pkgName, confirm }),
+      });
+      await loadAll();
+    } catch (err) {
+      if (err.message && err.message.includes("depend")) {
+        setConfirmDialog({
+          message: err.message,
+          onConfirm: () => { setConfirmDialog(null); handleUpdate(pkgName, true); },
+        });
+      } else {
+        console.error("Update failed:", err);
+      }
+    } finally {
+      setOperating(null);
+    }
+  }
+
+  async function handleRestart() {
+    if (!window.confirm("Deploy & restart the bot? Commands re-register and the dashboard rebuilds; the bot is briefly offline.")) return;
+    setRestarting(true);
+    setDeployLog([]);
+    try {
+      const proto = window.location.protocol === "https:" ? "wss" : "ws";
+      const ws = new window.WebSocket(`${proto}://${window.location.host}/ws`);
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          const payload = msg.payload || msg;
+          if (payload.type === "deploy-log" || msg.type === "deploy-log") {
+            setDeployLog((prev) => [...prev, payload.message || msg.message || ""]);
+          }
+        } catch { /* ignore */ }
+      };
+    } catch { /* WS optional */ }
+    try {
+      await request("/api/plugins/restart", { method: "POST" });
+    } catch (err) {
+      setDeployLog((prev) => [...prev, `Error: ${err.message}`]);
+      setRestarting(false);
+    }
+  }
+
+  function copyInteger() {
+    try {
+      navigator.clipboard.writeText(permissions.integer);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* clipboard unavailable */ }
   }
 
   async function handleReload(pluginName) {
@@ -129,8 +213,14 @@ export function Plugins() {
   }
 
   const installedNames = new Set(plugins.map((p) => p.name));
-  const corePlugins = plugins.filter((p) => p.isCore);
-  const userPlugins = plugins.filter((p) => !p.isCore);
+  const marketByPkg = new Map();
+  for (const m of market) {
+    if (m.npmPackage) marketByPkg.set(m.npmPackage, m);
+    marketByPkg.set(m.name, m);
+  }
+  const updateInfo = (p) => marketByPkg.get(p.npmPackage) || marketByPkg.get(p.name) || null;
+  const corePlugins = plugins.filter((p) => p.core);
+  const userPlugins = plugins.filter((p) => !p.core);
   const availableMarket = market.filter((p) => !installedNames.has(p.npmPackage) && !installedNames.has(p.name));
 
   const filteredInstalled = userPlugins.filter((p) =>
@@ -161,8 +251,29 @@ export function Plugins() {
             <Download size={14} />
             Install Custom
           </button>
+          <button style={s.dangerBtn} onClick={handleRestart} disabled={restarting}>
+            <Power size={14} />
+            {restarting ? "Deploying…" : "Restart & Deploy"}
+          </button>
         </div>
       </div>
+
+      {/* Permission integer bar */}
+      {permissions.integer && permissions.integer !== "0" && (
+        <div style={s.permBar}>
+          <div style={s.permBarInfo}>
+            <div style={s.permBarLabel}>Required bot permissions integer</div>
+            <code style={s.permInt}>{permissions.integer}</code>
+            <span style={s.permBarHint}>
+              Paste into the Discord Developer Portal → Bot → Privileged/Permissions, or use the invite link.
+            </span>
+          </div>
+          <button style={s.ghostBtn} onClick={copyInteger}>
+            <Copy size={14} />
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+      )}
 
       {/* Tabs */}
       <div style={s.tabBar}>
@@ -236,8 +347,10 @@ export function Plugins() {
                 <PluginCard
                   key={p.name}
                   plugin={{ ...p, _local: true }}
+                  update={updateInfo(p)}
                   onDetail={() => openDetail({ ...p, _local: true })}
                   onUninstall={() => handleUninstall(p.npmPackage || p.name)}
+                  onUpdate={() => handleUpdate(p.npmPackage || p.name)}
                   onReload={() => handleReload(p.name)}
                   operating={operating === p.name || operating === (p.npmPackage || p.name)}
                 />
@@ -336,16 +449,46 @@ export function Plugins() {
         </div>
       )}
 
+      {/* Dependency confirm dialog */}
+      {confirmDialog && (
+        <div style={s.overlay} onClick={() => setConfirmDialog(null)}>
+          <div style={s.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={s.confirmHead}>
+              <AlertCircle size={20} color={colors.dangerText} />
+              <h2 style={s.modalTitle}>Dependency warning</h2>
+            </div>
+            <p style={s.modalHint}>{confirmDialog.message}</p>
+            <div style={s.modalActions}>
+              <Button variant="secondary" onClick={() => setConfirmDialog(null)}>Cancel</Button>
+              <Button onClick={confirmDialog.onConfirm}>Continue anyway</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Deploy / restart log drawer */}
+      {restarting && (
+        <div style={s.deployDrawer}>
+          <div style={s.deployHeader}>
+            <span style={s.spinnerInline} />
+            Deploying &amp; restarting…
+          </div>
+          <pre style={s.deployLog}>{deployLog.join("") || "Starting deploy…"}</pre>
+        </div>
+      )}
+
       <style>{animationCSS}</style>
     </div>
   );
 }
 
 /* ── PLUGIN CARD ─────────────────────────────────────────────── */
-function PluginCard({ plugin, marketplace, onDetail, onInstall, onUninstall, onReload, operating }) {
+function PluginCard({ plugin, marketplace, update, onDetail, onInstall, onUninstall, onUpdate, onReload, operating }) {
   const catMeta = CATEGORY_META[plugin.category] || null;
   const hasError = !!plugin.lastError;
   const isLoaded = plugin.enabled && !hasError;
+  const canUpdate = !marketplace && update?.updateAvailable;
+  const perms = plugin.discordPermissions || [];
 
   return (
     <div style={s.card}>
@@ -361,6 +504,7 @@ function PluginCard({ plugin, marketplace, onDetail, onInstall, onUninstall, onR
             </span>
           )}
           {plugin.verified && <Badge label="Verified" variant="success" />}
+          {canUpdate && <Badge label={`Update ${update.version}`} variant="warning" />}
           {!marketplace && (
             hasError ? <Badge label="Error" variant="danger" /> :
             !plugin.enabled ? <Badge label="Disabled" variant="default" /> :
@@ -372,6 +516,13 @@ function PluginCard({ plugin, marketplace, onDetail, onInstall, onUninstall, onR
       <div style={s.cardBody}>
         <h3 style={s.cardName}>{plugin.displayName || plugin.name}</h3>
         <p style={s.cardDesc}>{plugin.description || "No description provided."}</p>
+        {perms.length > 0 && (
+          <div style={s.chipRow}>
+            {perms.map((flag) => (
+              <span key={flag} style={s.permChip}>{humanizeFlag(flag)}</span>
+            ))}
+          </div>
+        )}
       </div>
 
       <div style={s.cardMeta}>
@@ -398,6 +549,12 @@ function PluginCard({ plugin, marketplace, onDetail, onInstall, onUninstall, onR
           </button>
         ) : (
           <div style={s.installedCtrl}>
+            {canUpdate && (
+              <button style={s.updateBtn} onClick={onUpdate} disabled={!!operating} title={`Update to ${update.version}`}>
+                <ArrowUpCircle size={14} />
+                Update
+              </button>
+            )}
             <button style={s.iconCtrlBtn} onClick={onReload} disabled={!!operating} title="Reload plugin">
               <RefreshCw size={14} />
             </button>
@@ -431,6 +588,10 @@ function CorePluginRow({ plugin, onDetail }) {
         </div>
       </div>
       <div style={s.coreRowRight}>
+        <span style={s.lockBadge} title="Core plugin — delete its folder to remove">
+          <Lock size={11} />
+          Protected
+        </span>
         <StatusDot status={isOk ? "ok" : plugin.lastError ? "error" : "disabled"} />
         <button style={s.docsBtn} onClick={onDetail}>
           <BookOpen size={13} />
@@ -484,6 +645,17 @@ function PluginDetail({ plugin, brochureContent, brochureLoading, operating, onI
           </div>
         )}
       </div>
+
+      {(plugin.discordPermissions || []).length > 0 && (
+        <div style={s.permSection}>
+          <div style={s.permSectionTitle}>Discord permissions requested</div>
+          <div style={s.chipRow}>
+            {plugin.discordPermissions.map((flag) => (
+              <span key={flag} style={s.permChip}>{humanizeFlag(flag)}</span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Actions */}
       <div style={s.detailActions}>
@@ -606,6 +778,72 @@ const animationCSS = `
 /* ── STYLES ──────────────────────────────────────────────────── */
 const s = {
   page: { maxWidth: 1200 },
+
+  /* permission integer bar */
+  permBar: {
+    display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16,
+    padding: "12px 16px", marginBottom: 20,
+    background: colors.surface1, border: `1.5px solid ${colors.hairline}`,
+    borderRadius: radius.control, flexWrap: "wrap",
+  },
+  permBarInfo: { display: "flex", flexDirection: "column", gap: 3, minWidth: 0 },
+  permBarLabel: {
+    fontFamily: fonts.body, fontSize: 11, fontWeight: 600, letterSpacing: "0.04em",
+    textTransform: "uppercase", color: colors.inkMuted,
+  },
+  permInt: {
+    fontFamily: "'Fira Mono', monospace", fontSize: `${fontSize.title}px`,
+    color: colors.accent, wordBreak: "break-all",
+  },
+  permBarHint: { fontFamily: fonts.body, fontSize: 12, color: colors.inkMuted },
+
+  /* permission chips */
+  chipRow: { display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 },
+  permChip: {
+    fontFamily: fonts.body, fontSize: 11, fontWeight: 500, padding: "3px 9px",
+    borderRadius: radius.pill, background: colors.surface2, color: colors.ink2,
+    border: `1px solid ${colors.hairline}`,
+  },
+  permSection: { marginBottom: 16 },
+  permSectionTitle: {
+    fontFamily: fonts.body, fontSize: 11, fontWeight: 600, letterSpacing: "0.04em",
+    textTransform: "uppercase", color: colors.inkMuted, marginBottom: 2,
+  },
+
+  /* update button */
+  updateBtn: {
+    display: "inline-flex", alignItems: "center", gap: 5, padding: "6px 12px",
+    borderRadius: radius.pill, border: `1.5px solid ${colors.warning}`,
+    background: colors.warningTint, color: colors.warningText,
+    fontFamily: fonts.body, fontSize: 12, fontWeight: 600, cursor: "pointer", flexShrink: 0,
+  },
+
+  /* protected badge */
+  lockBadge: {
+    display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 9px",
+    borderRadius: radius.pill, background: colors.surface2, color: colors.inkMuted,
+    fontFamily: fonts.body, fontSize: 11, fontWeight: 600,
+  },
+
+  /* confirm dialog head */
+  confirmHead: { display: "flex", alignItems: "center", gap: 10, marginBottom: 8 },
+
+  /* deploy drawer */
+  deployDrawer: {
+    position: "fixed", bottom: 16, right: 16, width: 440, maxWidth: "calc(100vw - 32px)",
+    maxHeight: 340, background: "#0b0b0b", color: "#d4d4d4",
+    borderRadius: radius.control, overflow: "hidden", zIndex: 1100,
+    boxShadow: "0 8px 32px rgba(0,0,0,0.4)", display: "flex", flexDirection: "column",
+  },
+  deployHeader: {
+    display: "flex", alignItems: "center", gap: 8, padding: "10px 14px",
+    fontFamily: fonts.body, fontSize: 13, fontWeight: 600, color: "#f0f0f0",
+    borderBottom: "1px solid #222",
+  },
+  deployLog: {
+    margin: 0, padding: 14, fontFamily: "'Fira Mono', monospace", fontSize: 11,
+    lineHeight: 1.5, overflow: "auto", maxHeight: 280, whiteSpace: "pre-wrap", wordBreak: "break-word",
+  },
 
   pageHeader: {
     display: "flex", justifyContent: "space-between", alignItems: "flex-start",

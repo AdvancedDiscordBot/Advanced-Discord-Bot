@@ -54,7 +54,7 @@ export function useApiFetch() {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Request failed');
+        throw new Error(data.error || data.message || 'Request failed');
       }
       const data = await res.json();
       setLoading(false);
