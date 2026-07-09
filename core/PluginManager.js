@@ -50,6 +50,8 @@ class PluginManager {
 
 		this.plugins.set(pluginName, pluginState);
 
+		pluginState.source = "builtin";
+
 		const ctx = this.buildContext(pluginName, logger);
 
 		const commandsPath = path.join(process.cwd(), "commands");
@@ -213,6 +215,16 @@ class PluginManager {
 		return [];
 	}
 
+	getDependents(pluginName) {
+		const dependents = [];
+		for (const [name, state] of this.plugins.entries()) {
+			if (name === pluginName) continue;
+			const deps = this.getDependencies(state.manifest);
+			if (deps.includes(pluginName)) dependents.push(name);
+		}
+		return dependents;
+	}
+
 	buildContext(pluginName, logger) {
 		const pluginContext = new PluginContext({
 			pluginName,
@@ -243,6 +255,8 @@ class PluginManager {
 			lastError: null,
 			path: null,
 			entryPath: null,
+			source: null,
+			packageName: null,
 		};
 	}
 
@@ -256,6 +270,8 @@ class PluginManager {
 		const pluginState = this.initPluginState(plugin.name, plugin.manifest);
 		pluginState.path = plugin.basePath;
 		pluginState.entryPath = plugin.entryPath;
+		pluginState.source = plugin.source || "local";
+		pluginState.packageName = plugin.packageName || null;
 
 		this.plugins.set(plugin.name, pluginState);
 
@@ -269,6 +285,17 @@ class PluginManager {
 			}
 
 			await loadFn(ctx);
+
+			const { validateFlags } = require("./permissions");
+			const { invalid } = validateFlags(
+				plugin.manifest?.discordPermissions || [],
+			);
+			if (invalid.length) {
+				pluginState.lastError = `Unknown discordPermissions: ${invalid.join(", ")}`;
+				this.logger.warn(
+					`${plugin.name} declares unknown flags: ${invalid.join(", ")}`,
+				);
+			}
 
 			pluginState.hotReloadEligible =
 				!plugin.manifest.requiresRestart && !pluginState.hasCommands;
@@ -489,11 +516,13 @@ class PluginManager {
 			name: plugin.name,
 			displayName: plugin.manifest?.displayName,
 			author: plugin.manifest?.author,
-			version: plugin.manifest?.version,
+			version: plugin.manifest?.version || "0.0.0",
 			description: plugin.manifest?.description,
 			requiresRestart: !!plugin.manifest?.requiresRestart,
 			category: plugin.manifest?.category || null,
-			npmPackage: plugin.manifest?.npmPackage || null,
+			npmPackage: plugin.manifest?.npmPackage || plugin.packageName || null,
+			discordPermissions: plugin.manifest?.discordPermissions || [],
+			core: plugin.source === "local" || plugin.source === "builtin",
 			enabled: plugin.enabled,
 			hotReloadEligible: plugin.hotReloadEligible,
 			lastError: plugin.lastError,

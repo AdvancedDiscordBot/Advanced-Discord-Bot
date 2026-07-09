@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
+const semver = require("semver");
 const { createLogger } = require("./logger");
 
 const REGISTRY_URL =
@@ -198,6 +199,13 @@ class PluginRegistry {
 	async getPluginDetails(packageName) {
 		const plugins = await this.fetchRegistry();
 		return plugins.find((p) => p.npmPackage === packageName || p.name === packageName);
+	}
+
+	isNewer(installed, candidate) {
+		const a = semver.valid(semver.coerce(installed));
+		const b = semver.valid(semver.coerce(candidate));
+		if (!a || !b) return false;
+		return semver.gt(b, a);
 	}
 
 	getCategories() {

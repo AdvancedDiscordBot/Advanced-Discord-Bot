@@ -9,6 +9,10 @@ const { WebSocketServer } = require("ws");
 const { spawn, fork } = require("child_process");
 const { createLogger } = require("../logger");
 const { registry } = require("../pluginRegistry");
+const {
+	computePermissionInteger,
+	describe: describePermissions,
+} = require("../permissions");
 const adminPlugin = require("../adminPlugin");
 
 const ADMIN_PERMISSION = 0x8;
@@ -296,14 +300,18 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 	});
 
 	fastify.get("/auth/invite", async (request, reply) => {
+		const forceAdmin = process.env.INVITE_FORCE_ADMIN === "true";
+		const permissions = forceAdmin
+			? "8"
+			: computePermissionInteger(pluginManager.getPluginList());
 		const params = new URLSearchParams({
 			client_id: discordClientId,
-			permissions: "8",
+			permissions,
 			scope: "bot applications.commands",
 			integration_type: "0",
 		});
 		const redirectUrl = `https://discord.com/api/oauth2/authorize?${params}`;
-		logger.info(`Redirecting to Bot Invite: ${redirectUrl}`);
+		logger.info(`Redirecting to Bot Invite (perms=${permissions}): ${redirectUrl}`);
 		return reply.redirect(redirectUrl);
 	});
 
@@ -456,15 +464,32 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 	});
 
 	fastify.post("/api/plugins/uninstall", async (request, reply) => {
-		const { packageName } = request.body || {};
+		const { packageName, confirm } = request.body || {};
 		if (!packageName) {
 			return reply.code(400).send({ error: "Package name required" });
 		}
 
 		const pluginList = pluginManager.getPluginList();
 		const plugin = pluginList.find(
-			(p) => p.name === packageName || p.name === `adb-plugin-${packageName.replace("adb-plugin-", "")}`,
+			(p) => p.name === packageName || p.npmPackage === packageName,
 		);
+
+		if (plugin?.core) {
+			return reply.code(403).send({
+				error: `Core plugins can't be uninstalled. Delete the plugins/${plugin.name} folder to remove it.`,
+			});
+		}
+
+		if (plugin && !confirm) {
+			const dependents = pluginManager.getDependents(plugin.name);
+			if (dependents.length) {
+				return reply.code(409).send({
+					warning: true,
+					dependents,
+					message: `${dependents.join(", ")} depend on ${plugin.name} and may break.`,
+				});
+			}
+		}
 
 		if (plugin) {
 			await pluginManager.unloadPlugin(plugin.name, "uninstall");
@@ -502,18 +527,79 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		const { q, category } = request.query;
 		const plugins = await registry.searchPlugins(q, category);
 		const installed = pluginManager.getPluginList();
-		const installedNames = new Set(installed.map((p) => p.name));
 
 		return {
-			plugins: plugins.map((p) => ({
-				...p,
-				installed: installedNames.has(p.npmPackage) || installedNames.has(p.name),
-			})),
+			plugins: plugins.map((p) => {
+				const installedPlugin = installed.find(
+					(ip) => ip.npmPackage === p.npmPackage || ip.name === p.name,
+				);
+				const installedVersion = installedPlugin?.version || null;
+				return {
+					...p,
+					installed: !!installedPlugin,
+					installedVersion,
+					updateAvailable:
+						!!installedVersion && registry.isNewer(installedVersion, p.version),
+				};
+			}),
 		};
+	});
+
+	fastify.post("/api/plugins/update", async (request, reply) => {
+		const { packageName, confirm } = request.body || {};
+		if (!packageName) {
+			return reply.code(400).send({ error: "Package name required" });
+		}
+
+		const details = await registry.getPluginDetails(packageName);
+		if (!details) {
+			return reply.code(404).send({ error: "Plugin not found in registry" });
+		}
+
+		const installed = pluginManager.getPluginList();
+		const current = installed.find(
+			(p) => p.npmPackage === packageName || p.name === packageName,
+		);
+
+		if (current && !confirm) {
+			const dependents = pluginManager.getDependents(current.name);
+			if (dependents.length) {
+				return reply.code(409).send({
+					warning: true,
+					dependents,
+					message: `${dependents.join(", ")} depend on ${current.name} and may break after this update.`,
+				});
+			}
+		}
+
+		const target = `${details.npmPackage}@${details.version}`;
+		const result = await runNpmInstall(
+			target,
+			pluginManager,
+			logger,
+			broadcastInstallLog,
+		);
+		if (!result.ok) {
+			return reply.code(500).send({ error: result.error });
+		}
+		return { ok: true };
 	});
 
 	fastify.get("/api/plugins/categories", async () => {
 		return { categories: registry.getCategories() };
+	});
+
+	fastify.get("/api/plugins/permissions", async () => {
+		const plugins = pluginManager.getPluginList();
+		return {
+			integer: computePermissionInteger(plugins),
+			byPlugin: plugins
+				.filter((p) => (p.discordPermissions || []).length)
+				.map((p) => ({
+					name: p.displayName || p.name,
+					permissions: describePermissions(p.discordPermissions),
+				})),
+		};
 	});
 
 	fastify.get("/api/plugins/:name/brochure", async (request, reply) => {
@@ -554,19 +640,31 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 			return reply.code(403).send({ error: "Only bot owners can restart" });
 		}
 
-		logger.info("Scheduling bot restart...");
+		logger.info("Deploy + restart requested.");
 
-		setTimeout(() => {
+		// Run deploy while still up, streaming logs over WS.
+		const deploy = spawn("npm", ["run", "deploy"], {
+			cwd: process.cwd(),
+			shell: true,
+		});
+		const emitDeploy = (message) =>
+			broadcastInstallLog({ type: "deploy-log", message });
+
+		deploy.stdout.on("data", (d) => emitDeploy(d.toString()));
+		deploy.stderr.on("data", (d) => emitDeploy(d.toString()));
+
+		deploy.on("close", (code) => {
+			emitDeploy(`\n── deploy exited with code ${code}; restarting bot ──\n`);
 			const restartScript = path.join(__dirname, "restart-bot.js");
 			spawn("node", [restartScript], {
 				detached: true,
 				stdio: "ignore",
 				cwd: process.cwd(),
 			});
-			process.exit(0);
-		}, 1000);
+			setTimeout(() => process.exit(0), 500);
+		});
 
-		return { ok: true, message: "Restarting bot..." };
+		return { ok: true, message: "Deploying, then restarting..." };
 	});
 
 	fastify.get("/api/plugins/config/:pluginName", async (request, reply) => {
