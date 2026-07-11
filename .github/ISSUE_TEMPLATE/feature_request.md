@@ -36,4 +36,4 @@ Add any mockups, screenshots, or references (e.g., other websites or platforms w
 
 ---
 
-> 🧠 Please ensure this feature doesn’t already exist or is being tracked in [Projects](https://github.com/harshendram/Advanced-Discord-Bot/projects).
+> 🧠 Please ensure this feature doesn’t already exist or is being tracked in [Projects](https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot/projects).

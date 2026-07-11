@@ -63,9 +63,9 @@ client.profile = {
 	version: "2.0.0",
 	description: "Ultra-modern AI-powered Discord bot with advanced features",
 	author: "ADB Development Team",
-	website: "https://github.com/DeadIndian/Advanced-Discord-Bot",
-	github: "https://github.com/DeadIndian/Advanced-Discord-Bot",
-	support: "https://github.com/DeadIndian/Advanced-Discord-Bot/issues",
+	website: "https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot",
+	github: "https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot",
+	support: "https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot/issues",
 	features: [
 		"🤖 Advanced AI Assistant (Google Gemini)",
 		"💎 Points & Rewards System",

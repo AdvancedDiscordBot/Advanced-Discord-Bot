@@ -7,7 +7,7 @@
 ![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-4EA94B?style=for-the-badge&logo=mongodb&logoColor=white)
 ![Gemini AI](https://img.shields.io/badge/Gemini-AI-4285F4?style=for-the-badge&logo=google&logoColor=white)
 ![Plugin Ready](https://img.shields.io/badge/Plugins-Ready-6A5ACD?style=for-the-badge)
-![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
+![License](https://img.shields.io/badge/License-AGPL--3.0-blue?style=for-the-badge)
 
 <br/>
 
@@ -40,23 +40,23 @@
 <table>
 <tr>
 <td align="center">
-<img src="https://img.shields.io/github/stars/DeadIndian/Advanced-Discord-Bot?style=social" alt="GitHub Stars">
+<img src="https://img.shields.io/github/stars/AdvancedDiscordBot/Advanced-Discord-Bot?style=social" alt="GitHub Stars">
 <br><b>Stars</b>
 </td>
 <td align="center">
-<img src="https://img.shields.io/github/forks/DeadIndian/Advanced-Discord-Bot?style=social" alt="GitHub Forks">
+<img src="https://img.shields.io/github/forks/AdvancedDiscordBot/Advanced-Discord-Bot?style=social" alt="GitHub Forks">
 <br><b>Forks</b>
 </td>
 <td align="center">
-<img src="https://img.shields.io/github/issues/DeadIndian/Advanced-Discord-Bot" alt="GitHub Issues">
+<img src="https://img.shields.io/github/issues/AdvancedDiscordBot/Advanced-Discord-Bot" alt="GitHub Issues">
 <br><b>Open Issues</b>
 </td>
 <td align="center">
-<img src="https://img.shields.io/github/issues-pr/DeadIndian/Advanced-Discord-Bot" alt="GitHub Pull Requests">
+<img src="https://img.shields.io/github/issues-pr/AdvancedDiscordBot/Advanced-Discord-Bot" alt="GitHub Pull Requests">
 <br><b>Pull Requests</b>
 </td>
 <td align="center">
-<img src="https://img.shields.io/github/contributors/DeadIndian/Advanced-Discord-Bot" alt="GitHub Contributors">
+<img src="https://img.shields.io/github/contributors/AdvancedDiscordBot/Advanced-Discord-Bot" alt="GitHub Contributors">
 <br><b>Contributors</b>
 </td>
 </tr>
@@ -223,7 +223,7 @@ Refer to [DOCUMENTATION.md](./DOCUMENTATION.md) for the complete slash command r
 1. **Clone the repository**
 
    ```bash
-   git clone https://github.com/DeadIndian/Advanced-Discord-Bot.git
+   git clone https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot.git
    cd Advanced-Discord-Bot
    ```
 
@@ -265,7 +265,7 @@ Refer to [DOCUMENTATION.md](./DOCUMENTATION.md) for the complete slash command r
 1. **Clone the repository**
 
    ```bash
-   git clone https://github.com/DeadIndian/Advanced-Discord-Bot.git
+   git clone https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot.git
    cd Advanced-Discord-Bot
    ```
 
@@ -402,16 +402,17 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for implementation details.
 - 🐛 **Bug Reports** - Open a GitHub issue
 - 💡 **Feature Requests** - Open an issue with the feature proposal
 - 🔌 **Plugin Ideas** - Discuss or submit plugin-focused issues and PRs
+- 💬 **Direct Contact** - Email [gollabharath2007@gmail.com](mailto:gollabharath2007@gmail.com) or reach out via Discord to **@deadindian**
 
 ---
 
 ## 📄 License
 
-This project is licensed under the **MIT License**. See [LICENSE](LICENSE) for details.
+This project is licensed under the **GNU Affero General Public License v3.0**. See [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-![License: MIT](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
+![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue?style=for-the-badge)
 
 </div>
 
@@ -430,7 +431,7 @@ This project is licensed under the **MIT License**. See [LICENSE](LICENSE) for d
 
 ### Self-hosted • Plugin-ready • Dashboard-managed
 
-[🌟 Star this repo](https://github.com/DeadIndian/Advanced-Discord-Bot) • [🍴 Fork & Deploy](https://github.com/DeadIndian/Advanced-Discord-Bot/fork) • [📖 Read the docs](#quick-start)
+[🌟 Star this repo](https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot) • [🍴 Fork & Deploy](https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot/fork) • [📖 Read the docs](#quick-start)
 
 ---
 

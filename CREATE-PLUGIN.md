@@ -624,4 +624,4 @@ See these existing plugins for reference:
 ## Need Help?
 
 - Discord: [ADB Support Server](https://discord.gg/ADB_PLACEHOLDER)
-- GitHub: [ADB Discord Bot](https://github.com/DeadIndian/Advanced-Discord-Bot)
+- GitHub: [ADB Discord Bot](https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot)

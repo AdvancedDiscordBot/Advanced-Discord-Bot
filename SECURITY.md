@@ -17,7 +17,7 @@ If you discover a security vulnerability, **please do not open an issue** on Git
 
 Instead, follow these steps:
 
-1. **Email the maintainer directly**
+1. **Email the maintainer directly** at [gollabharath2007@gmail.com](mailto:gollabharath2007@gmail.com) or reach out via Discord to **@deadindian**
 2. Include the following details:
    - Description of the vulnerability
    - Steps to reproduce (if possible)

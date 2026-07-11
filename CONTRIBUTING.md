@@ -55,7 +55,7 @@ Plugin-first contributions:
 ### Local Setup
 
 ```bash
-git clone https://github.com/DeadIndian/Advanced-Discord-Bot.git
+git clone https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot.git
 cd Advanced-Discord-Bot
 npm install
 cp .env.example .env
