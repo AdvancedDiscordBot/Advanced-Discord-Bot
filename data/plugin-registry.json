@@ -1,4 +1,375 @@
 {
-  "plugins": [],
-  "lastFetch": 1783770319626
+  "plugins": [
+    {
+      "name": "adb-plugin-aegis",
+      "displayName": "Aegis",
+      "description": "Automated threat detection: anti-raid, anti-spam, anti-link, anti-alt. Each module independently toggleable.",
+      "author": "DeadIndian",
+      "version": "1.0.2",
+      "category": "moderation",
+      "npmPackage": "adb-plugin-aegis",
+      "main": "index.js",
+      "requiresRestart": false,
+      "verified": true,
+      "permissions": [
+        "db.read",
+        "db.write",
+        "commands.register"
+      ],
+      "configSchema": {
+        "type": "object",
+        "properties": {
+          "log_channel_id": {
+            "type": "string",
+            "default": null
+          },
+          "raid_joins": {
+            "type": "number",
+            "default": 10
+          },
+          "raid_seconds": {
+            "type": "number",
+            "default": 10
+          },
+          "spam_messages": {
+            "type": "number",
+            "default": 5
+          },
+          "spam_seconds": {
+            "type": "number",
+            "default": 3
+          },
+          "spam_action": {
+            "type": "string",
+            "enum": [
+              "warn",
+              "mute",
+              "kick",
+              "ban"
+            ],
+            "default": "mute"
+          },
+          "alt_min_age_days": {
+            "type": "number",
+            "default": 7
+          },
+          "alt_action": {
+            "type": "string",
+            "enum": [
+              "flag",
+              "kick"
+            ],
+            "default": "flag"
+          }
+        }
+      }
+    },
+    {
+      "name": "adb-plugin-levels",
+      "displayName": "Levels & XP System",
+      "description": "Track user activity with XP, levels, and role rewards.",
+      "author": "DeadIndian",
+      "version": "1.0.2",
+      "category": "entertainment",
+      "npmPackage": "adb-plugin-levels",
+      "main": "index.js",
+      "requiresRestart": false,
+      "verified": true,
+      "permissions": [
+        "db.read",
+        "db.write",
+        "commands.register",
+        "events.register"
+      ],
+      "configSchema": {
+        "type": "object",
+        "properties": {
+          "xpPerMessage": {
+            "type": "number",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 50
+          },
+          "xpCooldown": {
+            "type": "number",
+            "default": 60,
+            "minimum": 10,
+            "maximum": 300
+          },
+          "xpPerMinuteLimit": {
+            "type": "number",
+            "default": 100,
+            "minimum": 10,
+            "maximum": 1000
+          },
+          "levelUpChannelId": {
+            "type": "string",
+            "default": null
+          }
+        }
+      }
+    },
+    {
+      "name": "adb-plugin-moderation",
+      "displayName": "Basic Moderation",
+      "description": "Core moderation commands: ban, kick, timeout, warn, purge, tickets, and case logging.",
+      "author": "DeadIndian",
+      "version": "1.0.1",
+      "category": "moderation",
+      "npmPackage": "adb-plugin-moderation",
+      "main": "index.js",
+      "requiresRestart": true,
+      "verified": true,
+      "permissions": [
+        "db.read",
+        "db.write",
+        "commands.register"
+      ],
+      "configSchema": {
+        "type": "object",
+        "properties": {
+          "log_channel_id": {
+            "type": "string",
+            "default": null
+          },
+          "ticket_category_id": {
+            "type": "string",
+            "default": null
+          },
+          "ticket_support_role_id": {
+            "type": "string",
+            "default": null
+          },
+          "ticket_log_channel_id": {
+            "type": "string",
+            "default": null
+          },
+          "warn_thresholds": {
+            "type": "object",
+            "default": {
+              "3": {
+                "action": "timeout",
+                "duration": "1h"
+              },
+              "5": {
+                "action": "timeout",
+                "duration": "24h"
+              },
+              "7": {
+                "action": "kick"
+              },
+              "10": {
+                "action": "ban"
+              }
+            }
+          },
+          "dm_on_action": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      }
+    },
+    {
+      "name": "adb-plugin-reminders",
+      "displayName": "Reminders",
+      "description": "Adds /remind to set, list, and cancel personal reminders. Delivers via DM with a channel fallback.",
+      "author": "DeadIndian",
+      "version": "1.0.2",
+      "category": "utility",
+      "npmPackage": "adb-plugin-reminders",
+      "main": "index.js",
+      "requiresRestart": false,
+      "verified": true,
+      "permissions": [
+        "db.read",
+        "db.write",
+        "commands.register"
+      ],
+      "configSchema": {
+        "type": "object",
+        "properties": {
+          "maxPerUser": {
+            "type": "number",
+            "default": 25,
+            "minimum": 1,
+            "maximum": 200,
+            "description": "Max active reminders a single user can have per server"
+          }
+        }
+      }
+    },
+    {
+      "name": "adb-plugin-confessions",
+      "displayName": "Anonymous Confessions",
+      "description": "Members submit anonymous confessions via webhook to a configured channel. Includes moderation, cooldowns, and reporting.",
+      "author": "DeadIndian",
+      "version": "1.0.0",
+      "category": "entertainment",
+      "npmPackage": "adb-plugin-confessions",
+      "main": "index.js",
+      "requiresRestart": false,
+      "verified": true,
+      "permissions": [
+        "db.read",
+        "db.write",
+        "commands.register",
+        "manageWebhooks"
+      ],
+      "configSchema": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string",
+            "description": "Channel ID where confessions appear"
+          },
+          "cooldown": {
+            "type": "number",
+            "default": 60,
+            "minimum": 0,
+            "maximum": 3600,
+            "description": "Cooldown in seconds between confessions"
+          },
+          "requireApproval": {
+            "type": "boolean",
+            "default": false,
+            "description": "Require mod approval before posting"
+          }
+        }
+      }
+    },
+    {
+      "name": "adb-plugin-counting",
+      "displayName": "Counting",
+      "description": "Number counting game. Users take turns counting sequentially. Wrong numbers or double-posting resets the count.",
+      "author": "DeadIndian",
+      "version": "1.0.0",
+      "category": "entertainment",
+      "npmPackage": "adb-plugin-counting",
+      "main": "index.js",
+      "requiresRestart": false,
+      "verified": true,
+      "permissions": [
+        "db.read",
+        "db.write",
+        "commands.register",
+        "messages.read"
+      ],
+      "configSchema": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string",
+            "description": "Channel ID where counting happens"
+          },
+          "resetOnFail": {
+            "type": "boolean",
+            "default": true,
+            "description": "Reset to 0 on wrong count"
+          },
+          "milestones": {
+            "type": "string",
+            "default": "10,25,50,100,250,500,1000",
+            "description": "Comma-separated milestones that trigger a celebratory message"
+          }
+        }
+      }
+    },
+    {
+      "name": "adb-plugin-giveaways",
+      "displayName": "Giveaways",
+      "description": "Host giveaways with configurable duration, winners, and requirements. Reroll support, auto-end, and buttons to enter.",
+      "author": "DeadIndian",
+      "version": "1.0.0",
+      "category": "entertainment",
+      "npmPackage": "adb-plugin-giveaways",
+      "main": "index.js",
+      "requiresRestart": false,
+      "verified": true,
+      "permissions": [
+        "db.read",
+        "db.write",
+        "commands.register"
+      ],
+      "configSchema": {
+        "type": "object",
+        "properties": {
+          "defaultDuration": {
+            "type": "string",
+            "default": "1h",
+            "description": "Default giveaway duration (e.g., 30m, 1h, 1d)"
+          },
+          "maxWinners": {
+            "type": "number",
+            "default": 10,
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Max winners per giveaway"
+          }
+        }
+      }
+    },
+    {
+      "name": "adb-plugin-invite-tracker",
+      "displayName": "Invite Tracker",
+      "description": "Track who invited whom. Invite leaderboard, join/leave logging, fake join detection, and milestone roles.",
+      "author": "DeadIndian",
+      "version": "1.0.0",
+      "category": "analytics",
+      "npmPackage": "adb-plugin-invite-tracker",
+      "main": "index.js",
+      "requiresRestart": false,
+      "verified": true,
+      "permissions": [
+        "db.read",
+        "db.write",
+        "commands.register"
+      ],
+      "configSchema": {
+        "type": "object",
+        "properties": {
+          "trackLeaves": {
+            "type": "boolean",
+            "default": true,
+            "description": "Deduct invite credit when an invited member leaves"
+          },
+          "bonusRoles": {
+            "type": "string",
+            "default": "",
+            "description": "Comma-separated: roleID:inviteCount e.g. 123:5,456:10"
+          }
+        }
+      }
+    },
+    {
+      "name": "adb-plugin-todo",
+      "displayName": "To-Do List",
+      "description": "Per-user to-do lists with add, list, complete, edit, and clear commands.",
+      "author": "DeadIndian",
+      "version": "1.0.0",
+      "category": "utility",
+      "npmPackage": "adb-plugin-todo",
+      "main": "index.js",
+      "requiresRestart": false,
+      "verified": true,
+      "permissions": [
+        "db.read",
+        "db.write",
+        "commands.register"
+      ],
+      "configSchema": {
+        "type": "object",
+        "properties": {
+          "maxItems": {
+            "type": "number",
+            "default": 50,
+            "minimum": 1,
+            "maximum": 500,
+            "description": "Max to-do items per user per server"
+          }
+        }
+      }
+    }
+  ],
+  "lastFetch": 1783790017224
 }

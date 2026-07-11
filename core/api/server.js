@@ -605,8 +605,9 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 	});
 
 	fastify.get("/api/plugins/marketplace", async (request) => {
-		const { q, category } = request.query;
-		const plugins = await registry.searchPlugins(q, category);
+		const { q, category, refresh } = request.query;
+		const force = refresh === "1" || refresh === "true";
+		const plugins = await registry.searchPlugins(q, category, force);
 		const installed = pluginManager.getPluginList();
 
 		return {

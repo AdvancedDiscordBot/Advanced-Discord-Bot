@@ -4,9 +4,32 @@ const axios = require("axios");
 const semver = require("semver");
 const { createLogger } = require("./logger");
 
-const REGISTRY_URL =
-	process.env.PLUGIN_REGISTRY_URL ||
-	"https://raw.githubusercontent.com/AdvancedDiscordBot/registry/main/plugins.json";
+// Fallback only — the real registry URL comes from PLUGIN_REGISTRY_URL in .env.
+const FALLBACK_REGISTRY_URL =
+	"https://github.com/AdvancedDiscordBot/registry/blob/main/plugins.json";
+
+// GitHub "blob" URLs serve an HTML page, not JSON. Rewrite them (and the
+// github.com/raw form) to raw.githubusercontent.com so axios receives JSON.
+function normalizeRegistryUrl(url) {
+	if (!url) return url;
+	try {
+		const u = new URL(url);
+		if (u.hostname === "github.com") {
+			// /<owner>/<repo>/blob/<ref>/<path> -> raw.githubusercontent.com/<owner>/<repo>/<ref>/<path>
+			const m = u.pathname.match(/^\/([^/]+)\/([^/]+)\/(?:blob|raw)\/(.+)$/);
+			if (m) {
+				return `https://raw.githubusercontent.com/${m[1]}/${m[2]}/${m[3]}`;
+			}
+		}
+	} catch {
+		// not a valid URL — return as-is and let the fetch fail loudly
+	}
+	return url;
+}
+
+const REGISTRY_URL = normalizeRegistryUrl(
+	process.env.PLUGIN_REGISTRY_URL || FALLBACK_REGISTRY_URL,
+);
 
 const REGISTRY_CACHE_FILE = path.join(process.cwd(), "data", "plugin-registry.json");
 const SUBMISSIONS_FILE = path.join(process.cwd(), "data", "plugin-submissions.json");
@@ -30,9 +53,24 @@ class PluginRegistry {
 		}
 
 		try {
-			this.logger.info("Fetching plugin registry from remote...");
+			this.logger.info(`Fetching plugin registry from ${REGISTRY_URL} ...`);
 			const response = await axios.get(REGISTRY_URL, { timeout: 10000 });
-			this.registry = response.data.plugins || [];
+			let data = response.data;
+			// raw.githubusercontent serves text/plain; axios usually parses it, but
+			// guard against a string body (or an HTML error page) all the same.
+			if (typeof data === "string") {
+				try {
+					data = JSON.parse(data);
+				} catch {
+					data = null;
+				}
+			}
+			const plugins = Array.isArray(data?.plugins) ? data.plugins : null;
+			if (!plugins) {
+				this.logger.warn("Registry response had no plugins array, keeping cache");
+				return this.registry || this.loadCache() || [];
+			}
+			this.registry = plugins;
 			this.lastFetch = Date.now();
 			this.saveCache();
 			return this.registry;
@@ -80,8 +118,8 @@ class PluginRegistry {
 		return [];
 	}
 
-	async searchPlugins(query, category = null) {
-		const plugins = await this.fetchRegistry();
+	async searchPlugins(query, category = null, force = false) {
+		const plugins = await this.fetchRegistry(force);
 
 		let filtered = plugins;
 		if (query) {

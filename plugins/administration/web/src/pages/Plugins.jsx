@@ -21,7 +21,7 @@ function humanizeFlag(flag) {
   return FLAG_LABELS[flag] || flag.replace(/([a-z])([A-Z])/g, "$1 $2");
 }
 
-const TABS = ["Installed", "Browse", "Core"];
+const TABS = ["Browse", "Installed", "Core"];
 
 const CATEGORY_META = {
   features:      { label: "Features",      Icon: Zap },
@@ -34,13 +34,14 @@ const CATEGORY_META = {
 export function Plugins() {
   const { guildData } = useOutletContext();
   const guild = guildData?.guild;
-  const [tab, setTab] = useState("Installed");
+  const [tab, setTab] = useState("Browse");
   const [plugins, setPlugins] = useState([]);
   const [market, setMarket] = useState([]);
   const [categories, setCategories] = useState([]);
   const [query, setQuery] = useState("");
   const [selectedCat, setSelectedCat] = useState("");
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [operating, setOperating] = useState(null); // pluginName being acted on
   const [showInstallModal, setShowInstallModal] = useState(false);
   const [customPackage, setCustomPackage] = useState("");
@@ -55,7 +56,7 @@ export function Plugins() {
 
   const { request } = useApiFetch();
 
-  const loadAll = useCallback(async () => {
+  const loadAll = useCallback(async (force = false) => {
     setLoading(true);
     try {
       const [pluginsRes, catRes] = await Promise.all([
@@ -64,7 +65,7 @@ export function Plugins() {
       ]);
       setPlugins(pluginsRes?.plugins || []);
       setCategories(catRes?.categories || []);
-      const marketRes = await request("/api/plugins/marketplace").catch(() => ({ plugins: [] }));
+      const marketRes = await request(`/api/plugins/marketplace${force ? "?refresh=1" : ""}`).catch(() => ({ plugins: [] }));
       setMarket(marketRes?.plugins || []);
       const permsRes = await request("/api/plugins/permissions").catch(() => ({ integer: "0", byPlugin: [] }));
       setPermissions(permsRes || { integer: "0", byPlugin: [] });
@@ -76,6 +77,15 @@ export function Plugins() {
   }, [request]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    try {
+      await loadAll(true);
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   async function handleInstall(pkgName) {
     setOperating(pkgName);
@@ -243,6 +253,10 @@ export function Plugins() {
           <p style={s.pageSubtitle}>Manage and discover plugins for {guild.name}</p>
         </div>
         <div style={s.headerActions}>
+          <button style={s.ghostBtn} onClick={handleRefresh} disabled={refreshing} title="Pull the latest plugins from the registry">
+            <RefreshCw size={14} style={refreshing ? { animation: "spin 0.7s linear infinite" } : undefined} />
+            {refreshing ? "Refreshing…" : "Refresh"}
+          </button>
           <button style={s.ghostBtn} onClick={() => window.open("https://github.com/adb-plugin-registry/registry", "_blank")}>
             <ArrowUpRight size={14} />
             Submit Plugin
