@@ -45,13 +45,6 @@ export function Sidebar({ guild }) {
         {/* Plugin-injected nav items land here in future */}
         <div id="plugin-nav-items" />
       </nav>
-
-      <div style={styles.footer}>
-        <div style={styles.hostingCard}>
-          Managed hosting?{' '}
-          <span style={styles.hostingHandle}>@deadindian</span> on Discord.
-        </div>
-      </div>
     </aside>
   );
 }
@@ -124,22 +117,5 @@ const styles = {
     background: colors.accentTint,
     color: colors.accentOnTint,
     fontWeight: 500,
-  },
-  footer: {
-    padding: '12px',
-    borderTop: `1.5px solid ${colors.hairline}`,
-  },
-  hostingCard: {
-    background: colors.accentTint,
-    borderRadius: `${radius.card}px`,
-    padding: '10px 12px',
-    color: colors.accentOnTint,
-    fontFamily: fonts.body,
-    fontSize: `${fontSize.caption}px`,
-    lineHeight: 1.4,
-  },
-  hostingHandle: {
-    color: colors.accent,
-    fontWeight: 700,
   },
 };

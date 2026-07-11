@@ -22,7 +22,7 @@ class PluginContext {
 	}
 
 	build() {
-		return Object.freeze({
+		const ctx = {
 			client: this.client,
 			db: this.db,
 			scheduler: this.scheduler,
@@ -39,10 +39,32 @@ class PluginContext {
 					options,
 				),
 			defineModel: (modelName, schema) => this.defineModel(modelName, schema),
+			// Pre-declared so plugins can assign ctx.models = {...} without
+			// hitting "Cannot add property to non-extensible object".
+			// We make it writable while keeping everything else read-only
+			// to match the safety guarantees of the original Object.freeze().
+			models: null,
 			hooks: this.hooks,
 			config: this.config,
 			logger: this.logger,
+		};
+		// Make all properties read-only except 'models'
+		Object.keys(ctx).forEach(function (k) {
+			if (k !== "models") {
+				Object.defineProperty(ctx, k, {
+					writable: false,
+					configurable: false,
+				});
+			} else {
+				Object.defineProperty(ctx, k, {
+					writable: true,
+					configurable: false,
+				});
+			}
 		});
+		// Prevent adding new properties (non-extensible)
+		Object.preventExtensions(ctx);
+		return ctx;
 	}
 
 	defineModel(modelName, schema) {

@@ -4,7 +4,12 @@ set -euo pipefail
 BOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PID_FILE="$BOT_DIR/data/bot.pid"
 LOG_FILE="$BOT_DIR/logs/bot.log"
+WATCHDOG_PID_FILE="$BOT_DIR/data/watchdog.pid"
 CMD="${1:-help}"
+
+_watchdog_running() {
+    [ -f "$WATCHDOG_PID_FILE" ] && kill -0 "$(cat "$WATCHDOG_PID_FILE")" 2>/dev/null
+}
 
 _running() {
     [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null
@@ -15,6 +20,12 @@ _pid() {
 }
 
 start() {
+    if _watchdog_running; then
+        echo "Watchdog is running — use ./adb-watchdog.sh for lifecycle management."
+        echo "The watchdog manages the bot automatically; no need to start it manually."
+        exit 0
+    fi
+
     if _running; then
         echo "Already running (PID $(_pid)). Use 'restart' to restart."
         exit 1
@@ -40,6 +51,12 @@ start() {
 }
 
 stop() {
+    if _watchdog_running; then
+        echo "Watchdog is running — use ./adb-watchdog.sh stop or the dashboard."
+        echo "Killing the bot directly will cause the watchdog to restart it."
+        return 0
+    fi
+
     if ! _running; then
         echo "Bot not running."
         rm -f "$PID_FILE"
@@ -108,8 +125,8 @@ case "$CMD" in
     *)
         echo "Usage: $0 {start|stop|restart|status|logs}"
         echo ""
-        echo "  start    Start bot detached (stays alive after terminal close)"
-        echo "  stop     Gracefully stop the bot (SIGTERM, SIGKILL after 10s)"
+        echo "  start      Start bot directly (or use ./adb-watchdog.sh for production)"
+        echo "  stop       Gracefully stop the bot (SIGTERM, SIGKILL after 10s)"
         echo "  restart  stop + start"
         echo "  status   Show running state, PID, uptime, cpu/mem"
         echo "  logs     Tail live log output (Ctrl-C to exit)"

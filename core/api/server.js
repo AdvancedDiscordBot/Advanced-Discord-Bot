@@ -1,11 +1,12 @@
 const fastifyFactory = require("fastify");
+const cors = require("@fastify/cors");
 const cookie = require("@fastify/cookie");
 const session = require("@fastify/session");
 const MongoStore = require("connect-mongo");
 const axios = require("axios");
 const crypto = require("crypto");
 const path = require("path");
-const { WebSocketServer } = require("ws");
+
 const { spawn, fork } = require("child_process");
 const { createLogger } = require("../logger");
 const { registry } = require("../pluginRegistry");
@@ -42,22 +43,9 @@ function hasGuildPermission(guild) {
 	);
 }
 
-function parseCookies(headerValue) {
-	const result = {};
-	if (!headerValue) return result;
-
-	const parts = headerValue.split(";");
-	for (const part of parts) {
-		const [key, ...rest] = part.trim().split("=");
-		result[key] = rest.join("=");
-	}
-
-	return result;
-}
-
 async function startApiServer({ client, db, pluginManager, hooks, startListening = true }) {
 	const logger = createLogger("ApiServer");
-	const port = Number(process.env.BOT_API_PORT || 3210);
+	const port = Number(process.env.BOT_API_PORT);
 	const baseUrl = process.env.BOT_API_BASE_URL || `http://localhost:${port}`;
 	const dashboardRedirect = process.env.DASHBOARD_REDIRECT_URL || "";
 
@@ -76,17 +64,65 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		return null;
 	}
 
+	if (!port) {
+		logger.error("BOT_API_PORT not set in .env");
+		return null;
+	}
+
 	const fastify = fastifyFactory({
 		logger: false,
 		trustProxy: true,
 	});
+
+	// Tolerate empty-body POSTs sent with Content-Type: application/json.
+	// Fastify's default JSON parser throws (400) on a zero-length body, which
+	// otherwise breaks bodyless actions like plugin reload/restart/unload.
+	fastify.addContentTypeParser(
+		"application/json",
+		{ parseAs: "string" },
+		(req, body, done) => {
+			if (!body || !body.trim()) return done(null, {});
+			try {
+				done(null, JSON.parse(body));
+			} catch (err) {
+				err.statusCode = 400;
+				done(err, undefined);
+			}
+		},
+	);
 
 	const sessionStore = MongoStore.create({
 		mongoUrl: process.env.MONGODB_URI,
 		collectionName: "adb_sessions",
 	});
 
-	await fastify.register(cookie);
+	await fastify.register(cors, {
+		origin: process.env.CORS_ORIGIN || true,
+		credentials: true,
+	});
+
+	// Add Content-Security-Policy to block Cloudflare's auto-injected beacon
+	// script (static.cloudflareinsights.com/beacon.min.js) which causes CORS
+	// errors, SRI hash mismatches, and console noise when Cloudflare Web
+	// Analytics is enabled on the proxied domain. Applied on all responses so
+	// it works for both inline HTML and @fastify/static-served files.
+	fastify.addHook("onRequest", async (request, reply) => {
+		reply.header(
+			"Content-Security-Policy",
+			["default-src 'self'",
+			 "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://fonts.googleapis.com",
+			 "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+			 "font-src 'self' https://fonts.gstatic.com",
+			 "connect-src 'self' ws: wss:",
+			 "img-src 'self' https://cdn.discordapp.com data:",
+			 "frame-src 'self' https://discord.com",
+			 "object-src 'none'"].join("; ")
+		);
+	});
+
+	await fastify.register(cookie, {
+		secret: sessionSecret,
+	});
 	await fastify.register(session, {
 		secret: sessionSecret,
 		cookieName: "adb.sid",
@@ -455,6 +491,9 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 	};
 
 	let broadcastInstallLog = () => {};
+	// Reassigned once broadcast() exists (see below). Runs an async unit of work
+	// as a "job" whose start/log/end are streamed to the dashboard Jobs panel.
+	let runJob = async (_meta, fn) => fn(() => {});
 
 	fastify.get("/api/plugins", async () => ({
 		plugins: pluginManager.getPluginList(),
@@ -472,11 +511,9 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 			});
 		}
 
-		const result = await runNpmInstall(
-			packageName,
-			pluginManager,
-			logger,
-			broadcastInstallLog,
+		const result = await runJob(
+			{ label: `Install ${packageName}`, kind: "install" },
+			(emitLog) => runNpmInstall(packageName, pluginManager, logger, emitLog),
 		);
 		if (!result.ok) {
 			return reply.code(500).send({ error: result.error });
@@ -525,7 +562,10 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 			});
 		}
 
-		const result = await runNpmUninstall(npmTarget, logger, broadcastInstallLog);
+		const result = await runJob(
+			{ label: `Uninstall ${npmTarget}`, kind: "uninstall" },
+			(emitLog) => runNpmUninstall(npmTarget, logger, emitLog),
+		);
 		if (!result.ok) {
 			return reply.code(500).send({ error: result.error });
 		}
@@ -547,8 +587,17 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 
 	fastify.post("/api/plugins/reload/:name", async (request, reply) => {
 		if (!requireOwner(request, reply)) return;
-		const ok = await pluginManager.reloadPlugin(request.params.name);
-		if (!ok) {
+		const name = request.params.name;
+		const result = await runJob(
+			{ label: `Reload ${name}`, kind: "reload" },
+			async (emitLog) => {
+				emitLog(`Reloading plugin ${name}…\n`);
+				const ok = await pluginManager.reloadPlugin(name, { force: true });
+				emitLog(ok ? "Reloaded.\n" : "Plugin could not be reloaded.\n");
+				return { ok };
+			},
+		);
+		if (!result.ok) {
 			return reply.code(409).send({ error: "Plugin not reloadable" });
 		}
 
@@ -605,15 +654,20 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 			}
 		}
 
+		// Update installs from npm. If the registry entry has no npmPackage,
+		// there is nothing to install — stop rather than guessing a package name.
+		if (!details.npmPackage) {
+			return reply.code(422).send({
+				error: `Registry entry for ${packageName} has no npmPackage; cannot update.`,
+			});
+		}
 		const target = `${details.npmPackage}@${details.version}`;
 		if (!isValidPluginPackage(target)) {
 			return reply.code(400).send({ error: "Invalid package in registry entry." });
 		}
-		const result = await runNpmInstall(
-			target,
-			pluginManager,
-			logger,
-			broadcastInstallLog,
+		const result = await runJob(
+			{ label: `Update ${details.npmPackage} → ${details.version}`, kind: "update" },
+			(emitLog) => runNpmInstall(target, pluginManager, logger, emitLog),
 		);
 		if (!result.ok) {
 			return reply.code(500).send({ error: result.error });
@@ -678,29 +732,42 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 
 		logger.info("Deploy + restart requested.");
 
-		// Run deploy while still up, streaming logs over WS.
-		const deploy = spawn("npm", ["run", "deploy"], {
-			cwd: process.cwd(),
-			shell: true,
-		});
-		const emitDeploy = (message) =>
-			broadcastInstallLog({ type: "deploy-log", message });
+		// Tell the independent watchdog to handle the restart. The watchdog
+		// runs the bot as a child process, so it can safely spawn a replacement
+		// without the bot having to orchestrate its own death.
+		const watchdogPort = process.env.WATCHDOG_PORT;
+		if (!watchdogPort) {
+			return reply.code(502).send({ error: "WATCHDOG_PORT not set in .env" });
+		}
+		try {
+			const ac = new AbortController();
+			const timeout = setTimeout(() => ac.abort(), 120000); // 2 min timeout for deploy
 
-		deploy.stdout.on("data", (d) => emitDeploy(d.toString()));
-		deploy.stderr.on("data", (d) => emitDeploy(d.toString()));
-
-		deploy.on("close", (code) => {
-			emitDeploy(`\n── deploy exited with code ${code}; restarting bot ──\n`);
-			const restartScript = path.join(__dirname, "restart-bot.js");
-			spawn("node", [restartScript], {
-				detached: true,
-				stdio: "ignore",
-				cwd: process.cwd(),
+			const response = await fetch(`http://127.0.0.1:${watchdogPort}/restart`, {
+				method: "POST",
+				signal: ac.signal,
 			});
-			setTimeout(() => process.exit(0), 500);
-		});
 
-		return { ok: true, message: "Deploying, then restarting..." };
+			clearTimeout(timeout);
+			const data = await response.json();
+
+			if (!response.ok) {
+				logger.error(`Watchdog restart failed: ${data.error}`);
+				return reply.code(500).send({ error: data.error || "Restart failed" });
+			}
+
+			logger.info("Watchdog accepted restart request. Bot will be replaced momentarily.");
+
+			// The watchdog handles deploy + graceful replacement. The current
+			// process will be killed by the watchdog once the new one is ready.
+			// We send the response first, then let the process be terminated.
+			return reply.send({ ok: true, message: "Restarting…" });
+		} catch (err) {
+			logger.error(`Failed to reach watchdog: ${err.message}`);
+			return reply.code(502).send({
+				error: `Cannot reach watchdog on port ${watchdogPort}. Is it running? (./adb-watchdog.sh start)`,
+			});
+		}
 	});
 
 	fastify.get("/api/plugins/config/:pluginName", async (request, reply) => {
@@ -855,61 +922,20 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		};
 	});
 
-	const wss = new WebSocketServer({ server: fastify.server, path: "/ws" });
-	const wsClients = new Set();
-
-	const getSessionFromRequest = async (req) => {
-		const cookies = parseCookies(req.headers.cookie || "");
-		const rawSid = cookies["adb.sid"];
-		if (!rawSid) return null;
-
-		const unsigned = fastify.unsignCookie(rawSid);
-		if (!unsigned.valid) return null;
-
-		return new Promise((resolve) => {
-			sessionStore.get(unsigned.value, (error, sessionData) => {
-				if (error) return resolve(null);
-				resolve(sessionData);
-			});
-		});
-	};
-
-	wss.on("connection", async (socket, req) => {
-		const sessionData = await getSessionFromRequest(req);
-		if (!sessionData?.user) {
-			socket.close();
-			return;
-		}
-
-		socket.sessionData = sessionData;
-		wsClients.add(socket);
-
-		socket.on("close", () => {
-			wsClients.delete(socket);
-		});
-	});
+	// WebSocket broadcasting is handled by the watchdog process.
+	// The bot pushes events to the watchdog via HTTP POST to
+	// /api/ws-broadcast, which the watchdog then forwards to all
+	// connected WebSocket clients. This ensures the WebSocket
+	// connection survives bot restarts.
+	const watchdogPortLocal = process.env.WATCHDOG_PORT;
 
 	const broadcast = (event) => {
-		for (const socket of wsClients) {
-			if (socket.readyState !== socket.OPEN) continue;
-
-			const sessionData = socket.sessionData || {};
-			const guildId = event.guildId;
-
-			if (guildId) {
-				const ownerIds = sessionData.ownerIds || [];
-				const allowed = sessionData.adminGuildIds || [];
-
-				if (
-					!ownerIds.includes(sessionData.user?.id) &&
-					!allowed.includes(guildId)
-				) {
-					continue;
-				}
-			}
-
-			socket.send(JSON.stringify(event));
-		}
+		if (!watchdogPortLocal) return;
+		fetch(`http://127.0.0.1:${watchdogPortLocal}/api/ws-broadcast`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(event),
+		}).catch(function () {});
 	};
 
 	hooks.onAny((hookName, payload) => {
@@ -930,16 +956,49 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		});
 	};
 
+	// Job registry: wraps an async operation so the dashboard can show a live
+	// progress row + expandable CLI log. `fn` receives an emitLog(chunk) it can
+	// pass to the npm helpers. Errors are captured and reported, never thrown up.
+	let jobSeq = 0;
+	runJob = async (meta, fn) => {
+		const id = `job-${Date.now()}-${++jobSeq}`;
+		const job = { id, label: meta.label, kind: meta.kind || "task" };
+		broadcast({ type: "job", event: "start", job });
+		const emitLog = (chunk) => {
+			const message = typeof chunk === "string" ? chunk : chunk?.message || "";
+			const stream = chunk?.type === "stderr" ? "stderr" : "stdout";
+			if (message) broadcast({ type: "job", event: "log", id, stream, message });
+		};
+		try {
+			const result = await fn(emitLog);
+			const ok = !result || result.ok !== false;
+			broadcast({
+				type: "job",
+				event: "end",
+				id,
+				ok,
+				error: ok ? null : result.error || "failed",
+			});
+			return result;
+		} catch (error) {
+			broadcast({ type: "job", event: "end", id, ok: false, error: error.message });
+			throw error;
+		}
+	};
+
 	const listen = async () => {
 		await fastify.listen({ port, host: "0.0.0.0" });
 		logger.info(`API listening on ${baseUrl}`);
+		// WebSocket server is hosted by the watchdog process on the same
+		// port (3008) so it survives bot restarts. The watchdog proxies
+		// HTTP to us on port BOT_API_PORT and handles /ws natively.
 	};
 
 	if (startListening) {
 		await listen();
 	}
 
-	return { fastify, wss, broadcastInstallLog, runNpmInstall, listen };
+	return { fastify, broadcastInstallLog, runNpmInstall, listen };
 }
 
 async function runNpmInstallInternal(packageName, emitLog) {

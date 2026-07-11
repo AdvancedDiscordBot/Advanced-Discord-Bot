@@ -342,17 +342,20 @@ class PluginManager {
 		return true;
 	}
 
-	async reloadPlugin(pluginName) {
+	async reloadPlugin(pluginName, { force = false } = {}) {
 		const pluginState = this.plugins.get(pluginName);
 		if (!pluginState || pluginName === "core") return false;
-		if (!pluginState.hotReloadEligible) return false;
+		// File-watcher reloads respect eligibility; a manual reload forces it.
+		if (!force && !pluginState.hotReloadEligible) return false;
 
 		const entryPath = pluginState.entryPath;
 		if (!entryPath) return false;
 
 		await this.unloadPlugin(pluginName, "reload");
 
-		delete require.cache[require.resolve(entryPath)];
+		// Bust the plugin's whole require-cache subtree so edited command/lib
+		// files are re-read, not just the entry module.
+		this.bustRequireCache(pluginState.path, entryPath);
 
 		const manifest = pluginState.manifest;
 		const plugin = {
@@ -360,10 +363,31 @@ class PluginManager {
 			manifest,
 			basePath: pluginState.path,
 			entryPath,
+			source: pluginState.source,
+			packageName: pluginState.packageName,
 		};
 
 		await this.loadPlugin(plugin);
-		return true;
+		return this.plugins.get(pluginName)?.enabled === true;
+	}
+
+	bustRequireCache(basePath, entryPath) {
+		try {
+			delete require.cache[require.resolve(entryPath)];
+		} catch {
+			/* entry may be gone (uninstall/reload race) */
+		}
+		if (!basePath) return;
+		const prefix = basePath.endsWith(path.sep) ? basePath : basePath + path.sep;
+		const nmDir = prefix + "node_modules" + path.sep;
+		for (const key of Object.keys(require.cache)) {
+			// Re-read the plugin's own source, but leave its node_modules alone —
+			// re-requiring a bundled dep (e.g. mongoose) would create a second,
+			// disconnected instance and break model registration.
+			if (key.startsWith(prefix) && !key.startsWith(nmDir)) {
+				delete require.cache[key];
+			}
+		}
 	}
 
 	registerCommand(pluginName, command) {

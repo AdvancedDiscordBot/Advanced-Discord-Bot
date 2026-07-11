@@ -48,10 +48,13 @@ export function useApiFetch() {
     setLoading(true);
     setError(null);
     try {
-      const res = await window.fetch(url, {
-        headers: { 'Content-Type': 'application/json' },
-        ...options,
-      });
+      // Only advertise a JSON body when we actually send one — Fastify's JSON
+      // parser 400s on an empty body when Content-Type is application/json,
+      // which broke every bodyless POST (reload, restart, unload).
+      const headers = { ...(options.headers || {}) };
+      if (options.body != null) headers['Content-Type'] = 'application/json';
+
+      const res = await window.fetch(url, { ...options, headers });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || data.message || 'Request failed');

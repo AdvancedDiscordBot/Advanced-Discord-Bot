@@ -1,70 +1,73 @@
 /**
- * Spawned detached by the API restart endpoint.
- * Kills the old bot process, waits for cleanup, then starts a new detached instance.
+ * restart-bot.js — Signals the watchdog to perform a deploy + restart.
+ *
+ * Previously this script tried to kill the old process and spawn a new one
+ * from within the bot itself — a fragile suicide pact. Now it simply tells
+ * the independent watchdog (adb-watchdog.js) to handle the restart safely.
+ *
+ * The watchdog runs as a separate daemon and manages the bot as its child
+ * process, so the bot never has to orchestrate its own death.
  */
-const { spawn } = require("child_process");
-const fs = require("fs");
-const path = require("path");
 
-const ROOT = process.cwd();
-const PID_FILE = path.join(ROOT, "data", "bot.pid");
-const LOG_FILE = path.join(ROOT, "logs", "bot.log");
-const ENTRY = path.join(ROOT, "index.js");
+const http = require("http");
 
-function sleep(ms) {
-	return new Promise((resolve) => setTimeout(resolve, ms));
+var WATCHDOG_PORT = parseInt(process.env.WATCHDOG_PORT, 10);
+if (!WATCHDOG_PORT) {
+	console.error("[restart-bot] FATAL: WATCHDOG_PORT not set");
+	process.exit(1);
 }
 
 function log(msg) {
-	const line = `[${new Date().toISOString()}] [restart-bot] ${msg}\n`;
+	var line = "[" + new Date().toISOString() + "] [restart-bot] " + msg + "\n";
 	process.stderr.write(line);
-	try {
-		fs.appendFileSync(LOG_FILE, line);
-	} catch (_) { /* best-effort */ }
 }
 
-async function main() {
-	log("Restart triggered.");
+function main() {
+	log("Signalling watchdog to restart...");
 
-	// Stop old process
-	if (fs.existsSync(PID_FILE)) {
-		const raw = fs.readFileSync(PID_FILE, "utf8").trim();
-		const oldPid = parseInt(raw, 10);
-		if (oldPid && !Number.isNaN(oldPid)) {
-			log(`Sending SIGTERM to old process (PID ${oldPid})`);
-			try {
-				process.kill(oldPid, "SIGTERM");
-			} catch (_) {
-				log("Old process already gone.");
+	var payload = JSON.stringify({});
+
+	var options = {
+		hostname: "127.0.0.1",
+		port: WATCHDOG_PORT,
+		path: "/restart",
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			"Content-Length": Buffer.byteLength(payload),
+		},
+		timeout: 5000,
+	};
+
+	var req = http.request(options, function (res) {
+		var body = "";
+		res.on("data", function (chunk) { body += chunk; });
+		res.on("end", function () {
+			log("Watchdog responded with " + res.statusCode + ": " + body);
+			if (res.statusCode === 200) {
+				log("Restart triggered successfully. This process will exit now.");
+				process.exit(0);
+			} else {
+				log("Watchdog returned error: " + body);
+				process.exit(1);
 			}
-		}
-	}
-
-	log("Waiting for cleanup...");
-	await sleep(2000);
-
-	// Start new detached process, output to log file
-	fs.mkdirSync(path.join(ROOT, "logs"), { recursive: true });
-	fs.mkdirSync(path.join(ROOT, "data"), { recursive: true });
-
-	fs.appendFileSync(LOG_FILE, `\n[${new Date().toISOString()}] ──── Restarted by API ────\n`);
-
-	const logFd = fs.openSync(LOG_FILE, "a");
-	const child = spawn("node", [ENTRY], {
-		cwd: ROOT,
-		env: process.env,
-		detached: true,
-		stdio: ["ignore", logFd, logFd],
+		});
 	});
 
-	child.unref();
-	fs.closeSync(logFd);
+	req.on("error", function (err) {
+		log("Failed to contact watchdog: " + err.message);
+		log("Is adb-watchdog running? Use: ./adb-watchdog.sh start");
+		process.exit(1);
+	});
 
-	fs.writeFileSync(PID_FILE, String(child.pid));
-	log(`New bot started (PID ${child.pid})`);
+	req.on("timeout", function () {
+		req.destroy();
+		log("Timeout contacting watchdog.");
+		process.exit(1);
+	});
+
+	req.write(payload);
+	req.end();
 }
 
-main().catch((err) => {
-	log(`Fatal: ${err.message}`);
-	process.exit(1);
-});
+main();
