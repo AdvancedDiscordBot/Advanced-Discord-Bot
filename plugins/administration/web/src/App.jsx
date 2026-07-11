@@ -1,6 +1,8 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './hooks/useAuth';
+import { JobsProvider } from './hooks/useJobs';
+import { JobsPanel } from './components/JobsPanel';
 import { GuildLayout } from './components/GuildLayout';
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
@@ -32,15 +34,18 @@ function AppRoutes() {
   }
 
   return (
-    <Routes>
-      <Route path="/login" element={!user ? <Login /> : <Navigate to="/" />} />
-      <Route path="/" element={user ? <GuildLayout /> : <Navigate to="/login" />}>
-        <Route index element={<GuildPicker />} />
-        <Route path="guild/:guildId" element={<Dashboard />} />
-        <Route path="guild/:guildId/plugins" element={<Plugins />} />
-        <Route path="guild/:guildId/settings" element={<GuildSettings />} />
-      </Route>
-    </Routes>
+    <JobsProvider>
+      <Routes>
+        <Route path="/login" element={!user ? <Login /> : <Navigate to="/" />} />
+        <Route path="/" element={user ? <GuildLayout /> : <Navigate to="/login" />}>
+          <Route index element={<GuildPicker />} />
+          <Route path="guild/:guildId" element={<Dashboard />} />
+          <Route path="guild/:guildId/plugins" element={<Plugins />} />
+          <Route path="guild/:guildId/settings" element={<GuildSettings />} />
+        </Route>
+      </Routes>
+      {user && <JobsPanel />}
+    </JobsProvider>
   );
 }
 

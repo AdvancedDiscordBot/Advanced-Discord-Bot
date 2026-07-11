@@ -3,6 +3,7 @@ import { useParams, Outlet, useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { Sidebar } from '../components/Sidebar';
 import { CommandPalette } from '../components/CommandPalette';
+import { Footer } from '../components/Footer';
 import { colors, fonts, fontSize } from '../theme';
 
 export function GuildLayout() {
@@ -58,6 +59,7 @@ export function GuildLayout() {
         <div style={styles.main}>
           <Outlet context={{ guildData: null }} />
         </div>
+        <Footer />
       </div>
     );
   }
@@ -71,6 +73,7 @@ export function GuildLayout() {
           <div style={styles.spinner}></div>
           <span>Loading server data...</span>
         </div>
+        <Footer />
       </div>
     );
   }
@@ -85,6 +88,7 @@ export function GuildLayout() {
           <Outlet context={{ guildData, refreshGuild: () => setLoading(true) }} />
         </main>
       </div>
+      <Footer />
     </div>
   );
 }

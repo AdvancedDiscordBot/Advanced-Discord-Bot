@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
+const semver = require("semver");
 const { createLogger } = require("./logger");
 
 const REGISTRY_URL =
@@ -37,7 +38,7 @@ class PluginRegistry {
 			return this.registry;
 		} catch (error) {
 			this.logger.warn("Failed to fetch remote registry, using cache", error.message);
-			return this.loadCache() || this.getDefaultPlugins();
+			return this.loadCache() || [];
 		}
 	}
 
@@ -74,104 +75,9 @@ class PluginRegistry {
 	}
 
 	getDefaultPlugins() {
-		return [
-			{
-				name: "adb-plugin-economy",
-				displayName: "Economy System",
-				description: "Complete economy system with coins, work commands, shop, and leaderboards",
-				author: "ADB",
-				version: "1.0.0",
-				category: "features",
-				permissions: ["db.read", "db.write", "commands.register"],
-				requiresRestart: false,
-				verified: true,
-				npmPackage: "adb-plugin-economy",
-			},
-			{
-				name: "adb-plugin-tickets",
-				displayName: "Ticket System",
-				description: "Advanced ticket system with categories, transcripts, and automation",
-				author: "ADB",
-				version: "1.0.0",
-				category: "features",
-				permissions: ["db.read", "db.write", "commands.register"],
-				requiresRestart: false,
-				verified: true,
-				npmPackage: "adb-plugin-tickets",
-			},
-			{
-				name: "adb-plugin-music",
-				displayName: "Music Player",
-				description: "Play music from YouTube, Spotify, and more with advanced controls",
-				author: "Community",
-				version: "1.0.0",
-				category: "entertainment",
-				permissions: ["db.read", "commands.register"],
-				requiresRestart: true,
-				verified: false,
-				npmPackage: "adb-plugin-music",
-			},
-			{
-				name: "adb-plugin-games",
-				displayName: "Mini Games",
-				description: "Trivia, word games, and more to keep your server entertained",
-				author: "Community",
-				version: "1.0.0",
-				category: "entertainment",
-				permissions: ["db.read", "db.write", "commands.register"],
-				requiresRestart: false,
-				verified: false,
-				npmPackage: "adb-plugin-games",
-			},
-			{
-				name: "adb-plugin-moderation",
-				displayName: "Advanced Moderation",
-				description: "Auto-mod, logs, slowmode, and advanced moderation tools",
-				author: "ADB",
-				version: "1.0.0",
-				category: "moderation",
-				permissions: ["db.read", "db.write", "commands.register"],
-				requiresRestart: false,
-				verified: true,
-				npmPackage: "adb-plugin-moderation",
-			},
-			{
-				name: "adb-plugin-levels",
-				displayName: "Enhanced Levels",
-				description: "Advanced XP system with rewards, milestones, and custom ranks",
-				author: "Community",
-				version: "1.0.0",
-				category: "features",
-				permissions: ["db.read", "db.write", "commands.register"],
-				requiresRestart: false,
-				verified: false,
-				npmPackage: "adb-plugin-levels",
-			},
-			{
-				name: "adb-plugin-welcomer",
-				displayName: "Welcome & Leave Messages",
-				description: "Customizable welcome messages, images, and leave messages",
-				author: "Community",
-				version: "1.0.0",
-				category: "features",
-				permissions: ["db.read", "commands.register"],
-				requiresRestart: false,
-				verified: false,
-				npmPackage: "adb-plugin-welcomer",
-			},
-			{
-				name: "adb-plugin-polls",
-				displayName: "Polls & Voting",
-				description: "Create polls with reactions, anonymous voting, and results",
-				author: "Community",
-				version: "1.0.0",
-				category: "features",
-				permissions: ["commands.register"],
-				requiresRestart: false,
-				verified: false,
-				npmPackage: "adb-plugin-polls",
-			},
-		];
+		// No hardcoded fallback — the registry is the GitHub repo at REGISTRY_URL.
+		// Kept for API compatibility; returns nothing when remote + cache both fail.
+		return [];
 	}
 
 	async searchPlugins(query, category = null) {
@@ -198,6 +104,13 @@ class PluginRegistry {
 	async getPluginDetails(packageName) {
 		const plugins = await this.fetchRegistry();
 		return plugins.find((p) => p.npmPackage === packageName || p.name === packageName);
+	}
+
+	isNewer(installed, candidate) {
+		const a = semver.valid(semver.coerce(installed));
+		const b = semver.valid(semver.coerce(candidate));
+		if (!a || !b) return false;
+		return semver.gt(b, a);
 	}
 
 	getCategories() {

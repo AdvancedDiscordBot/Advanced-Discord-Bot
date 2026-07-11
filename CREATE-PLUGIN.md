@@ -101,7 +101,30 @@ adb-plugin-my-plugin/
 | `requiresRestart` | boolean | No | If true, changes require bot restart |
 | `port` | number | No | If set, exposes a web dashboard |
 | `configSchema` | object | No | JSON Schema for settings UI |
-| `permissions` | array | No | List of required permissions |
+| `permissions` | array | No | Internal capabilities (`db.read`, `db.write`, `commands.register`, `events.register`, …) |
+| `discordPermissions` | array | No | Discord permissions your bot needs, as `PermissionsBitField.Flags` keys |
+
+### discordPermissions
+
+Declare the Discord permissions your plugin's code actually uses — e.g. a
+moderation plugin that bans and deletes messages declares:
+
+```json
+"discordPermissions": ["BanMembers", "ModerateMembers", "ManageMessages", "SendMessages"]
+```
+
+Values must be exact discord.js flag names (`BanMembers`, `KickMembers`,
+`ModerateMembers`, `ManageMessages`, `ManageChannels`, `ManageRoles`,
+`ManageGuild`, `ManageWebhooks`, `SendMessages`, `AddReactions`,
+`EmbedLinks`, `AttachFiles`, `ReadMessageHistory`, …). See the full list:
+<https://discord.js.org/docs/packages/discord.js/main/PermissionFlagsBits:Variable>.
+
+The bot ORs every enabled plugin's `discordPermissions` into a single
+**permission integer** shown on the dashboard's Plugins page (copy it into
+the Discord Developer Portal) and baked into the bot invite link. Declare
+only what you use — over-declaring inflates the permissions users must grant.
+Unknown flag names are ignored and surfaced as a load-time warning on the
+plugin's card.
 
 ## The load Function
 
