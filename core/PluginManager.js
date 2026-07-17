@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const chokidar = require("chokidar");
 const { PluginContext } = require("./PluginContext");
+const { validateCapabilities } = require("./capabilities");
 const { createLogger } = require("./logger");
 
 class PluginManager {
@@ -19,6 +20,252 @@ class PluginManager {
 		this.logger = createLogger("PluginManager");
 		this.plugins = new Map();
 		this.watchers = new Map();
+
+		// ── Plugin Isolation (opt-in) ──────────────────────────────────────
+		// When enabled, third-party plugins load in worker_threads instead of
+		// sharing the main process.  Core plugins always load directly.
+		this.isolationEnabled = false;
+		this.workerManager = null;
+		this.broker = null;
+	}
+
+	/**
+	 * Enable plugin isolation.  Must be called before loadAll() if desired.
+	 * Creates the CapabilityBroker and WorkerManager, wires Discord event
+	 * forwarding, and adds RPC handlers for command/event registration.
+	 */
+	enableIsolation() {
+		const { CapabilityBroker } = require("./rpc/broker");
+		const { WorkerManager } = require("./rpc/worker-manager");
+
+		this.broker = new CapabilityBroker({
+			db: this.db,
+			client: this.client,
+			hooks: this.hooks,
+		});
+
+		this.workerManager = new WorkerManager({
+			broker: this.broker,
+			hooks: this.hooks,
+		});
+
+		// Forward Discord events from the Client to all workers
+		this._forwardDiscordEvents();
+
+		// Register RPC handlers for plugin.registerCommand / registerEvent
+		this._registerIsolationRpcHandlers();
+
+		this.isolationEnabled = true;
+		this.logger.info("Plugin isolation enabled (worker_threads)");
+	}
+
+	/**
+	 * Forward Discord client events to workers via the WorkerManager.
+	 * Only events that plugins commonly subscribe to are forwarded.
+	 */
+	_forwardDiscordEvents() {
+		const EVENTS_TO_FORWARD = [
+			"guildMemberAdd", "guildMemberRemove",
+			"messageCreate", "messageDelete", "messageUpdate",
+			"guildCreate", "guildDelete",
+			"interactionCreate",
+			"voiceStateUpdate",
+			"guildMemberUpdate",
+			"ready",
+		];
+
+		for (const eventName of EVENTS_TO_FORWARD) {
+			this.client.on(eventName, (...args) => {
+				if (!this.workerManager) return;
+				// Serialize the event payload for IPC transfer.
+				// For GuildMember / Message objects, extract only safe, serializable fields.
+				const payload = this._serializeDiscordEvent(eventName, args);
+				this.workerManager.broadcastEvent(`event:${eventName}`, payload);
+			});
+		}
+	}
+
+	/**
+	 * Serialize a Discord event's arguments into a plain, IPC-safe object.
+	 * @private
+	 */
+	_serializeDiscordEvent(eventName, args) {
+		// Default: try structuredClone, fall back to JSON round-trip
+		const trySerialize = (obj) => {
+			try {
+				if (obj && typeof obj.toJSON === "function") return obj.toJSON();
+				return JSON.parse(JSON.stringify(obj, (key, val) => {
+					if (typeof val === "function") return undefined;
+					if (val && val.constructor && val.constructor.name === "GuildMember") {
+						return {
+							id: val.id,
+							user: { id: val.user?.id, tag: val.user?.tag, username: val.user?.username, bot: val.user?.bot, avatarURL: val.user?.displayAvatarURL?.({ extension: "png", size: 256 }) || null },
+							nickname: val.nickname,
+							guildId: val.guild?.id,
+							roles: Array.from(val.roles?.cache?.keys() || []),
+							joinedAt: val.joinedAt,
+						};
+					}
+					if (val && val.constructor && val.constructor.name === "Message") {
+						return {
+							id: val.id,
+							content: val.content,
+							author: { id: val.author?.id, tag: val.author?.tag, username: val.author?.username, bot: val.author?.bot },
+							guildId: val.guild?.id,
+							channelId: val.channel?.id,
+						};
+					}
+					return val;
+				}));
+			} catch {
+				return { _unserializable: true, eventName };
+			}
+		};
+
+		if (args.length === 0) return {};
+		if (args.length === 1) return trySerialize(args[0]);
+		return args.map(trySerialize);
+	}
+
+	/**
+	 * Register RPC handlers that let worker plugins register commands and events
+	 * back into the Core process.
+	 * @private
+	 */
+	_registerIsolationRpcHandlers() {
+		// Store the original execute method so we can proxy through RPC
+		// plugin.registerCommand RPC: worker sends serialized command data,
+		// we create a proxy execute that calls back to the worker.
+		this._registerCommandRpcHandler();
+		this._registerEventRpcHandler();
+		this._registerModelRpcHandler();
+	}
+
+	/**
+	 * Handle plugin.registerCommand RPC from workers.
+	 * @private
+	 */
+	_registerCommandRpcHandler() {
+		// Intercept in the broker's handleRequest — we patch the execute method
+		// on the broker to add our custom handlers.
+		const origHandleRequest = this.broker.handleRequest.bind(this.broker);
+		const self = this;
+
+		this.broker.handleRequest = async function (pluginId, request) {
+			if (request.method === "plugin.registerCommand") {
+				const { command } = request.params;
+				if (!command || !command.data) {
+					return { id: request.id, ok: false, error: "Invalid command" };
+				}
+
+				// Create a proxy execute that sends the interaction back to the worker
+				const proxyExecute = async (interaction) => {
+					const workerEntry = self.workerManager?.workers?.get(pluginId);
+					if (!workerEntry || !workerEntry.ready) {
+						await interaction.reply({ content: "Plugin is not available.", ephemeral: true });
+						return;
+					}
+
+					// Serialize the interaction for IPC
+					const serializedInteraction = self._serializeInteraction(interaction);
+
+					// Send to worker and wait for response
+					const response = await new Promise((resolve) => {
+						const callId = `cmd_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+						const timer = setTimeout(() => resolve({ error: "Command execution timed out" }), 15000);
+
+						const handler = (msg) => {
+							if (msg.type === "rpc:response" && msg.id === callId) {
+								clearTimeout(timer);
+								workerEntry.worker.removeListener("message", handler);
+								resolve(msg);
+							}
+						};
+						workerEntry.worker.on("message", handler);
+
+						workerEntry.worker.postMessage({
+							type: "rpc:event",
+							event: "command:execute",
+							payload: { callId, commandName: command.data.name, interaction: serializedInteraction },
+						});
+					});
+
+					if (response.error) {
+						try { await interaction.reply({ content: `Error: ${response.error}`, ephemeral: true }); } catch {}
+					}
+				};
+
+				self.registerCommand(pluginId, { data: command.data, execute: proxyExecute });
+				return { id: request.id, ok: true, result: { registered: true } };
+			}
+
+			if (request.method === "plugin.registerEvent") {
+				// Events are registered client-side by the WorkerManager forwarding
+				return { id: request.id, ok: true, result: { registered: true } };
+			}
+
+			if (request.method === "plugin.defineModel") {
+				const { modelName, schema } = request.params;
+				try {
+					self.broker.registerModel(pluginId, modelName, schema);
+				} catch (err) {
+					// Model may already be registered — that's fine
+				}
+				return { id: request.id, ok: true, result: { registered: true } };
+			}
+
+			// Fall through to normal broker handling
+			return origHandleRequest(pluginId, request);
+		};
+	}
+
+	/**
+	 * Handle plugin.registerEvent RPC from workers.
+	 * @private
+	 */
+	_registerEventRpcHandler() {
+		// Already handled in _registerCommandRpcHandler above
+	}
+
+	/**
+	 * Handle plugin.defineModel RPC from workers.
+	 * @private
+	 */
+	_registerModelRpcHandler() {
+		// Already handled in _registerCommandRpcHandler above
+	}
+
+	/**
+	 * Serialize a Discord interaction for IPC transfer.
+	 * @private
+	 */
+	_serializeInteraction(interaction) {
+		try {
+			return {
+				id: interaction.id,
+				type: interaction.type,
+				commandName: interaction.commandName,
+				options: interaction.options?.data || [],
+				guildId: interaction.guildId,
+				channelId: interaction.channelId,
+				user: interaction.user ? {
+					id: interaction.user.id,
+					tag: interaction.user.tag,
+					username: interaction.user.username,
+				} : null,
+				member: interaction.member ? {
+					id: interaction.member.id,
+					user: { id: interaction.member.user?.id, tag: interaction.member.user?.tag, username: interaction.member.user?.username },
+					guildId: interaction.member.guild?.id,
+					nickname: interaction.member.nickname,
+					roles: Array.from(interaction.member.roles?.cache?.keys() || []),
+				} : null,
+				// Store methods that need to be called back via RPC
+				_replies: [],
+			};
+		} catch {
+			return { id: interaction.id, _unserializable: true };
+		}
 	}
 
 	async loadAll() {
@@ -235,7 +482,7 @@ class PluginManager {
 			pluginManager: this,
 			logger,
 			config: {
-				env: process.env,
+				env: {},
 			},
 		});
 
@@ -276,15 +523,33 @@ class PluginManager {
 		this.plugins.set(plugin.name, pluginState);
 
 		try {
-			const ctx = this.buildContext(plugin.name, logger);
-			const pluginModule = require(plugin.entryPath);
-			const loadFn = pluginModule.load || pluginModule.default || pluginModule;
-
-			if (typeof loadFn !== "function") {
-				throw new Error("Plugin entry does not export load(ctx)");
+			// Validate capabilities if declared
+			const caps = plugin.manifest?.capabilities;
+			if (caps) {
+				const capErrors = validateCapabilities(caps);
+				if (capErrors.length) {
+					pluginState.lastError = `Invalid capabilities: ${capErrors.join(", ")}`;
+					this.logger.warn(
+						`${plugin.name} has invalid capabilities: ${capErrors.join(", ")}`,
+					);
+				}
 			}
 
-			await loadFn(ctx);
+			// Decide: isolated (worker) or direct (main process) loading.
+			// Core plugins always load directly. Third-party plugins load in a
+			// worker when isolation is enabled and the plugin opts in via
+			// "isolation": true in plugin.json.
+			const useIsolation =
+				this.isolationEnabled &&
+				this.workerManager &&
+				plugin.source !== "builtin" &&
+				plugin.manifest?.isolation !== false; // opt-out with "isolation": false
+
+			if (useIsolation) {
+				await this._loadPluginInWorker(plugin, pluginState, caps, logger);
+			} else {
+				await this._loadPluginDirect(plugin, pluginState, logger);
+			}
 
 			const { validateFlags } = require("./permissions");
 			const { invalid } = validateFlags(
@@ -309,9 +574,55 @@ class PluginManager {
 		}
 	}
 
+	/**
+	 * Load a plugin directly in the main process (legacy / non-isolated path).
+	 * @private
+	 */
+	async _loadPluginDirect(plugin, pluginState, logger) {
+		const ctx = this.buildContext(plugin.name, logger);
+		const pluginModule = require(plugin.entryPath);
+		const loadFn = pluginModule.load || pluginModule.default || pluginModule;
+
+		if (typeof loadFn !== "function") {
+			throw new Error("Plugin entry does not export load(ctx)");
+		}
+
+		await loadFn(ctx);
+	}
+
+	/**
+	 * Load a plugin in a worker thread (isolated path).
+	 * @private
+	 */
+	async _loadPluginInWorker(plugin, pluginState, caps, logger) {
+		logger.info(`Spawning isolated worker for ${plugin.name}...`);
+
+		try {
+			await this.workerManager.spawnWorker(
+				plugin.name,
+				plugin.entryPath,
+				caps || {},
+				plugin.manifest?.displayName || plugin.name,
+			);
+
+			pluginState.isolated = true;
+			logger.info(`Isolated worker ready for ${plugin.name}`);
+		} catch (error) {
+			pluginState.enabled = false;
+			pluginState.lastError = `Worker spawn failed: ${error.message}`;
+			logger.error(`Failed to spawn worker for ${plugin.name}:`, error.message);
+			throw error;
+		}
+	}
+
 	async unloadPlugin(pluginName, reason = "manual") {
 		const pluginState = this.plugins.get(pluginName);
 		if (!pluginState || pluginName === "core") return false;
+
+		// If the plugin was running in a worker, terminate it
+		if (pluginState.isolated && this.workerManager) {
+			await this.workerManager.terminateWorker(pluginName);
+		}
 
 		for (const handler of pluginState.eventHandlers) {
 			this.client.off(handler.name, handler.wrapper);
@@ -546,13 +857,17 @@ class PluginManager {
 			category: plugin.manifest?.category || null,
 			npmPackage: plugin.manifest?.npmPackage || plugin.packageName || null,
 			discordPermissions: plugin.manifest?.discordPermissions || [],
+			capabilities: plugin.manifest?.capabilities || null,
 			core: plugin.source === "local" || plugin.source === "builtin",
 			enabled: plugin.enabled,
 			hotReloadEligible: plugin.hotReloadEligible,
 			lastError: plugin.lastError,
 			overrides: Array.from(plugin.overrides.keys()),
 			commands: Array.from(plugin.commandNames),
-			hasBrochure: !!(plugin.path && fs.existsSync(path.join(plugin.path, "Brochure.md"))),
+			hasBrochure: !!(
+				plugin.path &&
+				fs.existsSync(path.join(plugin.path, "Brochure.md"))
+			),
 		}));
 	}
 

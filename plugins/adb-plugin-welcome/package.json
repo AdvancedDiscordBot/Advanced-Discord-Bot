@@ -1,0 +1,36 @@
+{
+  "name": "adb-plugin-welcome",
+  "version": "1.0.0",
+  "description": "Customizable welcome & goodbye messages with canvas image cards, DMs, and embeds.",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "plugin.json",
+    "commands",
+    "lib",
+    "models",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node test/local-harness.js"
+  },
+  "keywords": [
+    "adb-plugin",
+    "discord",
+    "discord.js"
+  ],
+  "author": "DeadIndian",
+  "license": "AGPL-3.0-only",
+  "peerDependencies": {
+    "discord.js": ">=14.0.0",
+    "mongoose": ">=7.0.0"
+  },
+  "devDependencies": {
+    "discord.js": "^14.14.1",
+    "mongoose": "^8.0.0"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^1.0.2"
+  }
+}

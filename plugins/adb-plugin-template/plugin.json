@@ -1,0 +1,30 @@
+{
+  "name": "adb-plugin-template",
+  "displayName": "Template Plugin",
+  "version": "1.0.0",
+  "description": "A starter template for ADB plugins — works in both direct and isolated mode",
+  "author": "ADB Team",
+  "main": "index.js",
+  "requiresRestart": false,
+  "isolation": true,
+  "capabilities": {
+    "storage": ["own-collection"],
+    "discord": ["SendMessages", "GuildInfo"]
+  },
+  "discordPermissions": ["SendMessages"],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable or disable this plugin"
+      },
+      "welcomeMessage": {
+        "type": "string",
+        "default": "Hello!",
+        "description": "Custom message to send"
+      }
+    }
+  }
+}

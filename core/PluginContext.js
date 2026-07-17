@@ -22,18 +22,20 @@ class PluginContext {
 	}
 
 	build() {
+		const pluginName = this.pluginName;
+
 		const ctx = {
 			client: this.client,
 			db: this.db,
 			scheduler: this.scheduler,
 			commands: this.client.commands,
 			registerCommand: (command) =>
-				this.pluginManager.registerCommand(this.pluginName, command),
+				this.pluginManager.registerCommand(pluginName, command),
 			overrideCommand: (name, overrideFn) =>
-				this.pluginManager.overrideCommand(this.pluginName, name, overrideFn),
+				this.pluginManager.overrideCommand(pluginName, name, overrideFn),
 			registerEvent: (name, handler, options = {}) =>
 				this.pluginManager.registerEvent(
-					this.pluginName,
+					pluginName,
 					name,
 					handler,
 					options,
@@ -48,6 +50,47 @@ class PluginContext {
 			config: this.config,
 			logger: this.logger,
 		};
+
+		// ── Deprecation proxies for ctx.client and ctx.db ──────────────
+		// These warn when plugins access the raw client/db directly.
+		// In the isolation architecture, these will be replaced by RPC proxies.
+		// For now, we wrap them with Proxy-based deprecation warnings so we
+		// can observe which plugins actually touch them before removal.
+
+		if (ctx.client) {
+			ctx.client = new Proxy(ctx.client, {
+				get(target, prop) {
+					// Passthrough all symbols without warning (inspection, iteration, etc.)
+					if (typeof prop === "symbol") {
+						return target[prop];
+					}
+					console.warn(
+						`[DEPRECATION] Plugin "${pluginName}" accessed ctx.client.${String(prop)} directly. ` +
+							"This will be removed in the plugin isolation upgrade. " +
+							"Use ctx.registerEvent() / ctx.registerCommand() instead.",
+					);
+					return target[prop];
+				},
+			});
+		}
+
+		if (ctx.db) {
+			ctx.db = new Proxy(ctx.db, {
+				get(target, prop) {
+					// Passthrough all symbols without warning (inspection, iteration, etc.)
+					if (typeof prop === "symbol") {
+						return target[prop];
+					}
+					console.warn(
+						`[DEPRECATION] Plugin "${pluginName}" accessed ctx.db.${String(prop)} directly. ` +
+							"This will be removed in the plugin isolation upgrade. " +
+							"Use ctx.db.* RPC methods instead.",
+					);
+					return target[prop];
+				},
+			});
+		}
+
 		// Make all properties read-only except 'models'
 		Object.keys(ctx).forEach(function (k) {
 			if (k !== "models") {

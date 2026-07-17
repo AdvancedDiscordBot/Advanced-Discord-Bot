@@ -1,0 +1,60 @@
+{
+	"name": "adb-plugin-welcome",
+	"displayName": "Welcome",
+	"version": "2.0.0",
+	"description": "Customizable welcome & goodbye messages with canvas image cards, DMs, and embeds. Supports isolated worker mode.",
+	"author": "DeadIndian",
+	"main": "index.js",
+	"requiresRestart": false,
+	"capabilities": {
+		"storage": ["own-collection"],
+		"discord": ["SendMessages", "EmbedLinks", "AttachFiles", "GuildInfo", "ChannelInfo"],
+		"hooks": ["subscribe"]
+	},
+	"permissions": [
+		"db.read",
+		"db.write",
+		"commands.register",
+		"events.register"
+	],
+	"discordPermissions": [
+		"SendMessages",
+		"EmbedLinks",
+		"AttachFiles"
+	],
+	"configSchema": {
+		"type": "object",
+		"properties": {
+			"welcomeChannelId": {
+				"type": "string",
+				"default": "",
+				"description": "The channel where welcome messages are sent"
+			},
+			"welcomeMessage": {
+				"type": "string",
+				"default": "Welcome to the server, {user}! You are member #{memberCount}.",
+				"description": "The message sent when a new member joins"
+			},
+			"goodbyeChannelId": {
+				"type": "string",
+				"default": "",
+				"description": "The channel where goodbye messages are sent"
+			},
+			"goodbyeMessage": {
+				"type": "string",
+				"default": "Goodbye {username}! We will miss you.",
+				"description": "The message sent when a member leaves"
+			},
+			"dmEnabled": {
+				"type": "boolean",
+				"default": false,
+				"description": "Whether to send the welcome message to the user in Direct Messages (DM)"
+			},
+			"cardEnabled": {
+				"type": "boolean",
+				"default": false,
+				"description": "Whether to generate and attach a canvas image card"
+			}
+		}
+	}
+}
