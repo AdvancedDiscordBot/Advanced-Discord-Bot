@@ -15,6 +15,14 @@ const { getMethodDef, isValidMethod } = require("./methods");
 const { createLogger } = require("../logger");
 const { ResourceTracker, withResourceLimits, createLimitsFromCapabilities } = require("./resource-limits");
 const { metricsCollector } = require("./metrics");
+const { ViolationTracker, KIND } = require("./violations");
+
+// Cap on the response body (bytes) returned to a plugin from network.fetch, so a
+// plugin can't stream an unbounded body back across the RPC boundary.
+const NETWORK_MAX_BODY_BYTES = 5 * 1024 * 1024;
+// Wall-clock ceiling for a single network.fetch, independent of the plugin's
+// per-call execution budget.
+const NETWORK_TIMEOUT_MS = 15_000;
 
 class CapabilityBroker extends EventEmitter {
 	/**
@@ -24,8 +32,9 @@ class CapabilityBroker extends EventEmitter {
 	 * @param {object} opts.hooks    - HookBus instance
 	 * @param {string} [opts.logNamespace] - Logger namespace
 	 */
-	constructor({ db, client, hooks, logNamespace = "CapabilityBroker" }) {
+	constructor(opts) {
 		super();
+		const { db, client, hooks, logNamespace = "CapabilityBroker" } = opts;
 		this.db = db;
 		this.client = client;
 		this.hooks = hooks;
@@ -37,11 +46,21 @@ class CapabilityBroker extends EventEmitter {
 		/** @type {Map<string, string>} pluginId → pluginName (for logging) */
 		this.pluginNames = new Map();
 
+		/** @type {Map<string, string[]>} pluginId → allowed outbound hosts (network.outbound) */
+		this.networkAllowlists = new Map();
+
 		/** @type {Map<string, ResourceTracker>} pluginId → resource tracker */
 		this.resourceTrackers = new Map();
 
+		/**
+		 * Violation ledger + auto-suspension. Injectable so tests can drive the
+		 * clock and threshold; defaults to the standard policy.
+		 * @type {ViolationTracker}
+		 */
+		this.violations = opts.violations || new ViolationTracker();
+
 		/** Stats for observability */
-		this.stats = { requests: 0, denied: 0, errors: 0 };
+		this.stats = { requests: 0, denied: 0, errors: 0, suspended: 0 };
 
 		// Start metrics collection
 		metricsCollector.start(60000);
@@ -53,9 +72,14 @@ class CapabilityBroker extends EventEmitter {
 	 * Register a plugin's declared capabilities.
 	 * Called once when the plugin is loaded.
 	 */
-	registerCapabilities(pluginId, capabilities, pluginName) {
+	registerCapabilities(pluginId, capabilities, pluginName, options = {}) {
 		this.pluginCapabilities.set(pluginId, capabilities || {});
 		this.pluginNames.set(pluginId, pluginName || pluginId);
+
+		// network.outbound host allowlist (v2 manifest). --allow-net at the process
+		// level is all-or-nothing; the specific "this plugin may reach api.x.com and
+		// nowhere else" guarantee is enforced here, per-call, against this list.
+		this.networkAllowlists.set(pluginId, Array.isArray(options.networkAllowlist) ? options.networkAllowlist : []);
 
 		const limits = createLimitsFromCapabilities(capabilities);
 		const tracker = new ResourceTracker(pluginId, limits);
@@ -72,6 +96,7 @@ class CapabilityBroker extends EventEmitter {
 	unregisterCapabilities(pluginId) {
 		this.pluginCapabilities.delete(pluginId);
 		this.pluginNames.delete(pluginId);
+		this.networkAllowlists.delete(pluginId);
 
 		const tracker = this.resourceTrackers.get(pluginId);
 		if (tracker) {
@@ -103,6 +128,57 @@ class CapabilityBroker extends EventEmitter {
 		return pluginCategoryCaps.includes(value);
 	}
 
+	// ── Violation Recording ──────────────────────────────────────────────
+
+	/**
+	 * Record a violation attempt against a plugin and re-emit an event the
+	 * WorkerManager / admin layer can act on. If this crosses the suspension
+	 * threshold, a "plugin:suspended" event fires so callers can notify server
+	 * owners and stop dispatching events to it.
+	 * @private
+	 */
+	_recordViolation(pluginId, detail) {
+		const pluginName = this.pluginNames.get(pluginId) || pluginId;
+		const { record, suspended } = this.violations.record(pluginId, detail);
+		this.emit("plugin:violation", { ...record, pluginName });
+		if (suspended) {
+			this.stats.suspended++;
+			this.logger.error(
+				`SUSPENDED: ${pluginName} — ${this.violations.getSuspension(pluginId).reason}`,
+			);
+			this.emit("plugin:suspended", { pluginId, pluginName, ...this.violations.getSuspension(pluginId) });
+		}
+		return suspended;
+	}
+
+	/**
+	 * Check whether a URL's host is in the plugin's network.outbound allowlist.
+	 * Matches exact host or a subdomain of an allowlisted host (api.x.com allows
+	 * v2.api.x.com). Returns { ok, host, reason }.
+	 * @private
+	 */
+	_checkNetworkAllowed(pluginId, rawUrl) {
+		let url;
+		try {
+			url = new URL(rawUrl);
+		} catch {
+			return { ok: false, host: null, reason: `Invalid URL: ${String(rawUrl).slice(0, 120)}` };
+		}
+		if (url.protocol !== "http:" && url.protocol !== "https:") {
+			return { ok: false, host: url.host, reason: `Unsupported protocol: ${url.protocol}` };
+		}
+		const host = url.hostname.toLowerCase();
+		const allow = this.networkAllowlists.get(pluginId) || [];
+		const allowed = allow.some((entry) => {
+			const e = String(entry).toLowerCase();
+			return host === e || host.endsWith(`.${e}`);
+		});
+		if (!allowed) {
+			return { ok: false, host, reason: `Host "${host}" is not in the plugin's network allowlist` };
+		}
+		return { ok: true, host, reason: null };
+	}
+
 	// ── Request Handling ─────────────────────────────────────────────────
 
 	/**
@@ -110,10 +186,28 @@ class CapabilityBroker extends EventEmitter {
 	 */
 	async handleRequest(pluginId, request) {
 		const { id, method, params } = request;
+		const guildId = params && (params.guildId || (params.args && params.args[0])) || null;
 		this.stats.requests++;
+
+		// A suspended plugin's calls are refused before anything executes — the
+		// blast radius stays closed until an admin reviews and reinstates it.
+		if (this.violations.isSuspended(pluginId)) {
+			this.stats.denied++;
+			return {
+				id,
+				ok: false,
+				error: "Plugin is suspended pending review after repeated capability violations.",
+			};
+		}
 
 		if (!isValidMethod(method)) {
 			this.stats.denied++;
+			this._recordViolation(pluginId, {
+				kind: KIND.UNKNOWN_METHOD,
+				method,
+				message: `Called unknown RPC method "${method}"`,
+				guildId,
+			});
 			return { id, ok: false, error: `Unknown RPC method: "${method}"` };
 		}
 
@@ -125,6 +219,12 @@ class CapabilityBroker extends EventEmitter {
 			this.logger.warn(
 				`DENIED: ${pluginName} called ${method} — missing capability ${methodDef.capability}`,
 			);
+			this._recordViolation(pluginId, {
+				kind: KIND.CAPABILITY,
+				method,
+				message: `Called ${method} without capability ${methodDef.capability}`,
+				guildId,
+			});
 			return {
 				id,
 				ok: false,
@@ -539,8 +639,70 @@ class CapabilityBroker extends EventEmitter {
 				return { ok: true };
 			}
 
+			// ── Network ─────────────────────────────────────────────────
+			case "networkFetch":
+				return await this._networkFetch(pluginId, p);
+
 			default:
 				throw new Error(`Handler not implemented: ${handler}`);
+		}
+	}
+
+	// ── Network ────────────────────────────────────────────────────────────
+
+	/**
+	 * Perform an outbound HTTP(S) request on behalf of a plugin, but only to a
+	 * host in its network.outbound allowlist. A request to any other host is
+	 * refused and recorded as a violation — this is the per-host enforcement the
+	 * coarse process-level --allow-net flag cannot provide.
+	 *
+	 * @param {string} pluginId
+	 * @param {object} p - { url, method?, headers?, body? }
+	 * @private
+	 */
+	async _networkFetch(pluginId, p) {
+		const check = this._checkNetworkAllowed(pluginId, p.url);
+		if (!check.ok) {
+			this._recordViolation(pluginId, {
+				kind: KIND.NETWORK,
+				method: "network.fetch",
+				message: check.reason,
+			});
+			throw new Error(`Network request denied: ${check.reason}`);
+		}
+
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), NETWORK_TIMEOUT_MS);
+		try {
+			const res = await fetch(p.url, {
+				method: p.method || "GET",
+				headers: p.headers || {},
+				body: p.body,
+				redirect: "manual", // a 3xx to a non-allowlisted host must not silently follow
+				signal: controller.signal,
+			});
+
+			// Read the body with a hard byte ceiling so a plugin can't pull an
+			// unbounded response back across the RPC boundary.
+			const buf = Buffer.from(await res.arrayBuffer());
+			if (buf.length > NETWORK_MAX_BODY_BYTES) {
+				throw new Error(`Response body exceeds ${NETWORK_MAX_BODY_BYTES} bytes`);
+			}
+			const headers = {};
+			for (const [k, v] of res.headers) headers[k] = v;
+			return {
+				status: res.status,
+				ok: res.ok,
+				headers,
+				body: buf.toString("utf8"),
+			};
+		} catch (err) {
+			if (err.name === "AbortError") {
+				throw new Error(`Network request timed out after ${NETWORK_TIMEOUT_MS}ms`);
+			}
+			throw err;
+		} finally {
+			clearTimeout(timer);
 		}
 	}
 
@@ -620,6 +782,9 @@ class CapabilityBroker extends EventEmitter {
 			case "schedulerSchedule":     return { expression: args[0], name: args[1] };
 			case "schedulerCancel":       return { taskId: args[0] };
 
+			// Network — { url, options } where options carries method/headers/body
+			case "networkFetch":          return { url: args[0], ...(args[1] || {}) };
+
 			// Fallback: unknown handler — fail loud so missing mappings are caught at call time
 			default:
 				throw new Error(`_resolveArgs: no mapping for handler "${handler}" — add it to _resolveArgs`);
@@ -638,6 +803,42 @@ class CapabilityBroker extends EventEmitter {
 
 	getStats() {
 		return { ...this.stats };
+	}
+
+	// ── Violation / Suspension Introspection ─────────────────────────────
+
+	/** Whether a plugin is currently suspended. */
+	isSuspended(pluginId) {
+		return this.violations.isSuspended(pluginId);
+	}
+
+	/** Recent violation records for a plugin (newest last). */
+	getViolations(pluginId) {
+		return this.violations.getViolations(pluginId);
+	}
+
+	/** Suspension record for a plugin, or null. */
+	getSuspension(pluginId) {
+		return this.violations.getSuspension(pluginId);
+	}
+
+	/** Cross-plugin violation summary for the admin view. */
+	getViolationSummary() {
+		return this.violations.summary();
+	}
+
+	/**
+	 * Lift a plugin's suspension after admin review. Emits "plugin:reinstated"
+	 * so the WorkerManager can resume dispatching events to it.
+	 */
+	reinstate(pluginId) {
+		const lifted = this.violations.reinstate(pluginId);
+		if (lifted) {
+			const pluginName = this.pluginNames.get(pluginId) || pluginId;
+			this.logger.info(`Reinstated ${pluginName} after suspension`);
+			this.emit("plugin:reinstated", { pluginId, pluginName });
+		}
+		return lifted;
 	}
 
 	getResourceTracker(pluginId) {

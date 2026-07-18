@@ -53,14 +53,18 @@ class WorkerManager {
 		// Handle resource limit events from workers
 		this._resourceEventHandlers = new Map();
 
-		// Single global listener for call metrics — dispatches per-plugin
-		this._metricsUnsub = metricsCollector.on('call:recorded', (event) => {
+		// Single global listener for call metrics — dispatches per-plugin.
+		// EventEmitter.on returns the emitter, not an unsubscribe, so we keep the
+		// handler reference and build our own teardown closure for shutdown().
+		this._metricsHandler = (event) => {
 			const tracker = this.broker.getResourceTracker(event.pluginId);
 			if (tracker) {
 				const m = tracker.getMetrics();
 				metricsCollector.updateMemoryUsage(event.pluginId, m.current.memoryMB);
 			}
-		});
+		};
+		metricsCollector.on('call:recorded', this._metricsHandler);
+		this._metricsUnsub = () => metricsCollector.removeListener('call:recorded', this._metricsHandler);
 
 		// Forward broker EventEmitter events to workers
 		this._brokerHookForward = ({ pluginId, eventName, payload }) => {
@@ -84,14 +88,18 @@ class WorkerManager {
 	 * @param {string} [pluginName] - Human-readable name
 	 * @returns {Promise<void>} Resolves when the worker signals ready
 	 */
-	async spawnWorker(pluginId, entryPath, capabilities, pluginName) {
+	async spawnWorker(pluginId, entryPath, capabilities, pluginName, options = {}) {
 		if (this.workers.has(pluginId)) {
 			this.logger.warn(`Worker already exists for ${pluginId}, terminating first`);
 			await this.terminateWorker(pluginId);
 		}
 
-		// Register capabilities with the broker
-		this.broker.registerCapabilities(pluginId, capabilities, pluginName);
+		// Register capabilities with the broker (incl. the network host allowlist,
+		// which the broker enforces per-request — the process --allow-net flag is
+		// only a coarse on/off gate).
+		this.broker.registerCapabilities(pluginId, capabilities, pluginName, {
+			networkAllowlist: options.networkAllowlist || [],
+		});
 
 		this.logger.info(`Spawning worker for ${pluginName || pluginId}...`);
 
@@ -110,6 +118,7 @@ class WorkerManager {
 			pluginName: pluginName || pluginId,
 			entryPath,
 			capabilities,
+			networkAllowlist: options.networkAllowlist || [],
 			crashCount: 0,
 			spawnedAt: Date.now(),
 			ready: false,
@@ -285,6 +294,9 @@ class WorkerManager {
 	sendEvent(pluginId, eventName, payload) {
 		const entry = this.workers.get(pluginId);
 		if (!entry || !entry.ready) return;
+		// A suspended plugin stops receiving events — it keeps running but is cut
+		// off from new work until an admin reinstates it.
+		if (this.broker.isSuspended(pluginId)) return;
 
 		entry.worker.postMessage({
 			type: "rpc:event",
@@ -302,6 +314,7 @@ class WorkerManager {
 	broadcastEvent(eventName, payload) {
 		for (const [pluginId, entry] of this.workers) {
 			if (!entry.ready) continue;
+			if (this.broker.isSuspended(pluginId)) continue;
 			try {
 				entry.worker.postMessage({
 					type: "rpc:event",
@@ -350,6 +363,7 @@ class WorkerManager {
 				entry.entryPath,
 				entry.capabilities,
 				entry.pluginName,
+				{ networkAllowlist: entry.networkAllowlist },
 			);
 		} catch (err) {
 			this.logger.error(`Failed to restart worker ${pluginId}:`, err.message);

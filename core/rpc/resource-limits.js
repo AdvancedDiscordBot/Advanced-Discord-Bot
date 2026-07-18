@@ -70,7 +70,11 @@ class ResourceTracker {
         this.memoryCheckInterval = setInterval(() => {
             this._checkMemory();
         }, this.limits.checkInterval);
-        
+        // Don't let the periodic check hold the process open by itself.
+        if (typeof this.memoryCheckInterval.unref === "function") {
+            this.memoryCheckInterval.unref();
+        }
+
         return this;
     }
     

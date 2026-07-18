@@ -597,12 +597,25 @@ class PluginManager {
 	async _loadPluginInWorker(plugin, pluginState, caps, logger) {
 		logger.info(`Spawning isolated worker for ${plugin.name}...`);
 
+		// Derive the network.outbound host allowlist from the normalized v2
+		// manifest. The broker enforces outbound requests against this list per
+		// call; an empty list means "declared network capability but no hosts",
+		// which the broker treats as "reach nothing".
+		let networkAllowlist = [];
+		try {
+			const { normalize } = require("./manifest-schema");
+			networkAllowlist = normalize(plugin.manifest || {}).permissions.network.outbound || [];
+		} catch (e) {
+			logger.warn(`Could not derive network allowlist for ${plugin.name}: ${e.message}`);
+		}
+
 		try {
 			await this.workerManager.spawnWorker(
 				plugin.name,
 				plugin.entryPath,
 				caps || {},
 				plugin.manifest?.displayName || plugin.name,
+				{ networkAllowlist },
 			);
 
 			pluginState.isolated = true;
@@ -869,6 +882,16 @@ class PluginManager {
 				fs.existsSync(path.join(plugin.path, "Brochure.md"))
 			),
 		}));
+	}
+
+	/**
+	 * Get the raw parsed manifest for a loaded plugin (or null if unknown).
+	 * Used by the risk-disclosure endpoints, which need the full v2 permissions
+	 * block, not the trimmed shape getPluginList() returns.
+	 */
+	getManifest(pluginName) {
+		const plugin = this.plugins.get(pluginName);
+		return plugin?.manifest || null;
 	}
 
 	getBrochure(pluginName) {

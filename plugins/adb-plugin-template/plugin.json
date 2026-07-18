@@ -7,10 +7,22 @@
   "main": "index.js",
   "requiresRestart": false,
   "isolation": true,
-  "capabilities": {
-    "storage": ["own-collection"],
-    "discord": ["SendMessages", "GuildInfo"]
+  "manifestVersion": 2,
+  "process": {
+    "model": "pooled",
+    "maxExecutionMs": 5000,
+    "memoryMb": 128,
+    "persistentReason": null
   },
+  "permissions": {
+    "storage": ["own-collection"],
+    "discord": ["SendMessages", "GuildInfo"],
+    "network": { "outbound": [] },
+    "filesystem": { "read": [], "write": [] },
+    "childProcess": false,
+    "nativeAddons": false
+  },
+  "declaredDependencies": [],
   "discordPermissions": ["SendMessages"],
   "configSchema": {
     "type": "object",

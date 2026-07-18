@@ -263,6 +263,17 @@ const RPC_METHODS = {
 		handler: "schedulerCancel",
 		description: "Cancel a scheduled task",
 	},
+
+	// ── Network (outbound-http) ─────────────────────────────────────────
+	// The capability gate only proves the plugin declared "I make outbound
+	// requests". The broker additionally checks each request's host against the
+	// plugin's network.outbound allowlist — that per-host check is what makes
+	// "sends data to api.openweathermap.org and nowhere else" enforceable.
+	"network.fetch": {
+		capability: "network:outbound-http",
+		handler: "networkFetch",
+		description: "Make an outbound HTTP(S) request to an allowlisted host",
+	},
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────

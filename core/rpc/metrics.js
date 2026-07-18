@@ -58,7 +58,12 @@ class MetricsCollector extends EventEmitter {
             this._updateGlobalMetrics();
             this._checkAlerts();
         }, intervalMs);
-        
+        // Background collection must not keep the process (or a test run) alive
+        // on its own — it only matters while real work is in flight.
+        if (typeof this.collectionInterval.unref === "function") {
+            this.collectionInterval.unref();
+        }
+
         console.log(`[MetricsCollector] Started with ${intervalMs}ms interval`);
         return this;
     }

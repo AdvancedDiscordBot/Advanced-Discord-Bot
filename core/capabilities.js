@@ -29,6 +29,8 @@ const CAPABILITY_SCHEMA = {
 			"ViewChannel",
 			"ViewAuditLog",
 			"MentionEveryone",
+			"GuildInfo",
+			"ChannelInfo",
 		],
 		description: "Discord API actions the plugin may perform",
 	},
@@ -47,6 +49,10 @@ const CAPABILITY_SCHEMA = {
 	hooks: {
 		valid: ["subscribe", "emit"],
 		description: "Inter-plugin event bus access",
+	},
+	scheduler: {
+		valid: ["cron"],
+		description: "Scheduled/recurring task execution",
 	},
 };
 

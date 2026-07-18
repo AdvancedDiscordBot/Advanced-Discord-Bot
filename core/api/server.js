@@ -15,6 +15,7 @@ const {
 	describe: describePermissions,
 } = require("../permissions");
 const adminPlugin = require("../adminPlugin");
+const { generateFullRiskCard, diffRiskCards, UnmappedCapabilityError } = require("../risk-disclosure");
 
 const ADMIN_PERMISSION = 0x8;
 const MANAGE_GUILD_PERMISSION = 0x20;
@@ -707,6 +708,80 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 			return reply.code(404).send({ error: "Plugin not found in registry" });
 		}
 		return plugin;
+	});
+
+	// Risk card for an installed plugin — the plain-language "worst case" list
+	// generated deterministically from the plugin's own manifest.
+	fastify.get("/api/plugins/:name/risk-card", async (request, reply) => {
+		const manifest = pluginManager.getManifest(request.params.name);
+		if (!manifest) {
+			return reply.code(404).send({ error: "Plugin not found" });
+		}
+		try {
+			// { granted: [...], withheld: [...] } — both halves of the disclosure.
+			return generateFullRiskCard(manifest);
+		} catch (err) {
+			if (err instanceof UnmappedCapabilityError) {
+				return reply.code(422).send({ error: err.message, unmapped: err.unmapped });
+			}
+			throw err;
+		}
+	});
+
+	// Pre-install risk card from a registry entry's manifest. This is the
+	// disclosure shown before the user commits to installing. If the registry
+	// entry carries no manifest we can't honestly describe what it does, so we
+	// say so rather than showing a reassuringly-empty card.
+	fastify.get("/api/plugins/registry/:packageName/risk-card", async (request, reply) => {
+		const plugin = await registry.getPluginDetails(request.params.packageName);
+		if (!plugin) {
+			return reply.code(404).send({ error: "Plugin not found in registry" });
+		}
+		const manifest = plugin.manifest || plugin.pluginJson || null;
+		if (!manifest) {
+			return reply.code(422).send({
+				error: "Registry entry has no manifest; cannot generate a risk card.",
+			});
+		}
+		try {
+			return generateFullRiskCard(manifest);
+		} catch (err) {
+			if (err instanceof UnmappedCapabilityError) {
+				return reply.code(422).send({ error: err.message, unmapped: err.unmapped });
+			}
+			throw err;
+		}
+	});
+
+	// ── Runtime enforcement: violations & suspension ──────────────────────
+	// What the sandbox actually caught at runtime — capability denials, blocked
+	// outbound hosts — plus which plugins auto-suspended as a result. This is the
+	// "something went wrong, here's exactly what and what we did" surface.
+	fastify.get("/api/plugins/violations", async () => {
+		const broker = pluginManager.broker;
+		if (!broker) return { enforced: false, plugins: [] };
+		return { enforced: true, plugins: broker.getViolationSummary() };
+	});
+
+	fastify.get("/api/plugins/:name/violations", async (request, reply) => {
+		const broker = pluginManager.broker;
+		if (!broker) return reply.code(503).send({ error: "Isolation not enabled" });
+		const name = request.params.name;
+		return {
+			plugin: name,
+			suspended: broker.isSuspended(name),
+			suspension: broker.getSuspension(name),
+			violations: broker.getViolations(name),
+		};
+	});
+
+	// Lift a suspension after review. Reversible, admin-gated action: the plugin
+	// resumes receiving events and its violation window resets.
+	fastify.post("/api/plugins/:name/reinstate", async (request, reply) => {
+		const broker = pluginManager.broker;
+		if (!broker) return reply.code(503).send({ error: "Isolation not enabled" });
+		const lifted = broker.reinstate(request.params.name);
+		return { plugin: request.params.name, reinstated: lifted };
 	});
 
 	fastify.post("/api/plugins/submit", async (request, reply) => {

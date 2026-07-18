@@ -38,6 +38,8 @@
     "@fastify/session": "^10.7.0",
     "@fastify/static": "^6.12.0",
     "@google/genai": "^1.16.0",
+    "acorn": "8.14.0",
+    "acorn-walk": "8.3.4",
     "adb-plugin-levels": "^1.0.2",
     "adb-plugin-moderation": "^1.0.0",
     "adb-plugin-reminders": "^1.0.2",
