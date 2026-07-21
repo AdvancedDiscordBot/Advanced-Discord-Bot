@@ -1,76 +1,17 @@
 /**
- * test/welcome-isolated.test.js — Tests for the welcome plugin in isolated mode.
+ * test/broker-rpc-surface.test.js — Tests for the isolation RPC surface.
  *
- * Verifies:
- * 1. The welcome plugin uses ctx.discord proxy (not ctx.client)
- * 2. ctx.discord proxy routes calls through RPC correctly
- * 3. Event handlers work with serialized event payloads
- * 4. The plugin.json manifest has correct capabilities
- * 5. The broker's discordSendRichMessage handler works
- * 6. The broker's discordSendDM handler works
- * 7. Enhanced discordGetGuild returns iconURL
- * 8. Enhanced discordGetMember returns avatarURL and username
+ * These are engine-level tests that do NOT depend on any specific plugin
+ * living in this repo. They verify:
+ * 1. The ctx.discord proxy shape a worker plugin sees
+ * 2. The RPC method catalog (methods.js) exposes the expected surface
+ * 3. The broker's _resolveArgs positional→named mapping
+ * 4. The enhanced discordGetGuild / discordGetMember response shapes
+ * 5. The worker bootstrap ctx.discord → RPC method/param mapping
  */
 
-const { describe, it, beforeEach } = require("node:test");
+const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
-
-// ── Test: Plugin.json manifest ─────────────────────────────────────────
-
-describe("Welcome Plugin Manifest (isolated mode)", () => {
-	let manifest;
-
-	beforeEach(() => {
-		// Clear require cache so we get a fresh manifest each test
-		delete require.cache[require.resolve("../plugins/adb-plugin-welcome/plugin.json")];
-		manifest = require("../plugins/adb-plugin-welcome/plugin.json");
-	});
-
-	it("has capabilities field for isolated mode", () => {
-		assert.ok(manifest.capabilities, "manifest must have capabilities field");
-		assert.ok(manifest.capabilities.storage, "capabilities must have storage");
-		assert.ok(manifest.capabilities.discord, "capabilities must have discord");
-	});
-
-	it("declares storage:own-collection capability", () => {
-		assert.ok(
-			manifest.capabilities.storage.includes("own-collection"),
-			"must declare own-collection for db access"
-		);
-	});
-
-	it("declares discord:SendMessages capability", () => {
-		assert.ok(
-			manifest.capabilities.discord.includes("SendMessages"),
-			"must declare SendMessages for sending messages"
-		);
-	});
-
-	it("declares discord:EmbedLinks capability", () => {
-		assert.ok(
-			manifest.capabilities.discord.includes("EmbedLinks"),
-			"must declare EmbedLinks for embeds"
-		);
-	});
-
-	it("declares discord:GuildInfo capability for lookups", () => {
-		assert.ok(
-			manifest.capabilities.discord.includes("GuildInfo"),
-			"must declare GuildInfo for guild/member lookups"
-		);
-	});
-
-	it("declares discord:ChannelInfo capability", () => {
-		assert.ok(
-			manifest.capabilities.discord.includes("ChannelInfo"),
-			"must declare ChannelInfo for channel fetch"
-		);
-	});
-
-	it("has version 2.0.0 for the isolated mode migration", () => {
-		assert.equal(manifest.version, "2.0.0");
-	});
-});
 
 // ── Test: ctx.discord proxy shape ──────────────────────────────────────
 
@@ -132,181 +73,9 @@ describe("ctx.discord proxy shape", () => {
 	});
 });
 
-// ── Test: Welcome plugin event handler with serialized payloads ─────────
-
-describe("Welcome plugin event handler (isolated)", () => {
-	/**
-	 * Helper: create a mock ctx and load the plugin.
-	 * Returns { eventHandlers, ctx } where eventHandlers is a map of event name → handler.
-	 */
-	async function loadPluginWithMocks(overrides = {}) {
-		const calls = [];
-		const dmCalls = [];
-		const ctx = {
-			db: {
-				getPluginConfig: overrides.getConfig || (async () => ({ data: null })),
-			},
-			discord: {
-				sendToChannel: overrides.sendToChannel || (async (channelId, payload) => {
-					calls.push({ type: "channel", channelId, content: payload.content, embeds: payload.embeds, files: payload.files });
-					return { messageId: "msg_" + calls.length };
-				}),
-				sendDM: overrides.sendDM || (async (userId, payload) => {
-					dmCalls.push({ userId, content: payload.content, embeds: payload.embeds, files: payload.files });
-					return { messageId: "dm_" + dmCalls.length };
-				}),
-				getGuild: async () => ({ id: "g1", name: "Test", iconURL: null, memberCount: 10 }),
-				getMember: async () => ({ id: "m1", user: { id: "m1", username: "Test", avatarURL: null } }),
-				fetchChannel: async () => ({ id: "c1", name: "general", type: 0 }),
-			},
-			logger: { info: () => {}, error: () => {}, warn: () => {} },
-			registerCommand: async () => {},
-			registerEvent: () => {},
-			...overrides,
-		};
-
-		// Capture event handlers by name (not overwritten by subsequent calls)
-		const eventHandlers = {};
-		const origRegisterEvent = ctx.registerEvent;
-		ctx.registerEvent = (name, handler) => {
-			eventHandlers[name] = handler;
-			if (origRegisterEvent !== ctx.registerEvent) origRegisterEvent(name, handler);
-		};
-
-		// Clear require cache to force fresh load
-		delete require.cache[require.resolve("../plugins/adb-plugin-welcome/index.js")];
-		const { load } = require("../plugins/adb-plugin-welcome/index.js");
-		await load(ctx);
-
-		return { eventHandlers, calls, dmCalls, ctx };
-	}
-
-	it("guildMemberAdd handler processes serialized event payload", async () => {
-		const { eventHandlers, calls } = await loadPluginWithMocks({
-			getConfig: async () => ({
-				data: {
-					welcomeChannelId: "ch_welcome",
-					welcomeMessage: "Welcome {user}! You are #{memberCount}.",
-					cardEnabled: false,
-					dmEnabled: false,
-				},
-			}),
-		});
-
-		const eventPayload = {
-			member: {
-				id: "user_1",
-				guildId: "guild_1",
-				user: { id: "user_1", username: "TestUser", avatarURL: "https://example.com/avatar.png" },
-			},
-			guild: {
-				id: "guild_1",
-				name: "Test Server",
-				memberCount: 100,
-				iconURL: "https://example.com/icon.png",
-			},
-		};
-
-		await eventHandlers["guildMemberAdd"](eventPayload);
-
-		assert.equal(calls.length, 1, "should send one message to channel");
-		assert.equal(calls[0].channelId, "ch_welcome");
-		assert.ok(calls[0].content.includes("TestUser"), "should mention the user");
-		assert.ok(calls[0].content.includes("100"), "should include member count");
-	});
-
-	it("guildMemberRemove handler sends goodbye message", async () => {
-		const { eventHandlers, calls } = await loadPluginWithMocks({
-			getConfig: async () => ({
-				data: {
-					goodbyeChannelId: "ch_goodbye",
-					goodbyeMessage: "Goodbye {username}!",
-					cardEnabled: false,
-				},
-			}),
-		});
-
-		const eventPayload = {
-			member: {
-				id: "user_2",
-				guildId: "guild_1",
-				user: { id: "user_2", username: "LeavingUser", avatarURL: null },
-			},
-			guild: {
-				id: "guild_1",
-				name: "Test Server",
-				memberCount: 99,
-				iconURL: null,
-			},
-		};
-
-		await eventHandlers["guildMemberRemove"](eventPayload);
-
-		assert.equal(calls.length, 1, "should send one goodbye message");
-		assert.equal(calls[0].channelId, "ch_goodbye");
-		assert.ok(calls[0].content.includes("LeavingUser"), "should include username");
-	});
-
-	it("guildMemberAdd sends DM when dmEnabled is true", async () => {
-		const { eventHandlers, dmCalls } = await loadPluginWithMocks({
-			getConfig: async () => ({
-				data: {
-					welcomeChannelId: null,
-					welcomeMessage: "Welcome!",
-					cardEnabled: false,
-					dmEnabled: true,
-				},
-			}),
-		});
-
-		await eventHandlers["guildMemberAdd"]({
-			member: { id: "user_3", guildId: "g1", user: { id: "user_3", username: "DMUser", avatarURL: null } },
-			guild: { id: "g1", name: "Server", memberCount: 50, iconURL: null },
-		});
-
-		assert.equal(dmCalls.length, 1, "should send one DM");
-		assert.equal(dmCalls[0].userId, "user_3");
-	});
-
-	it("handler gracefully handles missing config", async () => {
-		const { eventHandlers, calls } = await loadPluginWithMocks({
-			getConfig: async () => ({ data: null }),
-		});
-
-		await eventHandlers["guildMemberAdd"]({
-			member: { id: "u1", guildId: "g1", user: { id: "u1", username: "X", avatarURL: null } },
-			guild: { id: "g1", name: "S", memberCount: 1, iconURL: null },
-		});
-
-		assert.equal(calls.length, 0, "should not send any messages when config is null");
-	});
-
-	it("guildMemberAdd sends to both channel and DM when both enabled", async () => {
-		const { eventHandlers, calls, dmCalls } = await loadPluginWithMocks({
-			getConfig: async () => ({
-				data: {
-					welcomeChannelId: "ch_both",
-					welcomeMessage: "Welcome {username}!",
-					cardEnabled: false,
-					dmEnabled: true,
-				},
-			}),
-		});
-
-		await eventHandlers["guildMemberAdd"]({
-			member: { id: "u4", guildId: "g1", user: { id: "u4", username: "BothUser", avatarURL: null } },
-			guild: { id: "g1", name: "Server", memberCount: 10, iconURL: null },
-		});
-
-		assert.equal(calls.length, 1, "should send one channel message");
-		assert.equal(dmCalls.length, 1, "should send one DM");
-		assert.equal(dmCalls[0].userId, "u4");
-	});
-});
-
 // ── Test: RPC method catalog includes new methods ──────────────────────
 
-describe("RPC method catalog (welcome plugin support)", () => {
+describe("RPC method catalog", () => {
 	const { RPC_METHODS, isValidMethod } = require("../core/rpc/methods");
 
 	it("discord.sendRichMessage is registered", () => {
@@ -355,11 +124,9 @@ describe("RPC method catalog (welcome plugin support)", () => {
 
 describe("Broker _resolveArgs", () => {
 	it("maps all db handlers to correct named params", () => {
-		// We test the _resolveArgs logic by verifying the broker class has it
 		const { CapabilityBroker } = require("../core/rpc/broker");
 		const broker = new CapabilityBroker({ db: {}, client: {}, hooks: {} });
 
-		// Test a few representative mappings
 		assert.deepEqual(broker._resolveArgs("getPluginConfig", ["g1"]), { guildId: "g1" });
 		assert.deepEqual(broker._resolveArgs("updatePluginConfig", ["g1", { foo: 1 }]), { guildId: "g1", data: { foo: 1 } });
 		assert.deepEqual(broker._resolveArgs("getUserProfile", ["u1", "g1"]), { userId: "u1", guildId: "g1" });

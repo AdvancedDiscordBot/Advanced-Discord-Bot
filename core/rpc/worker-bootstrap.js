@@ -151,10 +151,14 @@ function createShimContext(rpc) {
 	};
 
 	// Model definition: registers schema in Core, returns a proxy that routes CRUD through RPC
+	const { serializeSchema } = require("./schema-serialize");
 	const defineModel = (modelName, schema) => {
-		// Send schema to Core for namespaced registration
+		// A compiled mongoose Schema can't cross the IPC boundary (its field
+		// types are the String/Number/Date constructors, which structured-clone
+		// rejects). Flatten it to a plain descriptor first; Core rehydrates it.
 		try {
-			rpc.call("plugin.defineModel", { modelName, schema }).catch((err) => {
+			const descriptor = serializeSchema(schema);
+			rpc.call("plugin.defineModel", { modelName, schema: descriptor }).catch((err) => {
 				console.warn(`[plugin:${pluginId}] defineModel ${modelName} failed:`, err.message);
 			});
 		} catch (err) {

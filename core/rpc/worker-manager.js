@@ -19,7 +19,7 @@ const BOOTSTRAP_PATH = path.join(__dirname, "worker-bootstrap.js");
 
 // Default resource limits for worker threads
 const DEFAULT_RESOURCE_LIMITS = {
-	maxOldGenerationSizeMb: 128,
+	maxOldGenerationSizeMb: 512,
 	maxYoungGenerationSizeMb: 32,
 	stackSizeMb: 4,
 };
@@ -267,8 +267,16 @@ class WorkerManager {
 		if (isRequest(msg)) {
 			try {
 				const response = await this.broker.handleRequest(pluginId, msg);
-				// Send response back to the worker
-				entry.worker.postMessage(response);
+				// The broker returns a bare { id, ok, result|error }; the worker's
+				// RpcClient only recognizes a reply when it carries the
+				// "rpc:response" type, so stamp it here before posting back.
+				entry.worker.postMessage({
+					type: "rpc:response",
+					id: response.id != null ? response.id : msg.id,
+					ok: !!response.ok,
+					result: response.result,
+					error: response.error,
+				});
 			} catch (err) {
 				this.logger.error(`Error handling RPC from ${pluginId}:`, err.message);
 				entry.worker.postMessage({

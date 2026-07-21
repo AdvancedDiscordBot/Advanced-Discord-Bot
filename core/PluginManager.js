@@ -536,14 +536,19 @@ class PluginManager {
 			}
 
 			// Decide: isolated (worker) or direct (main process) loading.
-			// Core plugins always load directly. Third-party plugins load in a
-			// worker when isolation is enabled and the plugin opts in via
-			// "isolation": true in plugin.json.
+			//
+			// Only npm-installed plugins (source: "package") are untrusted
+			// third-party code and MUST run sandboxed in a worker thread — this
+			// is enforced, not opt-in, so an installed plugin cannot escape the
+			// broker by omitting a manifest flag.
+			//
+			// In-repo plugins (source: "local", e.g. the administration
+			// dashboard) and the internal "builtin" core ship with the bot and
+			// load directly with full ctx access.
 			const useIsolation =
 				this.isolationEnabled &&
 				this.workerManager &&
-				plugin.source !== "builtin" &&
-				plugin.manifest?.isolation !== false; // opt-out with "isolation": false
+				plugin.source === "package";
 
 			if (useIsolation) {
 				await this._loadPluginInWorker(plugin, pluginState, caps, logger);

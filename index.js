@@ -250,6 +250,13 @@ async function startADB() {
 		});
 		client.pluginManager = pluginManager;
 
+		// Sandbox untrusted (npm-installed) plugins in worker_threads.
+		// On by default; set PLUGIN_ISOLATION=false to force everything to
+		// load directly in the main process (not recommended in production).
+		if (process.env.PLUGIN_ISOLATION !== "false") {
+			pluginManager.enableIsolation();
+		}
+
 		let apiServer = null;
 		if (process.env.BOT_API_ENABLED === "true") {
 			apiServer = await startApiServer({

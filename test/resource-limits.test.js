@@ -90,7 +90,7 @@ describe("createLimitsFromCapabilities", () => {
     it("should increase memory limits for storage plugins", () => {
         const limits = createLimitsFromCapabilities({ storage: ["own-collection"] });
         assert.ok(limits.maxMemoryMB > DEFAULT_LIMITS.maxMemoryMB);
-        assert.ok(limits.maxMemoryMB <= 256);
+        assert.ok(limits.maxMemoryMB <= 768);
     });
     
     it("should increase timeout for AI plugins", () => {

@@ -16,8 +16,11 @@ const DEFAULT_LIMITS = {
     // Per-call execution timeout (ms) - kills any single RPC call that hangs
     callTimeout: 5000,
     
-    // Maximum memory usage (MB) - worker is killed if exceeded
-    maxMemoryMB: 128,
+    // Maximum memory usage (MB) - worker is killed if exceeded.
+    // A worker that loads discord.js + mongoose baselines ~200MB of heap on
+    // its own, so this ceiling is the plugin's own working set on top of that
+    // runtime floor, not a total-process budget.
+    maxMemoryMB: 512,
     
     // Maximum CPU time per minute (ms) - worker is throttled if exceeded
     maxCpuPerMinute: 30000,
@@ -279,7 +282,7 @@ function createLimitsFromCapabilities(capabilities = {}) {
     // Adjust limits based on declared capabilities
     if (capabilities.storage) {
         // Plugins with storage access get slightly higher memory limits
-        limits.maxMemoryMB = Math.min(limits.maxMemoryMB * 1.5, 256);
+        limits.maxMemoryMB = Math.min(limits.maxMemoryMB * 1.5, 768);
     }
     
     if (capabilities.ai) {

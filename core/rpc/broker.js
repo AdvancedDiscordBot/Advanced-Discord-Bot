@@ -858,9 +858,17 @@ class CapabilityBroker extends EventEmitter {
 	registerModel(pluginId, modelName, schema) {
 		if (!this._modelRegistry) this._modelRegistry = new Map();
 		const mongoose = require("mongoose");
+		const { deserializeSchema } = require("./schema-serialize");
 		const prefixedName = `plugin_${pluginId}_${modelName}`;
 		if (!mongoose.models[prefixedName]) {
-			mongoose.model(prefixedName, schema);
+			// Isolated plugins send a plain schema descriptor over IPC (a real
+			// mongoose.Schema can't be structured-cloned). Rehydrate it here.
+			// Direct callers may still pass a real Schema — pass those through.
+			const realSchema =
+				schema && schema.__adbSchema
+					? deserializeSchema(schema)
+					: schema;
+			mongoose.model(prefixedName, realSchema);
 		}
 		const key = `${pluginId}:${modelName}`;
 		this._modelRegistry.set(key, mongoose.models[prefixedName]);
