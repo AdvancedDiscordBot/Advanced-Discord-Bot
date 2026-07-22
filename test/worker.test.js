@@ -188,8 +188,65 @@ test("broker: multiple plugins have isolated capabilities", async () => {
 	assert.strictEqual(broker.hasCapability("plugin-b", "storage:own-collection"), false);
 });
 
-// ── RpcClient Protocol Tests ──────────────────────────────────────────────
+// ── Crash-Loop Circuit Breaker ────────────────────────────────────────────
 
+// A plugin that throws in load() exits non-zero every time. Each respawn used
+// to create a fresh WorkerEntry with crashCount:0, so MAX_CRASH_COUNT never
+// tripped and the worker crash-looped forever, flooding logs. This drives the
+// REAL spawnWorker (with a mocked Worker ctor) to prove crashCount survives
+// respawns and the breaker gives up after MAX_CRASH_COUNT attempts.
+test("WorkerManager: crash-looping plugin gives up after MAX_CRASH_COUNT", async () => {
+	const wt = require("worker_threads");
+	const realWorkerCtor = wt.Worker;
+	const realSetTimeout = global.setTimeout;
+	const modPath = require.resolve("../core/rpc/worker-manager");
+
+	let spawnCount = 0;
+	// A Worker that always "crashes in load()": exits non-zero right after spawn
+	// and never signals ready. Hard-capped so a regressed (never-tripping) breaker
+	// fails the assertion cleanly instead of crash-looping the event loop forever.
+	const SPAWN_CAP = 20;
+	class CrashWorker extends EventEmitter {
+		constructor() {
+			super();
+			spawnCount++;
+			this.postMessage = () => {};
+			this.terminate = async () => 0;
+			if (spawnCount <= SPAWN_CAP) realSetTimeout(() => this.emit("exit", 1), 0);
+		}
+	}
+
+	wt.Worker = CrashWorker;
+	// Collapse the 2s restart backoff (and 15s startup timeout) to near-instant.
+	global.setTimeout = (fn) => realSetTimeout(fn, 0);
+	// Re-require WorkerManager so its module-level `Worker` binds to CrashWorker.
+	delete require.cache[modPath];
+	const { WorkerManager: WM, MAX_CRASH_COUNT } = require(modPath);
+
+	try {
+		const broker = new CapabilityBroker({ db: makeMockDb(), client: null, hooks: makeMockHooks() });
+		const hooks = makeMockHooks();
+		const mgr = new WM({ broker, hooks });
+
+		// The initial startup promise never resolves (worker never readies) — it
+		// rejects on the (now-instant) startup timeout; swallow that.
+		mgr.spawnWorker("bad-plugin", "/x/index.js", {}, "Bad Plugin").catch(() => {});
+
+		// Let the crash → respawn chain run to completion.
+		await new Promise((r) => realSetTimeout(r, 150));
+
+		// 1 initial spawn + 2 restarts (crashCounts 1,2), then the breaker trips
+		// at crashCount 3 and stops respawning.
+		assert.strictEqual(spawnCount, MAX_CRASH_COUNT);
+		assert.strictEqual(mgr.hasWorker("bad-plugin"), false);
+	} finally {
+		wt.Worker = realWorkerCtor;
+		global.setTimeout = realSetTimeout;
+		delete require.cache[modPath];
+	}
+});
+
+// ── RpcClient Protocol Tests ──────────────────────────────────────────────
 const { RpcClient } = require("../core/rpc/worker-client");
 const { MSG } = require("../core/rpc/protocol");
 

@@ -120,7 +120,10 @@ class WorkerManager {
 			entryPath,
 			capabilities,
 			networkAllowlist: options.networkAllowlist || [],
-			crashCount: 0,
+			// Carry the crash count across respawns — otherwise a plugin that throws
+			// in load() gets a fresh entry (crashCount 0) on every restart and the
+			// MAX_CRASH_COUNT circuit breaker never trips, crash-looping forever.
+			crashCount: options.crashCount || 0,
 			spawnedAt: Date.now(),
 			ready: false,
 		};
@@ -372,7 +375,7 @@ class WorkerManager {
 				entry.entryPath,
 				entry.capabilities,
 				entry.pluginName,
-				{ networkAllowlist: entry.networkAllowlist },
+				{ networkAllowlist: entry.networkAllowlist, crashCount: entry.crashCount },
 			);
 		} catch (err) {
 			this.logger.error(`Failed to restart worker ${pluginId}:`, err.message);
@@ -492,4 +495,4 @@ class WorkerManager {
 	}
 }
 
-module.exports = { WorkerManager };
+module.exports = { WorkerManager, MAX_CRASH_COUNT };
