@@ -108,6 +108,7 @@ class WorkerManager {
 				pluginId,
 				entryPath,
 				pluginName: pluginName || pluginId,
+				grantedEnv: options.grantedEnv || {},
 			},
 			resourceLimits: DEFAULT_RESOURCE_LIMITS,
 		});

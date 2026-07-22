@@ -45,7 +45,7 @@ const { entryPath, pluginId } = workerData || {};
 // method that touches real resources goes through RPC instead of
 // direct access.
 
-function createShimContext(rpc) {
+function createShimContext(rpc, grantedEnv = {}) {
 	// DB proxy: routes all db.* calls through RPC
 	// The broker accepts flexible params — we pass args as a positional array
 	// and the broker's handler destructures them.
@@ -268,7 +268,7 @@ function createShimContext(rpc) {
 		defineModel,
 		models: null, // Plugins assign after defineModel
 		hooks: hooksProxy,
-		config: { env: {} },
+		config: { env: grantedEnv || {} },
 		logger: loggerProxy,
 	};
 }
@@ -330,7 +330,7 @@ if (IS_WORKER) {
 			}
 
 			// Override registerCommand to also track locally for command:execute routing
-			const shimCtx = createShimContext(rpc);
+			const shimCtx = createShimContext(rpc, workerData.grantedEnv);
 			const origRegisterCommand = shimCtx.registerCommand;
 			shimCtx.registerCommand = async (command) => {
 				if (command && command.data && command.execute) {

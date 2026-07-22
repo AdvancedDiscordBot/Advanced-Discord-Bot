@@ -57,6 +57,11 @@ const RISK_TEMPLATES = {
 	// scheduler.<action>
 	"scheduler.cron": "run tasks automatically on a schedule",
 
+	// system.<escalation> — HIGH RISK. These reduce or remove the sandbox.
+	"system.env": "read the bot's environment variables, which may include secrets and API keys",
+	"system.bot-token": "read the bot's Discord login token — enough to fully control the bot account",
+	"system.raw-client": "run WITHOUT the sandbox, in the bot's main process, with unrestricted access to the bot, your server, and the host machine",
+
 	// Composite / non-list permissions (filled with placeholders).
 	"filesystem.read": "read files in: {paths}",
 	"filesystem.write": "modify or delete files in: {paths}",
@@ -75,6 +80,17 @@ const RISK_TEMPLATES = {
 // Order is stable and user-facing. "other plugins' data" is always withheld
 // (per-plugin storage isolation is structural), so it has no predicate.
 const WITHHELD_FACETS = [
+	{
+		label: "run outside its sandbox with full access to the bot and host machine",
+		granted: (perm) => perm.system.includes("raw-client"),
+	},
+	{
+		label: "read the bot's environment variables or login token",
+		granted: (perm) =>
+			perm.system.includes("env") ||
+			perm.system.includes("bot-token") ||
+			perm.system.includes("raw-client"),
+	},
 	{
 		label: "manage your server's members (ban, kick, or timeout)",
 		granted: (perm) =>
@@ -162,6 +178,7 @@ function generateRiskCard(manifest) {
 	for (const value of perm.ai) push(`ai.${value}`);
 	for (const value of perm.hooks) push(`hooks.${value}`);
 	for (const value of perm.scheduler) push(`scheduler.${value}`);
+	for (const value of perm.system) push(`system.${value}`);
 
 	// Composite permissions.
 	if (perm.filesystem.read.length) {

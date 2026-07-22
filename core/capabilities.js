@@ -54,6 +54,13 @@ const CAPABILITY_SCHEMA = {
 		valid: ["cron"],
 		description: "Scheduled/recurring task execution",
 	},
+	system: {
+		valid: ["env", "bot-token", "raw-client"],
+		description:
+			"Elevated host access — reduces or removes the sandbox. Owner must approve at install. " +
+			"env = read the bot's environment variables; bot-token = read the Discord login token; " +
+			"raw-client = run UN-ISOLATED in the main process with full client/host access.",
+	},
 };
 
 // ── Validation ────────────────────────────────────────────────────────────

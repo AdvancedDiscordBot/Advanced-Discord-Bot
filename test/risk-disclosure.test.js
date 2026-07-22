@@ -150,7 +150,11 @@ test("other plugins' data is always withheld, even for a maximally-permissioned 
 			filesystem: { read: ["./assets"], write: ["./data"] },
 		},
 	});
-	assert.deepStrictEqual(withheld, ["any other plugin's data"]);
+	assert.deepStrictEqual(withheld, [
+		"run outside its sandbox with full access to the bot and host machine",
+		"read the bot's environment variables or login token",
+		"any other plugin's data",
+	]);
 });
 
 test("generateFullRiskCard returns both granted and withheld", () => {

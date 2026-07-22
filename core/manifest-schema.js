@@ -33,7 +33,7 @@ const LIMITS = {
 };
 
 // Permission categories that map onto CAPABILITY_SCHEMA value lists.
-const CAP_BACKED = ["discord", "storage", "ai", "hooks", "scheduler"];
+const CAP_BACKED = ["discord", "storage", "ai", "hooks", "scheduler", "system"];
 
 // ── Defaults ────────────────────────────────────────────────────────────────
 
@@ -53,6 +53,7 @@ function defaultPermissions() {
 		ai: [],
 		hooks: [],
 		scheduler: [],
+		system: [],
 		network: { outbound: [] },
 		filesystem: { read: [], write: [] },
 		childProcess: false,

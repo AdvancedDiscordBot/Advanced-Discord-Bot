@@ -472,7 +472,7 @@ class PluginManager {
 		return dependents;
 	}
 
-	buildContext(pluginName, logger) {
+	buildContext(pluginName, logger, grantedEnv = {}) {
 		const pluginContext = new PluginContext({
 			pluginName,
 			client: this.client,
@@ -482,11 +482,40 @@ class PluginManager {
 			pluginManager: this,
 			logger,
 			config: {
-				env: {},
+				env: grantedEnv,
 			},
 		});
 
 		return pluginContext.build();
+	}
+
+	/**
+	 * Compute the environment a plugin is allowed to see, from its declared
+	 * `system` escalation capabilities. Owner-approved at install time.
+	 *   - raw-client: full trust → the real process.env
+	 *   - env: process.env minus the most sensitive infra secrets
+	 *   - bot-token: adds DISCORD_TOKEN specifically
+	 * A plugin with no `system` capability gets `{}` (the default).
+	 */
+	grantedEnv(manifest) {
+		const sys = manifest?.capabilities?.system || [];
+		if (!sys.length) return {};
+		if (sys.includes("raw-client")) return { ...process.env };
+
+		const env = {};
+		if (sys.includes("env")) {
+			const DENY = new Set([
+				"DISCORD_TOKEN",
+				"MONGODB_URI",
+				"SESSION_SECRET",
+				"DISCORD_OAUTH_CLIENT_SECRET",
+			]);
+			for (const [k, v] of Object.entries(process.env)) {
+				if (!DENY.has(k)) env[k] = v;
+			}
+		}
+		if (sys.includes("bot-token")) env.DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+		return env;
 	}
 
 	initPluginState(pluginName, manifest) {
@@ -542,17 +571,31 @@ class PluginManager {
 			// is enforced, not opt-in, so an installed plugin cannot escape the
 			// broker by omitting a manifest flag.
 			//
+			// The one sanctioned escape hatch: a plugin that declares the
+			// `system:raw-client` escalation capability runs in DIRECT mode with
+			// full access. That capability is owner-approved at install time via
+			// the high-risk disclosure — some plugins (voice, raid lockdown,
+			// cross-plugin introspection) genuinely can't work over the RPC
+			// surface, and this makes that trust explicit rather than a silent
+			// bypass.
+			//
 			// In-repo plugins (source: "local", e.g. the administration
-			// dashboard) and the internal "builtin" core ship with the bot and
-			// load directly with full ctx access.
+			// dashboard) and the internal "builtin" core always load directly.
+			const wantsRawClient = (caps?.system || []).includes("raw-client");
 			const useIsolation =
 				this.isolationEnabled &&
 				this.workerManager &&
-				plugin.source === "package";
+				plugin.source === "package" &&
+				!wantsRawClient;
 
 			if (useIsolation) {
 				await this._loadPluginInWorker(plugin, pluginState, caps, logger);
 			} else {
+				if (wantsRawClient && plugin.source === "package") {
+					logger.warn(
+						`${plugin.name} runs UN-ISOLATED (system:raw-client) — owner-approved full access`,
+					);
+				}
 				await this._loadPluginDirect(plugin, pluginState, logger);
 			}
 
@@ -584,7 +627,11 @@ class PluginManager {
 	 * @private
 	 */
 	async _loadPluginDirect(plugin, pluginState, logger) {
-		const ctx = this.buildContext(plugin.name, logger);
+		const ctx = this.buildContext(
+			plugin.name,
+			logger,
+			this.grantedEnv(plugin.manifest),
+		);
 		const pluginModule = require(plugin.entryPath);
 		const loadFn = pluginModule.load || pluginModule.default || pluginModule;
 
@@ -620,7 +667,7 @@ class PluginManager {
 				plugin.entryPath,
 				caps || {},
 				plugin.manifest?.displayName || plugin.name,
-				{ networkAllowlist },
+				{ networkAllowlist, grantedEnv: this.grantedEnv(plugin.manifest) },
 			);
 
 			pluginState.isolated = true;
