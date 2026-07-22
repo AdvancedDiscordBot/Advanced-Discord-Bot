@@ -224,9 +224,12 @@ class WorkerManager {
 		const entry = this.workers.get(pluginId);
 		if (!entry) return;
 
-		const { entryPath, capabilities, pluginName } = entry;
+		const { entryPath, capabilities, pluginName, networkAllowlist } = entry;
 		await this.terminateWorker(pluginId);
-		await this.spawnWorker(pluginId, entryPath, capabilities, pluginName);
+		// Carry networkAllowlist across a manual reload — otherwise the plugin
+		// respawns with an empty allowlist and loses all outbound network access.
+		// crashCount is intentionally NOT carried: a human reload gets a fresh start.
+		await this.spawnWorker(pluginId, entryPath, capabilities, pluginName, { networkAllowlist });
 	}
 
 	// ── Message Handling ─────────────────────────────────────────────────
