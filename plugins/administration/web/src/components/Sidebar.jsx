@@ -1,15 +1,18 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Puzzle, Settings } from 'lucide-react';
+import { LayoutDashboard, Puzzle, Settings, SlidersHorizontal, ExternalLink, ShieldCheck } from 'lucide-react';
 import { colors, fonts, radius, fontSize } from '../theme';
 
+// Core nav items, each gated on a dashboard permission. `perm: null` means
+// always shown to anyone who can see the guild at all.
 const NAV = [
-  { to: '',         icon: LayoutDashboard, label: 'Dashboard' },
-  { to: 'plugins',  icon: Puzzle,          label: 'Plugins'   },
-  { to: 'settings', icon: Settings,        label: 'Settings'  },
+  { to: '',         icon: LayoutDashboard, label: 'Dashboard', perm: null },
+  { to: 'plugins',  icon: Puzzle,          label: 'Plugins',   perm: 'plugins.manage' },
+  { to: 'roles',    icon: ShieldCheck,     label: 'Access',    perm: 'roles.manage' },
+  { to: 'settings', icon: Settings,        label: 'Settings',  perm: 'guild.configure' },
 ];
 
-export function Sidebar({ guild }) {
+export function Sidebar({ guild, plugins = [], access = null }) {
   if (!guild) {
     return (
       <aside style={styles.sidebar}>
@@ -17,6 +20,19 @@ export function Sidebar({ guild }) {
       </aside>
     );
   }
+
+  const perms = new Set(access?.permissions || []);
+  const can = (perm) => !perm || perms.has(perm);
+  const navItems = NAV.filter((item) => can(item.perm));
+
+  // A plugin shows in the nav only when it's enabled for THIS guild, has
+  // something to configure, and the viewer may view it.
+  const pluginNavItems = plugins.filter(
+    (p) =>
+      p.enabledForGuild &&
+      (p.settingsSchema?.length > 0 || p.commandPermissions || p.webUi) &&
+      can(`plugin.${p.name}.view`),
+  );
 
   return (
     <aside style={styles.sidebar}>
@@ -27,7 +43,7 @@ export function Sidebar({ guild }) {
 
       <nav style={styles.nav}>
         <p style={styles.navSection}>CORE</p>
-        {NAV.map(({ to, icon: Icon, label }) => {
+        {navItems.map(({ to, icon: Icon, label }) => {
           const path = to ? `/guild/${guild.id}/${to}` : `/guild/${guild.id}`;
           return (
             <NavLink
@@ -42,8 +58,33 @@ export function Sidebar({ guild }) {
           );
         })}
 
-        {/* Plugin-injected nav items land here in future */}
-        <div id="plugin-nav-items" />
+        {pluginNavItems.length > 0 && (
+          <>
+            <p style={{ ...styles.navSection, marginTop: '16px' }}>PLUGINS</p>
+            {pluginNavItems.map((p) => (
+              <div key={p.name}>
+                <NavLink
+                  to={`/guild/${guild.id}/plugins/${p.name}/settings`}
+                  style={({ isActive }) => ({ ...styles.navLink, ...(isActive ? styles.navLinkActive : {}) })}
+                >
+                  <SlidersHorizontal size={16} />
+                  <span style={{ flex: 1 }}>{p.displayName || p.name}</span>
+                </NavLink>
+                {p.webUi && (
+                  <a
+                    href={`/plugin-ui/${p.name}/`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ ...styles.navLink, paddingLeft: '32px', fontSize: '12px', color: colors.inkFaint, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <ExternalLink size={12} />
+                    <span>{p.webUi.label || 'Open UI'}</span>
+                  </a>
+                )}
+              </div>
+            ))}
+          </>
+        )}
       </nav>
     </aside>
   );

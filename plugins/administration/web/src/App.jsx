@@ -8,7 +8,10 @@ import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 import { GuildSettings } from './pages/Settings';
 import { Plugins } from './pages/Plugins';
+import { Roles } from './pages/Roles';
+import { PluginSettings } from './pages/PluginSettings';
 import { GuildPicker } from './components/GuildPicker';
+import MemberApp from './MemberApp';
 import { colors } from './theme';
 
 function AppRoutes() {
@@ -41,6 +44,8 @@ function AppRoutes() {
           <Route index element={<GuildPicker />} />
           <Route path="guild/:guildId" element={<Dashboard />} />
           <Route path="guild/:guildId/plugins" element={<Plugins />} />
+          <Route path="guild/:guildId/plugins/:pluginName/settings" element={<PluginSettings />} />
+          <Route path="guild/:guildId/roles" element={<Roles />} />
           <Route path="guild/:guildId/settings" element={<GuildSettings />} />
         </Route>
       </Routes>
@@ -50,10 +55,16 @@ function AppRoutes() {
 }
 
 export default function App() {
+  // One build, two surfaces. The admin dashboard mounts under /dashboard; the
+  // member portal (self-service) mounts under /me. The path prefix picks which
+  // route tree runs — assets are absolute (homepage=/dashboard) so both load.
+  const isMember = window.location.pathname.startsWith('/me');
+  const basename = isMember ? '/me' : '/dashboard';
+
   return (
-    <BrowserRouter basename="/dashboard">
+    <BrowserRouter basename={basename}>
       <AuthProvider>
-        <AppRoutes />
+        {isMember ? <MemberApp /> : <AppRoutes />}
       </AuthProvider>
     </BrowserRouter>
   );

@@ -19,21 +19,55 @@
       "configSchema": {
         "type": "object",
         "properties": {
-          "log_channel_id": { "type": "string", "default": null },
-          "raid_joins": { "type": "number", "default": 10 },
-          "raid_seconds": { "type": "number", "default": 10 },
-          "spam_messages": { "type": "number", "default": 5 },
-          "spam_seconds": { "type": "number", "default": 3 },
-          "spam_action": { "type": "string", "enum": ["warn", "mute", "kick", "ban"], "default": "mute" },
-          "alt_min_age_days": { "type": "number", "default": 7 },
-          "alt_action": { "type": "string", "enum": ["flag", "kick"], "default": "flag" }
+          "log_channel_id": {
+            "type": "string",
+            "default": null
+          },
+          "raid_joins": {
+            "type": "number",
+            "default": 10
+          },
+          "raid_seconds": {
+            "type": "number",
+            "default": 10
+          },
+          "spam_messages": {
+            "type": "number",
+            "default": 5
+          },
+          "spam_seconds": {
+            "type": "number",
+            "default": 3
+          },
+          "spam_action": {
+            "type": "string",
+            "enum": [
+              "warn",
+              "mute",
+              "kick",
+              "ban"
+            ],
+            "default": "mute"
+          },
+          "alt_min_age_days": {
+            "type": "number",
+            "default": 7
+          },
+          "alt_action": {
+            "type": "string",
+            "enum": [
+              "flag",
+              "kick"
+            ],
+            "default": "flag"
+          }
         }
       }
     },
     {
       "name": "adb-plugin-automod",
       "displayName": "Automod",
-      "description": "automod plugin for ADB",
+      "description": "Auto-moderation with filters for spam, links, words, caps, mentions, emojis, invites, and configurable actions.",
       "author": "DeadIndian",
       "version": "1.1.0",
       "category": "moderation",
@@ -49,7 +83,11 @@
       "configSchema": {
         "type": "object",
         "properties": {
-          "enabled": { "type": "boolean", "default": true, "description": "Enable this plugin for the server" }
+          "enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Enable automod for the server"
+          }
         }
       }
     },
@@ -72,7 +110,11 @@
       "configSchema": {
         "type": "object",
         "properties": {
-          "enabled": { "type": "boolean", "default": false, "description": "Whether autorole is enabled for this server" }
+          "enabled": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether autorole is enabled for this server"
+          }
         }
       }
     },
@@ -96,9 +138,22 @@
       "configSchema": {
         "type": "object",
         "properties": {
-          "channel": { "type": "string", "description": "Channel ID where confessions appear" },
-          "cooldown": { "type": "number", "default": 60, "minimum": 0, "maximum": 3600, "description": "Cooldown in seconds between confessions" },
-          "requireApproval": { "type": "boolean", "default": false, "description": "Require mod approval before posting" }
+          "channel": {
+            "type": "string",
+            "description": "Channel ID where confessions appear"
+          },
+          "cooldown": {
+            "type": "number",
+            "default": 60,
+            "minimum": 0,
+            "maximum": 3600,
+            "description": "Cooldown in seconds between confessions"
+          },
+          "requireApproval": {
+            "type": "boolean",
+            "default": false,
+            "description": "Require mod approval before posting"
+          }
         }
       }
     },
@@ -122,9 +177,20 @@
       "configSchema": {
         "type": "object",
         "properties": {
-          "channel": { "type": "string", "description": "Channel ID where counting happens" },
-          "resetOnFail": { "type": "boolean", "default": true, "description": "Reset to 0 on wrong count" },
-          "milestones": { "type": "string", "default": "10,25,50,100,250,500,1000", "description": "Comma-separated milestones that trigger a celebratory message" }
+          "channel": {
+            "type": "string",
+            "description": "Channel ID where counting happens"
+          },
+          "resetOnFail": {
+            "type": "boolean",
+            "default": true,
+            "description": "Reset to 0 on wrong count"
+          },
+          "milestones": {
+            "type": "string",
+            "default": "10,25,50,100,250,500,1000",
+            "description": "Comma-separated milestones that trigger a celebratory message"
+          }
         }
       }
     },
@@ -147,7 +213,11 @@
       "configSchema": {
         "type": "object",
         "properties": {
-          "prefix": { "type": "string", "default": "!", "description": "Prefix for text commands" }
+          "prefix": {
+            "type": "string",
+            "default": "!",
+            "description": "Prefix for text commands"
+          }
         }
       }
     },
@@ -170,8 +240,18 @@
       "configSchema": {
         "type": "object",
         "properties": {
-          "defaultDuration": { "type": "string", "default": "1h", "description": "Default giveaway duration (e.g., 30m, 1h, 1d)" },
-          "maxWinners": { "type": "number", "default": 10, "minimum": 1, "maximum": 50, "description": "Max winners per giveaway" }
+          "defaultDuration": {
+            "type": "string",
+            "default": "1h",
+            "description": "Default giveaway duration (e.g., 30m, 1h, 1d)"
+          },
+          "maxWinners": {
+            "type": "number",
+            "default": 10,
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Max winners per giveaway"
+          }
         }
       }
     },
@@ -194,8 +274,16 @@
       "configSchema": {
         "type": "object",
         "properties": {
-          "trackLeaves": { "type": "boolean", "default": true, "description": "Deduct invite credit when an invited member leaves" },
-          "bonusRoles": { "type": "string", "default": "", "description": "Comma-separated: roleID:inviteCount e.g. 123:5,456:10" }
+          "trackLeaves": {
+            "type": "boolean",
+            "default": true,
+            "description": "Deduct invite credit when an invited member leaves"
+          },
+          "bonusRoles": {
+            "type": "string",
+            "default": "",
+            "description": "Comma-separated: roleID:inviteCount e.g. 123:5,456:10"
+          }
         }
       }
     },
@@ -219,10 +307,28 @@
       "configSchema": {
         "type": "object",
         "properties": {
-          "xpPerMessage": { "type": "number", "default": 5, "minimum": 1, "maximum": 50 },
-          "xpCooldown": { "type": "number", "default": 60, "minimum": 10, "maximum": 300 },
-          "xpPerMinuteLimit": { "type": "number", "default": 100, "minimum": 10, "maximum": 1000 },
-          "levelUpChannelId": { "type": "string", "default": null }
+          "xpPerMessage": {
+            "type": "number",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 50
+          },
+          "xpCooldown": {
+            "type": "number",
+            "default": 60,
+            "minimum": 10,
+            "maximum": 300
+          },
+          "xpPerMinuteLimit": {
+            "type": "number",
+            "default": 100,
+            "minimum": 10,
+            "maximum": 1000
+          },
+          "levelUpChannelId": {
+            "type": "string",
+            "default": null
+          }
         }
       }
     },
@@ -245,12 +351,45 @@
       "configSchema": {
         "type": "object",
         "properties": {
-          "log_channel_id": { "type": "string", "default": null },
-          "ticket_category_id": { "type": "string", "default": null },
-          "ticket_support_role_id": { "type": "string", "default": null },
-          "ticket_log_channel_id": { "type": "string", "default": null },
-          "warn_thresholds": { "type": "object", "default": { "3": { "action": "timeout", "duration": "1h" }, "5": { "action": "timeout", "duration": "24h" }, "7": { "action": "kick" }, "10": { "action": "ban" } } },
-          "dm_on_action": { "type": "boolean", "default": true }
+          "log_channel_id": {
+            "type": "string",
+            "default": null
+          },
+          "ticket_category_id": {
+            "type": "string",
+            "default": null
+          },
+          "ticket_support_role_id": {
+            "type": "string",
+            "default": null
+          },
+          "ticket_log_channel_id": {
+            "type": "string",
+            "default": null
+          },
+          "warn_thresholds": {
+            "type": "object",
+            "default": {
+              "3": {
+                "action": "timeout",
+                "duration": "1h"
+              },
+              "5": {
+                "action": "timeout",
+                "duration": "24h"
+              },
+              "7": {
+                "action": "kick"
+              },
+              "10": {
+                "action": "ban"
+              }
+            }
+          },
+          "dm_on_action": {
+            "type": "boolean",
+            "default": true
+          }
         }
       }
     },
@@ -294,7 +433,13 @@
       "configSchema": {
         "type": "object",
         "properties": {
-          "maxPerUser": { "type": "number", "default": 25, "minimum": 1, "maximum": 200, "description": "Max active reminders a single user can have per server" }
+          "maxPerUser": {
+            "type": "number",
+            "default": 25,
+            "minimum": 1,
+            "maximum": 200,
+            "description": "Max active reminders per user per server"
+          }
         }
       }
     },
@@ -317,7 +462,11 @@
       "configSchema": {
         "type": "object",
         "properties": {
-          "enabled": { "type": "boolean", "default": true, "description": "Enable this plugin for the server" }
+          "enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Enable server logs for this server"
+          }
         }
       }
     },
@@ -340,13 +489,43 @@
       "configSchema": {
         "type": "object",
         "properties": {
-          "creationChannelId": { "type": "string", "default": null, "description": "Discord snowflake ID of the designated voice channel" },
-          "categoryId": { "type": "string", "default": null, "description": "Discord snowflake ID of the category" },
-          "nameTemplate": { "type": "string", "default": "{username}'s channel", "description": "Template for channel names" },
-          "autoDeleteDelay": { "type": "number", "default": 30, "description": "Delay in minutes before auto-deleting empty channels" },
-          "maxChannels": { "type": "number", "default": 0, "description": "Maximum temp channels per guild (0 = unlimited)" },
-          "bitrateDefault": { "type": "number", "default": 64000, "minimum": 8000, "maximum": 384000 },
-          "userLimitDefault": { "type": "number", "default": 0, "minimum": 0, "maximum": 99 }
+          "creationChannelId": {
+            "type": "string",
+            "default": null,
+            "description": "Discord snowflake ID of the designated voice channel"
+          },
+          "categoryId": {
+            "type": "string",
+            "default": null,
+            "description": "Discord snowflake ID of the category"
+          },
+          "nameTemplate": {
+            "type": "string",
+            "default": "{username}'s channel",
+            "description": "Template for channel names"
+          },
+          "autoDeleteDelay": {
+            "type": "number",
+            "default": 30,
+            "description": "Delay in minutes before auto-deleting empty channels"
+          },
+          "maxChannels": {
+            "type": "number",
+            "default": 0,
+            "description": "Maximum temp channels per guild (0 = unlimited)"
+          },
+          "bitrateDefault": {
+            "type": "number",
+            "default": 64000,
+            "minimum": 8000,
+            "maximum": 384000
+          },
+          "userLimitDefault": {
+            "type": "number",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 99
+          }
         }
       }
     },
@@ -369,7 +548,13 @@
       "configSchema": {
         "type": "object",
         "properties": {
-          "maxItems": { "type": "number", "default": 50, "minimum": 1, "maximum": 500, "description": "Max to-do items per user per server" }
+          "maxItems": {
+            "type": "number",
+            "default": 50,
+            "minimum": 1,
+            "maximum": 500,
+            "description": "Max to-do items per user per server"
+          }
         }
       }
     },
@@ -392,15 +577,33 @@
       "configSchema": {
         "type": "object",
         "properties": {
-          "welcomeChannelId": { "type": "string", "default": "" },
-          "welcomeMessage": { "type": "string", "default": "Welcome to the server, {user}! You are member #{memberCount}." },
-          "goodbyeChannelId": { "type": "string", "default": "" },
-          "goodbyeMessage": { "type": "string", "default": "Goodbye {username}! We will miss you." },
-          "dmEnabled": { "type": "boolean", "default": false },
-          "cardEnabled": { "type": "boolean", "default": false }
+          "welcomeChannelId": {
+            "type": "string",
+            "default": ""
+          },
+          "welcomeMessage": {
+            "type": "string",
+            "default": "Welcome to the server, {user}! You are member #{memberCount}."
+          },
+          "goodbyeChannelId": {
+            "type": "string",
+            "default": ""
+          },
+          "goodbyeMessage": {
+            "type": "string",
+            "default": "Goodbye {username}! We will miss you."
+          },
+          "dmEnabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "cardEnabled": {
+            "type": "boolean",
+            "default": false
+          }
         }
       }
     }
   ],
-  "lastFetch": 1784895606188
+  "lastFetch": 1785482586220
 }

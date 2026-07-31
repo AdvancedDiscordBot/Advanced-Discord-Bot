@@ -49,6 +49,10 @@ if (!BOT_PORT) {
 // ── State ───────────────────────────────────────────────────────────────
 let botProcess = null;
 let botStartedAt = null;
+
+// Registry of plugin-hosted UIs: pluginName → port
+// Populated at runtime via /api/plugin-ui-register from the bot process.
+var pluginUiRegistry = new Map();
 let crashCount = 0;
 let restartInProgress = false;
 let shuttingDown = false;
@@ -271,19 +275,73 @@ function proxyToBot(req, res) {
 }
 
 // ── WebSocket server (native — survives bot restarts) ─────────────────
+
+// Which guilds may a socket receive guild-scoped events for? The watchdog has
+// no Discord client, so it can't answer that itself — it asks the bot, which
+// resolves live permissions. Cached per socket on the same 60s TTL the bot's
+// resolver uses.
+var WS_GUILD_TTL_MS = 60 * 1000;
+
+function refreshSocketGuilds(socket) {
+	var sessionData = socket.sessionData || {};
+	var userId = sessionData.user && sessionData.user.id;
+	if (!userId || !isBotRunning()) return;
+	if (socket._guildsPending) return;
+
+	socket._guildsPending = true;
+	var candidates = (sessionData.candidateGuildIds || []).join(",");
+	var req = http.request(
+		{
+			hostname: BOT_HOST,
+			port: BOT_PORT,
+			path:
+				"/api/internal/ws-guilds?userId=" +
+				encodeURIComponent(userId) +
+				"&candidates=" +
+				encodeURIComponent(candidates),
+			method: "GET",
+			headers: { "x-adb-internal": process.env.SESSION_SECRET || "" },
+		},
+		function (res) {
+			var body = "";
+			res.on("data", function (chunk) { body += chunk; });
+			res.on("end", function () {
+				socket._guildsPending = false;
+				try {
+					var parsed = JSON.parse(body);
+					if (Array.isArray(parsed.guildIds)) {
+						socket._allowedGuilds = parsed.guildIds;
+						socket._guildsFetchedAt = Date.now();
+					}
+				} catch (err) {
+					log("warn", "ws-guilds parse failed: " + err.message);
+				}
+			});
+		},
+	);
+	req.on("error", function (err) {
+		socket._guildsPending = false;
+		log("warn", "ws-guilds lookup failed: " + err.message);
+	});
+	req.end();
+}
+
 function wsBroadcast(event) {
 	var data = JSON.stringify(event);
 	wsClients.forEach(function (socket) {
 		if (socket.readyState !== socket.OPEN) return;
-		var sessionData = socket.sessionData || {};
 		var guildId = event.guildId;
 		if (guildId) {
-			var ownerIds = sessionData.ownerIds || [];
-			var allowed = sessionData.adminGuildIds || [];
-			if (
-				!ownerIds.includes(sessionData.user?.id) &&
-				!allowed.includes(guildId)
-			) return;
+			// No list yet: drop the event and fetch one — a socket never receives a
+			// guild's events on an unverified guess. A stale list triggers a
+			// background refresh and is used for this event, so staleness is bounded
+			// by the TTL plus one lookup.
+			var age = Date.now() - (socket._guildsFetchedAt || 0);
+			if (!socket._allowedGuilds || age > WS_GUILD_TTL_MS) {
+				refreshSocketGuilds(socket);
+				if (!socket._allowedGuilds) return;
+			}
+			if (socket._allowedGuilds.indexOf(guildId) === -1) return;
 		}
 		socket.send(data);
 	});
@@ -318,6 +376,7 @@ function setupWebSocket() {
 			}
 			socket.sessionData = sessionData;
 			wsClients.add(socket);
+			refreshSocketGuilds(socket);
 			store.close();
 			socket.on("close", function () { wsClients.delete(socket); });
 		});
@@ -406,6 +465,79 @@ var server = http.createServer(function (req, res) {
 				res.end(JSON.stringify({ error: "Invalid JSON" }));
 			}
 		});
+		return;
+	}
+
+	// ── Plugin UI port registry (populated by bot via /api/plugin-ui-register) ─
+	if (req.method === "POST" && pathname === "/api/plugin-ui-register") {
+		var body = "";
+		req.on("data", function (chunk) { body += chunk; });
+		req.on("end", function () {
+			try {
+				var data = JSON.parse(body);
+				var name = data.name;
+				var port = data.port;
+				if (typeof name !== "string" || !name || typeof port !== "number" ||
+					port < 3100 || port > 4999) {
+					res.writeHead(400, { "Content-Type": "application/json" });
+					res.end(JSON.stringify({ error: "invalid name or port" }));
+					return;
+				}
+				pluginUiRegistry.set(name, port);
+				log("info", "Plugin UI registered: " + name + " → port " + port);
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(JSON.stringify({ ok: true }));
+			} catch (e) {
+				res.writeHead(400, { "Content-Type": "application/json" });
+				res.end(JSON.stringify({ error: "Invalid JSON" }));
+			}
+		});
+		return;
+	}
+
+	// ── Plugin UI reverse proxy: /plugin-ui/:name/* → localhost:<port>/* ────
+	var pluginUiMatch = pathname.match(/^\/plugin-ui\/([^/]+)(\/.*)?$/);
+	if (pluginUiMatch) {
+		var pluginName = pluginUiMatch[1];
+		var pluginPath = pluginUiMatch[2] || "/";
+		var pluginPort = pluginUiRegistry.get(pluginName);
+		if (!pluginPort) {
+			res.writeHead(404, { "Content-Type": "application/json" });
+			res.end(JSON.stringify({ error: "No UI registered for plugin: " + pluginName }));
+			return;
+		}
+		// Proxy to the plugin's local port
+		var proxyOpts = {
+			hostname: "127.0.0.1",
+			port: pluginPort,
+			path: pluginPath + (url.search || ""),
+			method: req.method,
+			headers: Object.assign({}, req.headers),
+		};
+		delete proxyOpts.headers["connection"];
+		delete proxyOpts.headers["upgrade"];
+		var pluginProxyReq = http.request(proxyOpts, function (pluginProxyRes) {
+			var headers = Object.assign({}, pluginProxyRes.headers);
+			res.writeHead(pluginProxyRes.statusCode, headers);
+			pluginProxyRes.pipe(res);
+		});
+		pluginProxyReq.on("error", function (err) {
+			log("error", "Plugin UI proxy error (" + pluginName + "): " + err.message);
+			if (!res.headersSent) {
+				res.writeHead(502, { "Content-Type": "application/json" });
+				res.end(JSON.stringify({ error: "Plugin UI unreachable: " + err.message }));
+			}
+		});
+		req.pipe(pluginProxyReq);
+		return;
+	}
+
+	// The bot's /api/internal/* routes are for same-host callers only. Because we
+	// proxy from loopback, forwarding them would make them publicly reachable —
+	// so they are refused at the edge and never proxied.
+	if (pathname.indexOf("/api/internal/") === 0) {
+		res.writeHead(404, { "Content-Type": "application/json" });
+		res.end(JSON.stringify({ error: "Not found" }));
 		return;
 	}
 

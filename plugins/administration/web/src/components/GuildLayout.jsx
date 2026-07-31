@@ -10,6 +10,7 @@ export function GuildLayout() {
   const { guildId } = useParams();
   const navigate = useNavigate();
   const [guildData, setGuildData] = useState(null);
+  const [plugins, setPlugins] = useState([]);
   const [loading, setLoading] = useState(!!guildId);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
@@ -40,6 +41,13 @@ export function GuildLayout() {
         }
         const data = await res.json();
         setGuildData(data);
+        // Fetch this guild's plugin list (annotated with per-guild enable
+        // state) for the sidebar nav.
+        const plugRes = await fetch(`/api/guild/${guildId}/plugins`);
+        if (plugRes.ok) {
+          const plugData = await plugRes.json();
+          setPlugins(plugData.plugins || []);
+        }
       } catch (err) {
         console.error('Failed to fetch guild:', err);
         navigate('/');
@@ -83,7 +91,7 @@ export function GuildLayout() {
       <Header onOpenPalette={() => setPaletteOpen(true)} />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} guild={guildData?.guild} />
       <div style={styles.container}>
-        <Sidebar guild={guildData?.guild} />
+        <Sidebar guild={guildData?.guild} plugins={plugins} access={guildData?.access} />
         <main style={styles.main}>
           <Outlet context={{ guildData, refreshGuild: () => setLoading(true) }} />
         </main>
