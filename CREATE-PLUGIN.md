@@ -117,10 +117,11 @@ async function load(ctx) {
   // ✅ Works in both modes — ctx.db routes through RPC when isolated
   const config = await ctx.db.getPluginConfig(guildId, "my-plugin");
 
-  // ✅ Works in both modes — ctx.discord routes through RPC when isolated
+  // ⚠️ ctx.discord is the ISOLATED-mode Discord surface (routes through RPC).
+  //    It does NOT exist in direct mode — there, use ctx.client instead.
   await ctx.discord.sendToChannel(channelId, { content: "Hello!" });
 
-  // ❌ Only works in direct mode
+  // ❌ Only works in direct mode (ctx.client is null when isolated)
   // const guild = ctx.client.guilds.cache.get(guildId);
   // await guild.channels.fetch(channelId);
 }
@@ -213,17 +214,17 @@ capability you didn't declare):
 
 | Capability | RPC methods it unlocks |
 |------------|------------------------|
-| `storage:own-collection` | `ctx.db.getPluginConfig/updatePluginConfig/getAllPluginConfigs`, ticket methods, and all `ctx.defineModel()` model ops (`find`, `findOne`, `create`, `updateOne`, `deleteOne`, `countDocuments`, `save`, `markModified`) |
+| `storage:own-collection` | `ctx.db.getPluginConfig/updatePluginConfig/getAllPluginConfigs`, ticket methods, and all `ctx.defineModel()` model ops (`find`, `findOne`, `create`, `updateOne`, `deleteOne`, `countDocuments`, `save`) |
 | `storage:read-profiles` | `getUserProfile`, `getTopUsers`, `getUserRank`, `checkRoleRewards`, `getServerConfig`, `getServerStats`, `getUserPoints`, `getPointsLeaderboard` |
 | `storage:write-profiles` | `updateUserProfile`, `addXP`, `updateUserRoles`, `givePoints`, `updateServerConfig` |
 | `discord:SendMessages` | `ctx.discord.sendToChannel()` (sendMessage/sendRichMessage), `ctx.discord.sendDM()` |
-| `discord:EmbedLinks` | `discord.sendEmbed` |
-| `discord:AddReactions` | `discord.addReaction` |
-| `discord:ManageMessages` | `discord.deleteMessage` |
-| `discord:ModerateMembers` | `discord.timeout` |
-| `discord:KickMembers` | `discord.kick` |
-| `discord:BanMembers` | `discord.ban` |
-| `discord:ManageRoles` | `ctx.discord.addRole()`, `ctx.discord.removeRole()` |
+| `discord:EmbedLinks` | *(capability reserved — no `ctx.discord` accessor yet; embeds go via the `embeds` array of `sendToChannel`/`sendDM`)* |
+| `discord:AddReactions` | *(capability reserved — no `ctx.discord` accessor yet)* |
+| `discord:ManageMessages` | *(capability reserved — no `ctx.discord` accessor yet)* |
+| `discord:ModerateMembers` | *(capability reserved — no `ctx.discord` accessor yet)* |
+| `discord:KickMembers` | *(capability reserved — no `ctx.discord` accessor yet)* |
+| `discord:BanMembers` | *(capability reserved — no `ctx.discord` accessor yet)* |
+| `discord:ManageRoles` | *(capability reserved — no `ctx.discord` accessor yet)* |
 | `discord:GuildInfo` | `ctx.discord.getGuild()`, `ctx.discord.getMember()` |
 | `discord:ChannelInfo` | `ctx.discord.fetchChannel()` |
 | `hooks:subscribe` | `ctx.hooks.on()` |
@@ -297,7 +298,11 @@ const server = await ctx.db.getServerConfig(guildId);
 await ctx.db.updateServerConfig(guildId, { aiEnabled: true });
 ```
 
-### ctx.discord — Discord API (isolated-mode safe)
+### ctx.discord — Discord API (isolated mode only)
+
+`ctx.discord` exists **only in isolated mode** — it's the sandboxed RPC surface
+for Discord operations. In direct mode there is no `ctx.discord`; use `ctx.client`
+(real discord.js) instead.
 
 ```javascript
 // Send a message
@@ -436,9 +441,10 @@ await ctx.hooks.emitHook("myPluginEvent", { data: "something" });
 
 ### ctx.scheduler — Recurring tasks
 
-Signature: `schedule(cronExpression, callback, name)` — **expression first**, name
-last. Core runs the cron and invokes your callback on tick; a bundled
-`node-cron` will NOT work in an isolated worker, so always use `ctx.scheduler`.
+Signature (isolated mode — the default): `schedule(cronExpression, callback, name)`
+— **expression first**, name last. Core runs the cron and invokes your callback on
+tick; a bundled `node-cron` will NOT work in an isolated worker, so always use
+`ctx.scheduler`.
 
 ```javascript
 await ctx.scheduler.schedule("0 * * * *", async () => {
@@ -448,6 +454,12 @@ await ctx.scheduler.schedule("0 * * * *", async () => {
 
 await ctx.scheduler.cancel("cleanup");
 ```
+
+> **Direct mode differs.** When your plugin runs direct (`system:raw-client` or
+> in-repo), `ctx.scheduler` is the real `TaskScheduler`, whose signature is
+> **name-first**: `schedule(name, cronExpression, fn)`, and cancellation is
+> `unschedule(name)` — there is no `cancel()`. Only isolated mode uses the
+> `schedule(expression, callback, name)` / `cancel(name)` shim shown above.
 
 ### ctx.logger — Namespaced logging
 
@@ -475,7 +487,7 @@ When running in a worker thread, keep these in mind:
 
 ## Publishing Your Plugin
 
-1. **Test locally** with the offline harness (`npm test`) — loads your plugin against a mock `ctx`, no bot/Mongo needed.
+1. **Test locally** — the [`adb-plugin-template`](https://github.com/AdvancedDiscordBot/adb-plugin-template) repo ships a local mock-`ctx` harness you can run your plugin against with no bot/Mongo. (Note: this repo's own `npm test` runs the platform test suite — broker/manifest/permissions — not your plugin.) Otherwise, test inside a real bot checkout.
 2. **Smoke-test in a real bot** — install into the pre-prod bot's `node_modules` and confirm it loads isolated with no `Missing capability` denials or crash-loops in the log.
 3. **Bump the version** — npm forbids republishing an existing version. Patch-bump every publish.
 4. **`npm publish`** — the package name must start with `adb-plugin-`; `PluginManager` auto-discovers `node_modules/adb-plugin-*`.

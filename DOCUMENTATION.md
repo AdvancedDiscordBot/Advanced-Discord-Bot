@@ -1,105 +1,81 @@
 <div align="center">
 
-# 📚 Advanced Discord Bot Slash Command Documentation
+# 📚 Advanced Discord Bot Documentation
 
-Official command reference for **Advanced Discord Bot (ADB)**.
+How commands work in **Advanced Discord Bot (ADB)**.
 
 </div>
 
 ---
 
-## 💰 Economy Commands
+## 🧩 ADB has no built-in commands
 
-| Command | Description | Usage |
-|--------|-------------|-------|
-| `/bal [user]` | Check wallet and bank balance. | `/bal` |
-| `/buy <item>` | Buy a role from the shop. | `/buy PremiumRole` |
-| `/coinflip <bet> <choice>` | Flip a coin and gamble coins. | `/coinflip 100 heads` |
-| `/collect` | Collect income from purchased roles. | `/collect` |
-| `/deposit <amount \| all>` | Deposit coins into the bank. | `/deposit all` |
-| `/diceroll <bet> <number>` | Roll a die and bet on a number. | `/diceroll 50 4` |
-| `/economy-setup [options]` | Configure economy settings. Admin only. | `/economy-setup` |
-| `/give <recipient> <amount>` | Give coins to another user. | `/give @user 100` |
-| `/leaderboard` | Show the richest users. | `/leaderboard` |
-| `/shop` | Display roles available for purchase. | `/shop` |
-| `/shop-admin <subcommand> [options]` | Manage the role shop. Admin only. | `/shop-admin add PremiumRole` |
-| `/steal <victim>` | Attempt to steal coins. | `/steal @user` |
-| `/withdraw <amount \| all>` | Withdraw coins into wallet. | `/withdraw 200` |
-| `/work` | Work to earn coins. | `/work` |
+ADB's core is a lean bot runtime + dashboard. **It ships with zero user-facing
+slash commands of its own.** Every command your server gets comes from an
+installed **plugin** — a package named `adb-plugin-*`.
 
----
+At startup the plugin loader discovers plugins from two places:
 
-## 🎉 Fun Commands
+- `node_modules/` — anything matching `adb-plugin-*` with a `plugin.json` + entry file
+- the local `plugins/` directory — the only in-repo plugin is `plugins/administration` (the dashboard itself)
 
-| Command | Description | Usage |
-|--------|-------------|-------|
-| `/8ball <question>` | Ask the magic 8-ball a question. | `/8ball Will I win?` |
-| `/avatar [user]` | Display a user's avatar. | `/avatar @user` |
-| `/meme [subreddit]` | Get a random meme. | `/meme` |
-| `/poll <question> <options>` | Create an emoji poll. | `/poll "Best fruit?" apples, bananas, oranges` |
-| `/reminder <time> <message>` | Set a reminder. | `/reminder 1h Take a break` |
-| `/roll <dice>` | Roll dice. | `/roll 2d6` |
-| `/secret` | Discover an easter egg. | `/secret` |
+Because the command set depends entirely on which plugins you install, this repo
+does **not** maintain a central slash-command list. Each plugin documents its own
+commands in its own README.
+
+### The flow: install → enable → deploy → commands appear
+
+1. **Install** a plugin — from the dashboard marketplace, or `npm install adb-plugin-<name>` in the bot's root.
+2. **Enable** it from the dashboard (writes it into the plugin config the loader reads).
+3. **Deploy** the commands to Discord:
+   ```bash
+   npm run deploy
+   ```
+   This runs `node scripts/build-plugins.js && node deploy-commands.js`, which
+   gathers every enabled plugin's slash commands and registers them with Discord.
+4. **Commands appear** in your server. Plugin *logic* hot-reloads, but adding or
+   changing a slash command definition always needs a fresh `npm run deploy`.
 
 ---
 
-## ⚙️ General Commands
+## 🔌 Official plugins
 
-| Command | Description | Usage |
-|--------|-------------|-------|
-| `/banner` | Display server banner. | `/banner` |
-| `/birthday <subcommand>` | Manage birthdays. | `/birthday set 1990-01-01` |
-| `/botstats` | Bot performance statistics. | `/botstats` |
-| `/calculate <expression>` | Perform arithmetic. | `/calculate 5 + 7` |
-| `/dm <message>` | Send yourself a DM. | `/dm Remember the meeting!` |
-| `/feedback` | Submit feedback. | `/feedback This bot is useful!` |
-| `/help` | List bot commands. | `/help` |
-| `/joindate [user]` | Show when a user joined. | `/joindate @user` |
-| `/ping` | Bot and API latency. | `/ping` |
-| `/resetnick` | Reset your nickname. | `/resetnick` |
-| `/reverse <text>` | Reverse a message. | `/reverse hello` |
-| `/serverinfo` | Display server info. | `/serverinfo` |
-| `/setnick <nickname>` | Change your nickname. | `/setnick Hero` |
-| `/spoiler <text>` | Hide text as spoiler. | `/spoiler secret text` |
-| `/uptime` | Bot uptime info. | `/uptime` |
-| `/userinfo [user]` | Detailed user info. | `/userinfo @user` |
+From the registry at [AdvancedDiscordBot/registry](https://github.com/AdvancedDiscordBot/registry).
+The commands below are indicative — see each plugin's own README for the full, current reference.
 
----
+| Plugin | What it adds |
+|---|---|
+| [`adb-plugin-moderation`](https://github.com/AdvancedDiscordBot/adb-plugin-moderation) | Moderation + tickets: `/ban`, `/unban`, `/kick`, `/timeout`, `/warn`, `/warnings`, `/purge`, `/slowmode`, `/lock`, `/case`, `/history`, `/ticket …`. Numbered case log with auto-escalation. |
+| [`adb-plugin-levels`](https://github.com/AdvancedDiscordBot/adb-plugin-levels) | XP & leveling from message activity: `/level`, `/leaderboard`, plus `/level-config` and `/level-roles` for admins. Role rewards on level-up. |
+| [`adb-plugin-aegis`](https://github.com/AdvancedDiscordBot/adb-plugin-aegis) | Server protection: anti-raid, anti-spam, link filtering, and alt/join-gate detection. |
+| [`adb-plugin-automod`](https://github.com/AdvancedDiscordBot/adb-plugin-automod) | Rule-based auto-moderation: `/automod rule add|remove|edit`, `/automod list`, `/automod whitelist`, `/automod action`. |
+| [`adb-plugin-autorole`](https://github.com/AdvancedDiscordBot/adb-plugin-autorole) | Automatically assigns roles to members on join. |
+| [`adb-plugin-confessions`](https://github.com/AdvancedDiscordBot/adb-plugin-confessions) | Anonymous confessions with optional approval: `/confess text`, `/confess-admin …`. |
+| [`adb-plugin-counting`](https://github.com/AdvancedDiscordBot/adb-plugin-counting) | Counting game channel: `/counting channel|stats|reset`. |
+| [`adb-plugin-custom-commands`](https://github.com/AdvancedDiscordBot/adb-plugin-custom-commands) | Lets admins define their own custom text/response commands. |
+| [`adb-plugin-giveaways`](https://github.com/AdvancedDiscordBot/adb-plugin-giveaways) | Giveaways: `/giveaway start|end|reroll|list`. |
+| [`adb-plugin-invite-tracker`](https://github.com/AdvancedDiscordBot/adb-plugin-invite-tracker) | Invite tracking + leaderboard: `/invites me|user|leaderboard`, `/invites-admin …`. |
+| [`adb-plugin-reaction-roles`](https://github.com/AdvancedDiscordBot/adb-plugin-reaction-roles) | Self-assignable roles via reactions/buttons. |
+| [`adb-plugin-reminders`](https://github.com/AdvancedDiscordBot/adb-plugin-reminders) | Personal reminders: `/remind set|list|cancel`. Bot DMs you when due. |
+| [`adb-plugin-server-logs`](https://github.com/AdvancedDiscordBot/adb-plugin-server-logs) | Audit logging by category: `/log set|remove|list|enable|disable|ignore|retention`. |
+| [`adb-plugin-tempvoice`](https://github.com/AdvancedDiscordBot/adb-plugin-tempvoice) | Temporary "join-to-create" voice channels with owner controls (lock, limit, rename, permit/deny, claim). |
+| [`adb-plugin-todo`](https://github.com/AdvancedDiscordBot/adb-plugin-todo) | Personal to-do lists: `/todo add|list|done|remove|edit|clear`. |
+| [`adb-plugin-welcome`](https://github.com/AdvancedDiscordBot/adb-plugin-welcome) | Configurable welcome / goodbye messages and cards. |
 
-## 🛡️ Moderation Commands
-
-| Command | Description | Usage |
-|--------|-------------|-------|
-| `/ban <user> [reason]` | Ban a user. | `/ban @user spamming` |
-| `/kick <user> [reason]` | Kick a user. | `/kick @user offensive language` |
-| `/purge <amount> [user]` | Bulk delete messages. | `/purge 50` |
-| `/ticket <title> <description>` | Create a support ticket. | `/ticket "Bug Report" "Feature not working"` |
-| `/ticketdashboard <subcommand>` | Manage tickets. Mods only. | `/ticketdashboard list` |
+> Command names above were taken from each plugin's README/source where verified.
+> Exact options and subcommands can change between versions — the plugin's own
+> README is always the source of truth.
 
 ---
 
-## 📈 XP & Leveling Commands
+## 🔗 Where to look next
 
-| Command | Description | Usage |
-|--------|-------------|-------|
-| `/daily` | Claim daily reward. | `/daily` |
-| `/points <subcommand>` | Manage or view points. | `/points view` |
-| `/profile [user]` | View profile and stats. | `/profile @user` |
-| `/roles <subcommand>` | View or claim role rewards. | `/roles claim` |
-| `/xpconfig <subcommand>` | Configure XP and leveling. Admin only. | `/xpconfig set multiplier 2x` |
+- **Per-plugin command reference** — each plugin's `README.md` (linked in the table above) lists its full, current command set.
+- **Marketplace / registry** — browse and install plugins from the dashboard, or see the registry: [AdvancedDiscordBot/registry](https://github.com/AdvancedDiscordBot/registry).
+- **Building your own plugin** — [CREATE-PLUGIN.md](./CREATE-PLUGIN.md).
+- **Getting started with the bot** — [README.md](./README.md).
 
 ---
 
-## 🤖 AI & Plugin Commands
-
-| Command | Description | Usage |
-|--------|-------------|-------|
-| `/aiassistant ask <question>` | Ask the AI assistant. | `/aiassistant ask What can you do?` |
-| `/config-ai` | Configure AI plugin behavior. | `/config-ai` |
-| `/faq` | Use FAQ assistant features when the AI plugin is enabled. | `/faq` |
-| `/antiraid <subcommand>` | Manage anti-raid system. | `/antiraid enable` |
-| `/truthordare <subcommand>` | Play Truth or Dare. | `/truthordare start` |
-
----
-
-Plugins can add more slash commands at runtime. Re-run `npm run deploy` after adding or changing slash command definitions so Discord receives the updated command list.
+Adding or changing a plugin's slash commands? Re-run `npm run deploy` so Discord
+receives the updated command list.

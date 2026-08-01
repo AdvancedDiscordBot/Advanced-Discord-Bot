@@ -25,7 +25,7 @@
 
 [![Features](https://img.shields.io/badge/-Features-4CAF50?style=for-the-badge&logo=sparkles&logoColor=white)](#-features)
 [![Installation](https://img.shields.io/badge/-Installation-FF9800?style=for-the-badge&logo=visualstudiocode&logoColor=white)](#-quick-start)
-[![Commands](https://img.shields.io/badge/-Commands-1976D2?style=for-the-badge&logo=terminal&logoColor=white)](#commands-list)
+[![Commands](https://img.shields.io/badge/-Commands-1976D2?style=for-the-badge&logo=terminal&logoColor=white)](#commands)
 [![Plugins](https://img.shields.io/badge/-Plugin%20Docs-6A5ACD?style=for-the-badge)](./CREATE-PLUGIN.md)
 [![Contributing](https://img.shields.io/badge/Contributing-Guidelines-blue?style=for-the-badge)](./CONTRIBUTING.md)
 
@@ -145,67 +145,53 @@ ADB is not participating in any open source contribution program at the moment. 
 
 ## 🎯 Features
 
+ADB ships as a **lean core plus a dashboard**. Everything user-facing —
+moderation, levels, economy, giveaways, logging, and more — is delivered by
+**plugins** you install from the marketplace, so you run only what your server
+needs. See [Plugins & Marketplace](#-plugins--marketplace).
+
 ### **🔌 Plugin Platform**
 
-- Local plugins from `plugins/`
-- npm-style plugin packages
-- Plugin manifests with metadata, config schemas, permissions, restart flags, and optional dashboard ports
+- Local plugins from `plugins/` and npm packages (`adb-plugin-*`)
+- Plugin manifests with metadata, config schemas, capabilities, and restart flags
 - Command registration and command overrides
-- Event listeners, scheduled jobs, hook bus integration, and namespaced database models
-- Registry support for a plugin marketplace
+- Event listeners, scheduled jobs, hook bus, and namespaced database models
+- Sandboxed-by-default isolation — plugins run in a worker and reach Discord/DB
+  only through capability-gated RPC
 
 ### **🖥️ Administration Dashboard**
 
 - Discord OAuth-based admin access
 - Guild picker for server-specific management
 - Plugin install, enable, disable, and status views
-- Settings pages for AI, XP, tickets, birthdays, economy, anti-raid, and plugins
-- Activity logs and operational visibility
+- Auto-generated settings pages from each plugin's config schema
+- Member-facing portal and per-plugin dashboards
 
-### **🤖 AI Assistant**
+### **🤖 AI Assistant** *(optional, via Gemini)*
 
-- Google Gemini-powered responses
+- Google Gemini-powered responses when `GEMINI_API_KEY` is set
 - Configurable AI channels and behavior
-- FAQ-oriented plugin support
 - Rate limiting and graceful failure handling
 
-### **💎 Economy, XP & Rewards**
+### **🧩 Official Plugins**
 
-- Wallet, bank, shop, work, collect, gamble, and leaderboard commands
-- XP profiles, daily rewards, role rewards, and server-configurable leveling
-- Persistent MongoDB-backed user data
-
-### **🎫 Moderation & Tickets**
-
-- Ban, kick, purge, anti-raid, support tickets, and ticket dashboards
-- Configurable ticket categories and logs
-- Permission-aware command handling
-
-### **🎉 Community Tools**
-
-- Birthdays, polls, reminders, feedback, memes, truth-or-dare, dice, 8ball, avatars, server info, and utility commands
+Install from the [registry](https://github.com/AdvancedDiscordBot/registry) —
+moderation, automod, aegis (anti-raid/spam/alt), levels & XP, giveaways,
+counting, confessions, autorole, reaction-roles, invite-tracker, reminders,
+server-logs, temp voice, welcome, custom commands, to-do, and more.
 
 ---
 
-## Commands List
+## Commands
 
-<div align="center">
+ADB has **no built-in slash commands** — commands come from the plugins you
+install. Each plugin registers its own; enable a plugin from the dashboard and
+run `npm run deploy` to publish its commands to Discord.
 
-### 📊 Command Categories Breakdown
-
-| Category | Examples |
-| -------- | -------- |
-| 🎮 **Fun & Games** | 8ball, meme, roll, secret, truthordare |
-| 🛡️ **Moderation** | antiraid, ban, kick, purge |
-| 📊 **Utility & Info** | help, ping, userinfo, serverinfo, botstats |
-| 💎 **Economy & XP** | bal, daily, points, profile, work, shop, xpconfig |
-| 🎫 **Support System** | ticket, ticketdashboard |
-| 🤖 **AI Assistant** | aiassistant, faq, config-ai |
-| 🎂 **Community** | birthday, feedback, poll, reminder |
-
-</div>
-
-Refer to [DOCUMENTATION.md](./DOCUMENTATION.md) for the complete slash command reference.
+For example, installing `adb-plugin-moderation` adds `/ban`, `/kick`,
+`/timeout`, `/warn`, `/purge`, and ticket commands; `adb-plugin-levels` adds
+`/rank` and `/leaderboard`. See each plugin's own README for its command
+reference, and [CREATE-PLUGIN.md](./CREATE-PLUGIN.md) to build your own.
 
 ---
 
@@ -235,17 +221,29 @@ Refer to [DOCUMENTATION.md](./DOCUMENTATION.md) for the complete slash command r
 
 3. **Configure environment variables**
 
-   Create a `.env` file:
+   Copy `.env.example` to `.env` and fill in your values — it documents every
+   variable. The essentials:
 
    ```env
    DISCORD_TOKEN=your_discord_bot_token_here
    CLIENT_ID=your_bot_client_id_here
-   GUILD_ID=your_test_guild_id_here
+   GUILD_ID=your_test_guild_id_here          # optional: instant commands in one test guild
    MONGODB_URI=your_mongodb_connection_string
-   GEMINI_API_KEY=your_gemini_api_key_here
-   PORT=3000
-   DASHBOARD_URL=http://localhost:5173
+   GEMINI_API_KEY=your_gemini_api_key_here   # optional: only for AI features
+
+   # Dashboard / internal API (needed only if you use the web dashboard)
+   BOT_API_ENABLED=true
+   BOT_API_PORT=3210
+   DISCORD_OAUTH_CLIENT_ID=your_oauth_client_id
+   DISCORD_OAUTH_CLIENT_SECRET=your_oauth_client_secret
+   DISCORD_OAUTH_REDIRECT_URI=http://localhost:3210/auth/discord/callback
+   DASHBOARD_REDIRECT_URL=http://localhost:3000
    SESSION_SECRET=replace_with_a_long_random_secret
+
+   # Optional: comma-separated user IDs with global owner access
+   OWNER_IDS=
+   # Optional: your plugin marketplace registry (see REGISTRY-SETUP.md)
+   PLUGIN_REGISTRY_URL=
    ```
 
 4. **Deploy slash commands**
@@ -271,7 +269,8 @@ Refer to [DOCUMENTATION.md](./DOCUMENTATION.md) for the complete slash command r
 
 2. **Configure environment variables**
 
-   Create a `.env` file:
+   Create a `.env` file (see `.env.example` for the full list). For the
+   bundled MongoDB container, point `MONGODB_URI` at the `mongo` service:
 
    ```env
    DISCORD_TOKEN=your_discord_bot_token_here

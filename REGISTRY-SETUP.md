@@ -37,7 +37,6 @@ Create `plugins.json` in the repository root:
       "author": "ADB",
       "version": "1.0.0",
       "category": "features",
-      "permissions": ["db.read", "db.write", "commands.register"],
       "requiresRestart": false,
       "verified": true,
       "npmPackage": "adb-plugin-economy"
@@ -49,7 +48,6 @@ Create `plugins.json` in the repository root:
       "author": "ADB",
       "version": "1.0.0",
       "category": "moderation",
-      "permissions": ["db.read", "db.write", "commands.register"],
       "requiresRestart": false,
       "verified": true,
       "npmPackage": "adb-plugin-moderation"
@@ -57,6 +55,8 @@ Create `plugins.json` in the repository root:
   ]
 }
 ```
+
+> **Note:** Registry entries do not declare permissions. A plugin's capabilities are declared as `category:value` entries in the plugin's own `plugin.json` manifest (e.g. `discord:SendMessages`, `storage:own-collection`) and are approved by the server owner at install time — not in the registry entry.
 
 ### 3. Plugin Entry Reference
 
@@ -68,11 +68,9 @@ Create `plugins.json` in the repository root:
 | `author` | string | Yes | Developer name |
 | `version` | string | Yes | Current version |
 | `category` | string | Yes | Marketplace category |
-| `permissions` | array | No | Declared plugin permissions |
 | `requiresRestart` | boolean | No | Whether the bot must restart after install/update |
 | `verified` | boolean | No | Officially reviewed or audited plugin |
 | `npmPackage` | string | Yes | Exact npm package name |
-| `port` | number | No | Dashboard port if the plugin exposes a web UI |
 | `configSchema` | object | No | JSON Schema used to render plugin settings |
 
 ### 4. Categories
@@ -84,8 +82,8 @@ Create `plugins.json` in the repository root:
 | `entertainment` | Entertainment |
 | `utility` | Utility |
 | `analytics` | Analytics |
-| `ai` | AI |
-| `dashboard` | Dashboard |
+
+> A plugin's web UI port, if any, is declared as `webUi.port` in the plugin's `plugin.json` manifest — not in the registry entry.
 
 ### 5. Registry README
 
@@ -114,13 +112,13 @@ This repository contains the plugin list for the ADB marketplace.
 
 ## Configuring ADB
 
-Set the registry URL in your bot environment:
+ADB ships with a built-in default registry (`https://github.com/AdvancedDiscordBot/registry/blob/main/plugins.json`), so the official plugins are available without setting anything. To point the bot at your own registry instead, set `PLUGIN_REGISTRY_URL`:
 
 ```bash
-export PLUGIN_REGISTRY_URL="https://raw.githubusercontent.com/YOUR_USERNAME/adb-plugin-registry/main/plugins.json"
+export PLUGIN_REGISTRY_URL="https://github.com/YOUR_USERNAME/adb-plugin-registry/blob/main/plugins.json"
 ```
 
-If `PLUGIN_REGISTRY_URL` is not set, configure one before enabling marketplace installs in production.
+A normal GitHub `blob` URL works fine — the bot auto-normalizes GitHub `blob`/`raw` URLs to the `raw.githubusercontent.com` form before fetching. If `PLUGIN_REGISTRY_URL` is unset, the built-in default registry is used.
 
 ## Managing Submissions
 
@@ -184,10 +182,10 @@ jq . plugins.json
 
 - Use HTTPS in production.
 - Return valid JSON.
-- For GitHub raw files, use:
+- A GitHub `blob` URL is fine — the bot rewrites GitHub `blob`/`raw` URLs to the raw form automatically:
 
 ```text
-https://raw.githubusercontent.com/USER/REPO/BRANCH/plugins.json
+https://github.com/USER/REPO/blob/BRANCH/plugins.json
 ```
 
 ## Need Help?
