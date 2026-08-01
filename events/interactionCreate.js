@@ -64,6 +64,60 @@ module.exports = {
 			timestamps.set(interaction.user.id, now);
 			setTimeout(() => timestamps.delete(interaction.user.id), cooldownAmount);
 
+			// 🛡️ Plugin command permission gate
+			// Check if the owning plugin has disabled this command or restricted it
+			// to specific roles for this guild. Config stored in PluginConfig.data._commands.
+			if (interaction.guildId && client.pluginManager) {
+				const owningPlugin = [...client.pluginManager.plugins.entries()]
+					.find(([, state]) => state.commandNames.has(command.data.name));
+				if (owningPlugin) {
+					const [pluginName, pluginState] = owningPlugin;
+
+					// Per-guild plugin enable gate. An installed plugin the guild
+					// hasn't enabled contributes no usable commands there. Core/
+					// builtin/in-repo and raw-client plugins are never gated.
+					if (
+						client.pluginManager.isGuildGateable(pluginName) &&
+						!client.pluginManager.isEnabledForGuild(interaction.guildId, pluginName)
+					) {
+						return interaction.reply({
+							content: `❌ The \`/${command.data.name}\` command isn't enabled on this server.`,
+							flags: 64,
+						});
+					}
+
+					if (pluginState.manifest?.settings?.commandPermissions) {
+						try {
+							const Database = require("../utils/database");
+							const db = await Database.getInstance();
+							const cfg = await db.getPluginConfig(interaction.guildId, pluginName);
+							const cmdCfg = cfg?.data?._commands?.[command.data.name];
+							if (cmdCfg) {
+								if (cmdCfg.enabled === false) {
+									return interaction.reply({
+										content: `❌ The \`/${command.data.name}\` command is disabled on this server.`,
+										flags: 64,
+									});
+								}
+								if (Array.isArray(cmdCfg.allowedRoles) && cmdCfg.allowedRoles.length > 0) {
+									const member = interaction.member;
+									const hasRole = member?.roles?.cache?.some((r) => cmdCfg.allowedRoles.includes(r.id));
+									if (!hasRole) {
+										return interaction.reply({
+											content: `❌ You don't have the required role to use \`/${command.data.name}\`.`,
+											flags: 64,
+										});
+									}
+								}
+							}
+						} catch (e) {
+							// Non-fatal: if DB lookup fails, allow the command through
+							console.error(`[PermGate] Failed to check command permissions:`, e.message);
+						}
+					}
+				}
+			}
+
 			// 🧩 Run hook pipeline before command
 			if (client.hooks) {
 				const hookResult = await client.hooks.emitHook("beforeCommand", {

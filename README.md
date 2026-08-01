@@ -163,6 +163,8 @@ needs. See [Plugins & Marketplace](#-plugins--marketplace).
 
 - Discord OAuth-based admin access
 - Guild picker for server-specific management
+- Multi-tenant RBAC: derived HOST_OWNER / GUILD_ADMIN / MEMBER tiers, per-plugin dashboard permission keys, and an **Access** page to grant Discord roles fine-grained dashboard access
+- Per-guild plugin enable gate — installed plugins are off in each guild until an admin turns them on
 - Plugin install, enable, disable, and status views
 - Auto-generated settings pages from each plugin's config schema
 - Member-facing portal and per-plugin dashboards
@@ -239,12 +241,14 @@ reference, and [CREATE-PLUGIN.md](./CREATE-PLUGIN.md) to build your own.
    DISCORD_OAUTH_REDIRECT_URI=http://localhost:3210/auth/discord/callback
    DASHBOARD_REDIRECT_URL=http://localhost:3000
    SESSION_SECRET=replace_with_a_long_random_secret
-
-   # Optional: comma-separated user IDs with global owner access
-   OWNER_IDS=
+   # Comma-separated Discord user IDs of host owners — the top RBAC tier and the
+   # only one allowed to install/uninstall plugins. Set at least one.
+   OWNER_IDS=your_discord_user_id
    # Optional: your plugin marketplace registry (see REGISTRY-SETUP.md)
    PLUGIN_REGISTRY_URL=
    ```
+
+   See `.env.example` for the full list of options.
 
 4. **Deploy slash commands**
 

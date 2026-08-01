@@ -1,371 +1,261 @@
 # Architecture
 
-This file summarizes the runtime architecture and data model of ADB (Advanced
-Discord Bot) as implemented in the repository. It is derived directly from the
-code (`index.js`, `core/`, `utils/`, `models/`, `deploy-commands.js`,
-`.env.example`).
+This file summarizes the runtime architecture and data model of the bot **as
+implemented in the repository**. It is derived directly from the code
+(`index.js`, `core/`, `events/`, `utils/`, `models/`). When code and this doc
+disagree, the code wins — please update this file in the same change.
 
-ADB is not a monolithic feature bot. Core is a **lean plugin platform**: it
-ships **no user-facing slash commands of its own**. All features come from
-`adb-plugin-*` packages (npm) and local plugins in `plugins/`, which are
-auto-discovered at startup and — by default — run sandboxed in worker threads,
-reaching Discord and the database only through a capability-gated RPC broker.
-An optional Fastify API serves a React admin dashboard and a plugin marketplace.
+The project has two layers:
+
+1. **The Discord bot** — the classic command/event/scheduler runtime.
+2. **The plugin platform** — process isolation, a capability broker, an HTTP
+   API, a React admin dashboard, and a multi-tenant RBAC system layered on top.
+
+---
 
 ## High-level components
 
-- `index.js` — startup path
-  - Builds the discord.js `Client` with the intents/partials below.
-  - Initializes the `Database` singleton (`utils/database.js`).
-  - Creates a `TaskScheduler` (`utils/scheduler.js`), a `HookBus`
-    (`core/HookBus.js`), and a `PluginManager` (`core/PluginManager.js`).
-  - Enables plugin isolation unless `PLUGIN_ISOLATION=false`.
-  - Optionally starts the Fastify API (`core/api/server.js`) when
-    `BOT_API_ENABLED=true`.
-  - Calls `pluginManager.loadAll()`, then logs in with `DISCORD_TOKEN`.
-  - Rotates presence, and installs global `unhandledRejection` /
-    `uncaughtException` / `SIGINT` handlers.
-- `PluginManager` (`core/PluginManager.js`) — the heart of the platform.
-  - Discovers, loads, isolates, hot-reloads, and unloads plugins.
-  - Owns `client.commands` (the command registry the interaction router reads).
-- `HookBus` (`core/HookBus.js`) — priority-ordered async event bus for
-  inter-plugin and lifecycle hooks (`onPluginLoad`, `onPluginUnload`, plus any
-  plugin-defined hooks). Handlers can mutate or `cancel` a payload; `onAny` is
-  used by the API to stream events to the dashboard.
-- Capability RPC layer (`core/rpc/`) — broker, worker manager, protocol, and
-  the worker bootstrap that isolated plugins run inside.
-- API + dashboard (`core/api/`, `core/adminPlugin.js`) — Fastify server with
-  Discord OAuth, plugin management endpoints, and the React admin UI.
-- Watchdog (`core/adb-watchdog.js`, `adb-watchdog.sh`) — independent process
-  manager and reverse proxy that survives bot restarts.
-- Data layer (`utils/database.js`, `models/schemas.js`) — mongoose models and
-  a `Database` singleton with helper methods.
-- Legacy core runtime (`events/`, `utils/scheduler.js`) — a residual set of
-  built-in event handlers and cron jobs still loaded by core (see below). These
-  predate the plugin split and are not the extension surface.
+### Bot runtime
+- **`index.js`** — entry point (`npm start`). Constructs the discord.js
+  `Client`, initializes the `Database` singleton, `TaskScheduler`, `HookBus`,
+  and `PluginManager`, optionally starts the API server, loads plugins, then
+  logs in. See **Startup sequence** below.
+- **Command loader / `deploy-commands.js`** — registers slash commands with the
+  Discord REST API. `npm run deploy` runs `scripts/build-plugins.js` first
+  (rebuilds plugin dashboards) then `deploy-commands.js`.
+- **Events (`events/`)** — `interactionCreate.js` (slash/button/modal/select
+  dispatch, cooldowns, per-guild plugin gate), `messageCreate.js` (XP, AI
+  auto-response), plus `ready.js`, `guildMemberAdd.js`, etc.
+- **Database layer (`utils/database.js` + `models/schemas.js`)** — a singleton
+  wrapping Mongoose models. See **Data models**.
+- **Scheduler (`utils/scheduler.js`)** — `node-cron` jobs: daily/weekly resets,
+  hourly leaderboard, role checks, birthday checks.
 
-## The "core" plugin (legacy runtime)
+### Plugin platform (`core/`)
+- **`PluginManager.js`** — discovers, load-orders (topological), loads, and
+  hot-reloads plugins. Owns the **per-guild enable index** (see RBAC below).
+- **`PluginContext.js`** — the frozen, namespaced `ctx` handed to each plugin
+  (`db`, `scheduler`, `hooks`, `logger`, `registerCommand/Event`,
+  `defineModel`). Wraps `hooks` so handlers are guild-gated.
+- **`HookBus.js`** — inter-plugin pub/sub (`onLevelUp`, `onPluginUnload`, …).
+- **Isolation / RPC (`core/rpc/`)** — untrusted plugins run in
+  `worker_threads`; `broker.js` is the **CapabilityBroker** that mediates every
+  privileged call over an RPC protocol (`protocol.js`, `worker-manager.js`,
+  `worker-client.js`, `process-router.js`). `capabilities.js` +
+  `manifest-schema.js` define and validate what a plugin may request.
+- **API server (`core/api/server.js`)** — Fastify app exposing the dashboard
+  REST API. `adminPlugin.js` registers the guild/admin routes. Auth is Discord
+  OAuth + session cookie.
+- **RBAC (`core/permission-resolver.js` + `core/dashboard-permissions.js`)** —
+  derives who-can-do-what per request. See **Multi-tenant RBAC**.
+- **Watchdog (`core/adb-watchdog.js`)** — independent supervisor process +
+  reverse proxy. Restarts the bot on the dashboard "Restart & Deploy" action and
+  proxies `/dashboard` and plugin UIs. Runs as its own process (not started by
+  `index.js`).
 
-`PluginManager.loadCore()` registers a synthetic `builtin` plugin named `core`
-and loads:
+---
 
-- Commands from `commands/` — **this directory does not exist in the repo, so
-  core contributes zero slash commands.**
-- Events from `events/` (excluding `helpInteraction.js` and `modalCreate.js`):
-  `guildCreate`, `guildMemberAdd`, `interactionCreate`, `messageCreate`,
-  `ready`, `voiceStateUpdate`.
+## Startup sequence (`startADB` in `index.js`)
 
-The most important of these is `events/interactionCreate.js` — the **slash
-command router**. It looks up `interaction.client.commands.get(commandName)`,
-enforces per-command cooldowns (`command.cooldown`, default applied by the
-handler), and calls the command's `execute`. Plugins are what populate
-`client.commands`; core just routes to them. The other legacy events
-(`messageCreate` XP, `guildMemberAdd` birthday/welcome, `voiceStateUpdate` voice
-tracking) still run against the legacy models and scheduler.
+1. `initializeDatabase()` — connect Mongo (`MONGODB_URI`).
+2. Construct `TaskScheduler`, `HookBus`, `PluginManager` (wired to
+   `client`, `db`, `scheduler`, `hooks`).
+3. Unless `PLUGIN_ISOLATION=false`, call `pluginManager.enableIsolation()` so
+   package plugins load in workers.
+4. If `BOT_API_ENABLED=true`, `startApiServer(...)` with `startListening: false`
+   (built now, bound later).
+5. `pluginManager.loadAll()` — loads plugins and warms the per-guild enable
+   index.
+6. `apiServer.listen()` — bind the API port now that plugins are registered.
+7. `client.login(DISCORD_TOKEN)`.
 
-## Plugin lifecycle
+---
 
-### Discovery (`PluginManager.discoverPlugins`)
+## Plugin model: core vs. installable, isolated vs. raw
 
-Two sources are scanned:
+A plugin's `source` determines how it loads and whether it is gateable:
 
-- **Local plugins:** every subdirectory of `plugins/` that contains a
-  `plugin.json`. Tagged `source: "local"`. (The repo ships one:
-  `plugins/administration`, the dashboard plugin.)
-- **npm plugins:** every `node_modules/` entry whose name starts with
-  `adb-plugin-`, including scoped packages `@scope/adb-plugin-*`, that contains
-  a `plugin.json`. Tagged `source: "package"`.
+| Source | Where | Loads in | Gateable per-guild? |
+|---|---|---|---|
+| `core` / builtin | `plugins/*` in-repo | main process | No — always on |
+| `local` | local dev dirs | main process | No — always on |
+| `package` (isolated) | `node_modules/adb-plugin-*` | **worker thread** | **Yes** |
+| `package` + `raw-client` | declares `system: ["raw-client"]` | main process (real `client`) | No — always on, **API rejects toggling** |
 
-Discovered plugins are topologically sorted by their manifest `dependsOn` /
-`dependencies` (`sortByDependencies`); missing deps disable the plugin, circular
-deps throw.
+**Gateable = `source === "package"` and NOT `raw-client`.** Isolated package
+plugins go through the broker, so the platform can gate them. `raw-client`
+plugins bypass the broker (they hold the real bot token), so a per-guild gate on
+them would be unenforceable — the API returns `not_toggleable` instead of
+pretending.
 
-### Manifest (`plugin.json`)
+---
 
-Read verbatim as JSON. Fields the code consults include: `name`, `version`,
-`main` (entry, default `index.js`), `displayName`, `description`, `author`,
-`category`, `requiresRestart`, `dependsOn`/`dependencies`, `discordPermissions`
-(validated against `core/permissions.js`), `capabilities` (see below), and a v2
-`permissions` block normalized by `core/manifest-schema.js` (used to derive the
-`network.outbound` host allowlist).
+## Multi-tenant RBAC (Spec 1)
 
-### Load contract
+The dashboard is multi-tenant: one bot instance serves many guilds, and access
+is resolved **live per request** from the bot's member cache (60s TTL), never
+from a login-time snapshot — a user demoted in Discord loses dashboard access
+without re-logging in.
 
-A plugin's entry module must export a `load(ctx)` function (or a default/
-callable export). `PluginManager` resolves it as
-`pluginModule.load || pluginModule.default || pluginModule` and calls it with a
-context object. What `ctx` contains depends on the load **mode**.
+### Tiers (`core/permission-resolver.js`)
+| Tier | Who | Powers |
+|---|---|---|
+| `HOST_OWNER` | listed in `OWNER_IDS` | The operator. **Sole** authority to install/uninstall plugins. Holds every permission in every guild, even guilds it hasn't joined. |
+| `GUILD_ADMIN` | guild owner, or `ADMINISTRATOR` / `MANAGE_GUILD` in that guild | Every permission **for that guild**, including enabling/disabling installed plugins — but never install/uninstall. |
+| `MEMBER` | in the guild | Union of permissions granted to their Discord roles via `GuildRoleGrant`. Usually empty. |
+| `NONE` | not in the guild (or bot isn't) | 403. |
 
-### Isolated vs. direct mode (`loadPlugin`)
+`resolve(userId, guildId)` is cached per `(userId, guildId)` for `DEFAULT_TTL_MS`
+(60s) and invalidated eagerly on `guildMemberUpdate/Remove`, `roleUpdate/Delete`,
+and on any grant edit (`invalidateGuild`).
 
-The mode is decided per plugin, not opt-in by the plugin:
+### Permission catalog (`core/dashboard-permissions.js`)
+- **Core permissions** (platform-level, plugin `null`): `guild.view`,
+  `guild.configure`, `plugins.manage`, `roles.manage`.
+- **Per-plugin**, auto-derived for every loaded plugin: `plugin.<name>.view`,
+  `plugin.<name>.configure`. A plugin may declare its own keys in
+  `manifest.dashboard.permissions[]`; those are **always re-namespaced** under
+  `plugin.<name>.` so a plugin cannot mint a permission outside its namespace
+  (e.g. claim `plugins.manage`).
+- Guild admins map Discord roles → sets of these keys (`GuildRoleGrant`); the
+  resolver turns a member's roles into the union of granted keys.
 
-- **Isolated (default for npm plugins):** `source === "package"` plugins run in
-  a `worker_threads` Worker via `core/rpc/worker-bootstrap.js`. This is
-  enforced — an installed third-party plugin cannot escape the sandbox by
-  omitting a flag.
-- **Direct (main process):** `builtin` core and `source: "local"` plugins always
-  load directly through `core/PluginContext.js`.
-- **Escape hatch:** a `package` plugin that declares the `system:raw-client`
-  capability loads **direct/un-isolated** with full access. This is owner-
-  approved at install time via the risk disclosure and logged as a warning.
-- Setting `PLUGIN_ISOLATION=false` forces everything to direct mode (not
-  recommended in production).
+### Per-guild plugin enable gate (`core/PluginManager.js`)
+- Installed gateable plugins are **off by default per guild**; a guild admin
+  opts in from the dashboard.
+- Enforced synchronously on hot paths via a pre-warmed **enable index** — a Set
+  of `"guildId:pluginName"` rebuilt from one query (`getAllEnabledPluginRows`)
+  on a 60s TTL, plus eager `setEnabledForGuild` on toggle. On a DB error the
+  last good snapshot is kept.
+- Chokepoints that consult the gate: Discord **event forwarding** to workers
+  (`worker-manager.broadcastEvent` filter), the **HookBus facade** in
+  `PluginContext`, and **command dispatch** in `events/interactionCreate.js`.
+  (In normal isolated operation the broker boundary is the real gate; the
+  in-process hook/event checks are defense-in-depth and cover
+  `PLUGIN_ISOLATION=false`.)
 
-After load, hot-reload is wired for eligible plugins (`chokidar` watches the
-plugin directory; not eligible if `requiresRestart` or the plugin registered
-commands). Core is never hot-reloaded.
+---
 
-## The `ctx` object — differs by mode
+## Dashboard API surface (selected)
 
-This is the single most important correctness point: **isolated and direct
-plugins receive different context objects.** Code that works in one mode is not
-guaranteed to work in the other.
+Served by `core/api/server.js` (+ `core/adminPlugin.js`), all guild routes
+guarded by `requireGuildAccess(request, reply, <permission>)`:
 
-### Direct mode (`core/PluginContext.js`)
+- `GET /api/guild/:guildId` — guild summary; returns caller `access: { tier, permissions }`.
+- `GET /api/guild/:guildId/plugins` — installed plugins annotated with
+  `gateable` and `enabledForGuild`.
+- `PUT /api/guild/:guildId/plugins/:name/enabled` — toggle a gateable plugin for
+  the guild (`400 not_toggleable` for non-gateable). Gated `plugins.manage`.
+- `GET /api/guild/:guildId/permissions/catalog` — full permission catalog. Gated `roles.manage`.
+- `GET /api/guild/:guildId/roles/grants` — guild roles + current grants. Gated `roles.manage`.
+- `PUT|DELETE /api/guild/:guildId/roles/grants/:roleId` — set/clear a role's
+  granted permissions (validated against the catalog). Gated `roles.manage`.
+- Host-owner-only: `/api/plugins/*` (install, uninstall, update, marketplace,
+  restart).
 
-The context is frozen (read-only except `ctx.models`) and exposes:
+The React admin dashboard lives in `plugins/administration/web` (CRA, built to
+`/dashboard`). Its Sidebar and pages are permission-filtered from the `access`
+payload; the **Access** page (`Roles.jsx`) is the role→permission editor.
 
-- `ctx.client` — the **real** discord.js `Client` (wrapped in a deprecation-
-  warning Proxy).
-- `ctx.db` — the real `Database` singleton (also deprecation-wrapped).
-- `ctx.scheduler` — the real `TaskScheduler`.
-- `ctx.commands` — `client.commands`.
-- `ctx.registerCommand`, `ctx.overrideCommand`, `ctx.registerEvent`,
-  `ctx.defineModel`, `ctx.models`, `ctx.hooks`, `ctx.config`, `ctx.logger`.
-- **There is no `ctx.discord`** — direct plugins use the real `ctx.client`.
+---
 
-### Isolated mode (`core/rpc/worker-bootstrap.js` → `createShimContext`)
+## Data models (high-level)
 
-Every resource is a shim that routes through RPC to the broker:
+Defined in `models/schemas.js`, exposed via `utils/database.js`:
 
-- `ctx.client` — **`null`.** The worker never touches a real client.
-- `ctx.discord` — a Discord shim with **exactly five convenience methods**:
-  `sendToChannel(channelId, payload)`, `sendDM(userId, payload)`,
-  `getGuild(guildId)`, `getMember(guildId, userId)`, `fetchChannel(channelId)`.
-- `ctx.db` — a Proxy that only allows a fixed set of methods (config, profile,
-  XP, points, ticket, server-config helpers); anything else throws
-  "not available in isolated mode".
-- `ctx.scheduler`, `ctx.registerCommand`, `ctx.registerEvent`,
-  `ctx.defineModel` (returns an RPC-backed model proxy), `ctx.hooks`,
-  `ctx.config` (with `env`), `ctx.logger`.
-- `ctx.commands` — `null`; `ctx.overrideCommand` warns that it is unsupported.
+- **ServerConfig** — per-guild config (AI, tickets, XP/role automation, birthdays…).
+- **UserProfile** — per-user-per-guild (`wallet`, `bank`, `totalXp`, `level`, …).
+- **PluginConfig** — per-guild-per-plugin config **and the `enabled` flag** that
+  drives the per-guild enable gate.
+- **GuildRoleGrant** — the only RBAC table: `(guildId, roleId) → permissions[]`.
+- **Ticket, AIRateLimit, XPTransaction, Leaderboard, Birthday, GuildEconomy,
+  ShopItem, TruthOrDareConfig, AntiRaid** — feature-specific schemas.
 
-Discord events are serialized in Core (`_serializeDiscordEvent`) and broadcast
-to workers; a subset is forwarded (`guildMemberAdd`, `messageCreate`,
-`interactionCreate`, `voiceStateUpdate`, etc.). Isolated command handlers run in
-the worker and reply via a proxied interaction that routes `reply`/`followUp`
-back over RPC.
+(See `models/schemas.js` for full field lists and indexes.)
 
-### Scheduler signature also differs by mode
-
-- **Direct** (`utils/scheduler.js`): `schedule(name, cronExpression, fn)` —
-  **name first** — and `unschedule(name)`.
-- **Isolated** (worker shim): `schedule(expression, callback, name)` —
-  **expression first, name last** — and `cancel(taskId)`. The worker subscribes
-  to `cron:tick` events emitted by the broker.
-
-## Capabilities and the RPC broker
-
-Isolated plugins reach real resources only through the `CapabilityBroker`
-(`core/rpc/broker.js`), which is the sole path to the DB, Discord, scheduler,
-hooks, network, and AI. Every RPC call is checked against the plugin's declared
-capabilities before it executes; denials and blocked hosts are tracked and can
-auto-suspend a plugin.
-
-Capabilities are declared in the manifest as `category: [values]` and referenced
-as `"category:value"` strings (`core/capabilities.js`):
-
-- `discord` — API actions (`SendMessages`, `EmbedLinks`, `ManageRoles`,
-  `BanMembers`, `ModerateMembers`, `GuildInfo`, …).
-- `storage` — `own-collection`, `read-profiles`, `write-profiles` (plugins never
-  get raw Mongo).
-- `network` — `outbound-http`.
-- `ai` — `gemini-proxy` (keys stay in Core).
-- `hooks` — `subscribe`, `emit`.
-- `scheduler` — `cron`.
-- `system` — `env`, `bot-token`, `raw-client` — elevated host access that
-  reduces or removes the sandbox; owner-approved. `PluginManager.grantedEnv`
-  turns these into the `process.env` slice a plugin's `ctx.config.env` sees
-  (`raw-client` → full env; `env` → env minus infra secrets; `bot-token` → adds
-  `DISCORD_TOKEN`; none → `{}`).
-
-`core/rpc/methods.js` defines the full capability-gated RPC surface (many more
-`discord.*`, `db.*`, `model.*`, `hooks.*`, `scheduler.*` methods than the five
-convenience helpers on `ctx.discord`).
-
-## Registry / marketplace (`core/pluginRegistry.js`)
-
-A singleton `PluginRegistry` fetches `plugins.json` over HTTP:
-
-- URL comes from `PLUGIN_REGISTRY_URL`, falling back to `FALLBACK_REGISTRY_URL`
-  (`https://github.com/AdvancedDiscordBot/registry/blob/main/plugins.json`).
-- `normalizeRegistryUrl` rewrites GitHub `blob`/`raw` URLs to
-  `raw.githubusercontent.com` so axios receives JSON, not an HTML page.
-- Responses are cached in `data/plugin-registry.json` for 30 minutes; on failure
-  it falls back to that cache. There is no hardcoded plugin list.
-- `getCategories()` returns exactly five: **features, moderation,
-  entertainment, utility, analytics**.
-- Also supports search, plugin-detail lookup, `isNewer` version comparison, and
-  a submissions queue (`data/plugin-submissions.json`).
-
-## Command deployment
-
-`npm run deploy` = `node scripts/build-plugins.js && node deploy-commands.js`.
-
-- `scripts/build-plugins.js` — finds `plugins/*/web` directories that have a
-  `package.json` with a `build` script and runs `npm install && npm run build`
-  in each (builds plugin front-ends, e.g. the administration dashboard).
-- `deploy-commands.js` — collects `SlashCommandBuilder` JSON via
-  `command.data.toJSON()` from `commands/` (absent) and from each
-  `plugins/*/commands/` directory, then registers them with Discord's REST API
-  (guild-scoped when `GUILD_ID` is set, else global), with timeout + rate-limit
-  retry handling.
-
-Plugins own their commands. At runtime, plugin `load(ctx)` calls
-`ctx.registerCommand(...)`, which places the command in `client.commands` so the
-core interaction router can dispatch it (isolated plugins register via RPC and
-execute through a worker proxy).
-
-## Dashboard / API layer (`core/api/server.js`, `core/adminPlugin.js`)
-
-Started only when `BOT_API_ENABLED=true`. Fastify with `@fastify/cookie`,
-`@fastify/session` (MongoDB-backed via `connect-mongo`), `@fastify/cors`, and a
-CSP header. Highlights:
-
-- **Auth:** Discord OAuth (`identify guilds`). `/auth/discord` →
-  `/auth/discord/callback` stores the user plus the guilds where they have
-  Manage-Guild/Admin. `OWNER_IDS` grants global access.
-- **Access control:** `/api/*` requires a session; plugin-management actions
-  require owner; guild config/stats require admin access to that guild.
-- **Plugin management:** list, install/uninstall/update (npm, restricted to
-  `adb-plugin-*` names by regex), reload, unload, marketplace search,
-  categories, permissions integer, brochures, and per-plugin/registry **risk
-  cards** (`core/risk-disclosure.js`) plus runtime **violations** and
-  reinstatement.
-- **Config/stats:** per-guild server config, per-plugin config (stored in the
-  `PluginConfig` model), and aggregate stats.
-- **Restart:** `/api/plugins/restart` delegates to the watchdog over HTTP rather
-  than killing itself.
-- **Dashboard:** `core/adminPlugin.js` serves the built React app from
-  `plugins/administration/web/build` under `/dashboard/` and adds `/api/guilds`,
-  `/api/guild/:id`, and leaderboard endpoints. Live job/hook events are pushed to
-  the watchdog, which owns the WebSocket so it survives restarts.
-
-## Watchdog (`core/adb-watchdog.js`)
-
-An independent Node process (managed by `adb-watchdog.sh`) that runs the bot as
-a child, proxies all bot traffic (`/api/*`, `/dashboard/*`, `/ws`, `/auth/*`),
-and stays alive across bot restarts/crashes so the upstream tunnel never drops.
-It listens on `WATCHDOG_PORT` and forwards to the bot on `BOT_API_PORT`, handles
-deploy-and-restart requests, and hosts the dashboard WebSocket.
-
-## Data models (`models/schemas.js`, `utils/database.js`)
-
-Mongoose is used throughout. The `Database` singleton connects lazily
-(`getInstance` / `ensureConnection`) using `MONGODB_URI` and exposes both model
-references and helper methods.
-
-Core-level models that still exist (mostly legacy, used by the built-in
-scheduler/events and exposed selectively to plugins via `db.*` RPC):
-
-- `ServerConfig` — per-guild config (AI, ticket, XP/role, birthday settings).
-- `UserProfile` — per-user-per-guild profile (economy, XP/level, points,
-  activity, current roles, streaks).
-- `Ticket`, `AIRateLimit`, `XPTransaction`, `Leaderboard`, `Birthday`,
-  `TruthOrDareConfig`, `AntiRaid`, `GuildEconomy`, `ShopItem` — specialized
-  legacy schemas.
-- `PluginConfig` — the per-guild plugin settings store (`{ guildId, pluginName,
-  data }`), unique on `(guildId, pluginName)`. This is the current, plugin-era
-  model.
-
-New plugins do **not** add fields to these. Isolated plugins define their own
-schemas via `ctx.defineModel(name, schema)`, which are **namespaced** as
-`plugin_<pluginName>_<modelName>` (`PluginContext.defineModel`) so plugins can't
-collide with each other or with core models. In isolated mode the returned model
-is an RPC proxy (`find`, `findOne`, `create`, `updateOne`, `deleteOne`,
-`countDocuments`, `save`).
-
-## Background scheduler (`utils/scheduler.js`)
-
-`TaskScheduler` (node-cron) still runs a set of **legacy** in-process jobs:
-daily reset (midnight UTC), weekly reset (Mon midnight UTC), hourly leaderboard
-update, role checks every 30 min, birthday check daily 08:00 UTC, and — only
-when `TRIAL_MODE=true` — a destructive "trial reset" every 5 hours (leaves
-guilds, drops the DB, `git pull`, `npm install`, `npm run deploy`, restart).
-
-On top of that it exposes the generic direct-mode plugin API
-`schedule(name, cronExpression, fn)` / `unschedule(name)` described above.
+---
 
 ## External integrations
 
-- Discord (discord.js v14) — gateway, interactions, components.
-- MongoDB (mongoose v8) — persistence and session store.
-- Google Gemini via `@google/genai` — AI, proxied through Core so keys never
-  reach plugins (`GEMINI_API_KEY`).
-- node-cron — scheduling; chokidar — hot reload; axios — registry/OAuth HTTP;
-  ws — dashboard WebSocket; acorn / acorn-walk — manifest static analysis
-  (`core/manifest-crossvalidate.js`).
+- Discord (**discord.js v14**) — runtime + components + OAuth
+- **MongoDB** (Mongoose 8) — persistence and sessions
+- **Fastify 4** — dashboard API (cors, cookie, session, static)
+- Google Gemini (`@google/genai`) — AI features (`GEMINI_API_KEY`)
+- `node-cron` — scheduling
+- `worker_threads` — plugin isolation
+
+---
 
 ## Environment variables
 
-From `.env.example` (authoritative):
+Core bot:
+- `DISCORD_TOKEN` (required) — bot token
+- `CLIENT_ID` (for `deploy-commands.js`) — application id
+- `GUILD_ID` (optional) — guild-scoped command deploy
+- `MONGODB_URI` (required) — Mongo connection string
+- `GEMINI_API_KEY` (optional) — Google Gemini
 
-- `DISCORD_TOKEN` (required) — bot token.
-- `CLIENT_ID` (required for `deploy-commands.js`) — application id.
-- `GUILD_ID` (optional) — guild-scoped command deployment when set.
-- `MONGODB_URI` (required) — MongoDB connection string.
-- `GEMINI_API_KEY` (optional) — Gemini key.
-- `BOT_API_ENABLED`, `BOT_API_PORT`, `BOT_API_BASE_URL` — the Fastify API.
+Platform / dashboard:
+- `BOT_API_ENABLED` — `true` to start the Fastify API
+- `BOT_API_PORT`, `BOT_API_BASE_URL` — API bind/base
+- `OWNER_IDS` — comma-separated host-owner user IDs (**the HOST_OWNER tier**)
 - `DISCORD_OAUTH_CLIENT_ID`, `DISCORD_OAUTH_CLIENT_SECRET`,
-  `DISCORD_OAUTH_REDIRECT_URI`, `SESSION_SECRET`, `DASHBOARD_REDIRECT_URL`,
-  `OWNER_IDS` — dashboard auth.
-- `NODE_ENV`, `PORT`, `WATCHDOG_PORT` — deployment/health/watchdog.
-- `ENABLE_AI_ASSISTANT`, `ENABLE_POINTS_SYSTEM`, `ENABLE_XP_SYSTEM`,
-  `ENABLE_TICKET_SYSTEM`, `ENABLE_MODERATION` — legacy feature toggles.
-- `PLUGIN_REGISTRY_URL` — marketplace registry (empty → fallback URL).
+  `DISCORD_OAUTH_REDIRECT_URI` — dashboard login
+- `SESSION_SECRET`, `DASHBOARD_REDIRECT_URL`, `CORS_ORIGIN` — session/redirect/CORS
+- `PLUGIN_ISOLATION` — `false` to disable worker isolation (not for production)
+- `PLUGIN_REGISTRY_URL` — plugin marketplace source
+- `WATCHDOG_PORT` — watchdog reverse-proxy port
+- `INVITE_FORCE_ADMIN`, `TRIAL_MODE`, `DEBUG`, `PORT` — misc/optional
 
-Additional variables read by code but not in `.env.example`:
-`PLUGIN_ISOLATION` (`index.js`), `CORS_ORIGIN` and `INVITE_FORCE_ADMIN`
-(`core/api/server.js`), `TRIAL_MODE` (`utils/scheduler.js`), `DEBUG`
-(worker logging).
+---
 
 ## Permissions & Intents
 
 - Intents (`index.js`): `Guilds`, `GuildMembers`, `GuildMessages`,
   `MessageContent`, `GuildMessageReactions`, `GuildVoiceStates`,
-  `GuildPresences`. Partials: `Message`, `Channel`, `Reaction`, `User`,
-  `GuildMember`.
-- Privileged intents (Message Content, Guild Members, Presences) must be enabled
-  in the Discord Developer Portal.
-- The bot's required Discord permissions are **computed from installed plugins'**
-  declared `discordPermissions` (`core/permissions.js`,
-  `/auth/invite`), not hardcoded — each plugin declares what it needs.
+  `GuildPresences`. The privileged ones (Message Content, Guild Members,
+  Presences) must be enabled in the Developer Portal.
+- The **invite permission integer** is computed from enabled plugins'
+  `discordPermissions` (`core/permissions.js`), not hardcoded.
+
+---
 
 ## Scaling & operational notes
 
-- The legacy `TaskScheduler` and forwarded Discord events run in-process;
-  running multiple bot instances would duplicate scheduled jobs and event
-  handling unless coordinated.
-- The `Database` singleton keeps one connection pool per process.
-- Isolated plugins run in worker threads with resource limits
-  (`core/rpc/resource-limits.js`); a misbehaving plugin can be suspended without
-  taking down Core.
-- The watchdog is the intended front door in production so restarts/deploys
-  don't drop the tunnel or the dashboard WebSocket.
+- Scheduler and the enable index are in-process; running multiple bot instances
+  duplicates scheduled jobs and each keeps its own index — coordinate (single
+  scheduler process / leader election) if you scale out.
+- The watchdog is a separate process; the dashboard "Restart & Deploy" goes
+  through it.
+- RBAC resolution and the enable index both fail closed (empty index = gateable
+  plugins off; DB error on grants = no permissions granted).
+
+---
 
 ## Extending the bot
 
-Do **not** add files to `commands/` or `events/` — that is the legacy core
-runtime, not the extension surface. To add a feature, **build a plugin**:
+- **New command:** add a file under `commands/<category>/` exporting `data` +
+  `execute`; run `npm run deploy`.
+- **New event:** add a file in `events/` exporting `{ name, execute, once? }`.
+- **New plugin:** see `CREATE-PLUGIN.md`. Declare capabilities and
+  `discordPermissions` in the manifest; optionally declare
+  `dashboard.permissions[]`.
+- **New DB model:** update `models/schemas.js` and expose via
+  `utils/database.js`.
+- **New dashboard permission:** it is auto-derived from the plugin name; only
+  declare `dashboard.permissions[]` when you need finer-grained keys.
 
-1. Create a `plugin.json` manifest (name, `main`, `capabilities`, any
-   `discordPermissions`/`dependsOn`).
-2. Export a `load(ctx)` function from the entry file and use `ctx` (respecting
-   the mode differences above) to `registerCommand` / `registerEvent`,
-   `defineModel`, schedule tasks, and subscribe to hooks.
-3. Place it in `plugins/<name>/` (local, direct mode) or publish it as an
-   `adb-plugin-*` npm package (isolated by default).
+---
 
-See `CREATE-PLUGIN.md` for the full plugin authoring guide and
-`REGISTRY-SETUP.md` for hosting a marketplace registry.
+## Roadmap
+
+- **Spec 1 — Multi-tenant RBAC:** ✅ implemented (this document).
+- **Spec 2 — Member portal:** 🚧 platform foundation shipped. A separate
+  `/me/*` self-service surface where members see their own data (rank,
+  reminders, tickets). Landed: the `webUi.memberPages` manifest field
+  (normalize + validate), `PluginManager.getMemberPages(guildId)` (gated by the
+  per-guild enable flag), the `GET /api/me/guild/:guildId/pages` API (any tier
+  above NONE), and the `/me` route tree in the dashboard SPA (guild picker →
+  guild pages → embedded plugin page). Remaining: individual plugins declare
+  their `memberPages` and serve the corresponding member routes — propagated to
+  the ~18 plugin repos incrementally.

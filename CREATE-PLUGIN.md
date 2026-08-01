@@ -192,7 +192,11 @@ adb-plugin-my-plugin/
 | `capabilities` | object | Declare what resources your plugin needs (see below) — **the broker enforces this** |
 | `permissions` | object | v2 mirror of capabilities + `network.outbound` host allowlist, `filesystem`, `childProcess`, `nativeAddons` |
 | `discordPermissions` | array | Discord permission flags for the bot invite link |
-| `configSchema` | object | JSON Schema for server admin settings UI |
+| `engines` | object | Version constraints: `{ core: ">=2.0.0", plugins: { "administration": ">=2.0.0" } }` — see **Plugin Dependencies** |
+| `settings` | object | Dashboard settings schema + command-permission toggle — see **Plugin Settings** |
+| `webUi` | object | Plugin-hosted frontend: `{ port, label, icon, memberPages }` — requires `web:host-ui` capability — see **webUi block** |
+| `dashboard` | object | Optional RBAC block: `{ permissions: [...] }` for finer-grained dashboard permission keys — see **Dashboard Access (RBAC)** |
+| `configSchema` | object | JSON Schema for server admin settings UI (legacy; prefer `settings.schema`) |
 
 > `capabilities` (the v1-style category→values block) is what the runtime broker
 > checks on every RPC. `permissions` (the v2 block) additionally drives the
@@ -482,6 +486,252 @@ When running in a worker thread, keep these in mind:
 5. **Event payloads are serialized** — they're plain objects, not Discord.js class instances (see the event payload shapes below)
 6. **`ctx.hooks.onAny()` is not available** — use `ctx.hooks.on('specificHookName', handler)` instead
 7. **`ctx.scheduler`, not `node-cron`** — Core runs the cron; signature is `schedule(expression, callback, name)`
+
+---
+
+<!-- DOCS_PLACEHOLDER -->
+
+## Plugin Settings & Dashboard Integration
+
+Plugins can expose settings, per-command permissions, and an optional hosted web UI — all surfaced in the left sidebar of the admin dashboard under a **PLUGINS** section.
+
+### settings block
+
+Add a `settings` block to `plugin.json` to expose configuration fields in the dashboard:
+
+```json
+"settings": {
+  "commandPermissions": true,
+  "schema": [
+    { "key": "announceChannel", "type": "channel", "label": "Announcement channel" },
+    { "key": "staffRole",       "type": "role",    "label": "Staff role" },
+    { "key": "xpRate",          "type": "number",  "label": "XP per message", "default": 10 },
+    { "key": "enabled",         "type": "boolean", "label": "Feature enabled", "default": true },
+    { "key": "welcomeMsg",      "type": "string",  "label": "Welcome message" },
+    { "key": "mode",            "type": "select",  "label": "Mode", "default": "normal",
+      "options": [ { "value": "normal", "label": "Normal" }, { "value": "strict", "label": "Strict" } ] }
+  ]
+}
+```
+
+**Field types:** `string`, `number`, `boolean`, `channel`, `role`, `select` (requires `options`).
+
+`commandPermissions: true` adds a per-command table to the settings page where admins can toggle each command on/off and restrict it to specific roles.
+
+**Reading saved config in your plugin:**
+
+```javascript
+async function load(ctx) {
+  ctx.registerEvent("interactionCreate", async (interaction) => {
+    const cfg = await ctx.db.getPluginConfig(interaction.guildId, "adb-plugin-my-plugin");
+    const channel = cfg?.announceChannel;
+    const rate    = cfg?.xpRate ?? 10;
+  });
+}
+```
+
+Config is stored in `PluginConfig.data` (MongoDB). The dashboard writes to the same document. The `_commands` sub-key is reserved for per-command permission data — do not write to it directly.
+
+---
+
+### webUi block — hosting a plugin frontend
+
+A plugin can run its own web server and have the watchdog reverse-proxy it at `/plugin-ui/<name>/*`:
+
+```json
+"capabilities": {
+  "web": ["host-ui"]
+},
+"permissions": {
+  "web": ["host-ui"]
+},
+"webUi": {
+  "port": 3210,
+  "label": "My Plugin UI",
+  "icon": "LayoutDashboard"
+}
+```
+
+**Requirements:**
+
+- `permissions.web` must include `"host-ui"` — this triggers the owner-approval flow at install (same as `system:raw-client`).
+- `webUi.port` must be in the range **3100–4999** (avoids the bot's HTTP port 3000/3009 and watchdog 3008).
+- The plugin must start its own HTTP server on that port and register it with the bot at startup:
+
+```javascript
+async function load(ctx) {
+  const http = require("http");
+
+  const server = http.createServer((req, res) => {
+    res.end("<h1>My Plugin UI</h1>");
+  });
+
+  server.listen(3210, "127.0.0.1", async () => {
+    // Register with the bot so the watchdog proxy table is updated
+    await fetch("http://localhost:" + (process.env.BOT_API_PORT || 3009) + "/api/plugin-ui/register", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "adb-plugin-my-plugin", port: 3210 }),
+    });
+  });
+}
+```
+
+Once registered, the dashboard sidebar shows an **"Open UI"** link that opens `/plugin-ui/adb-plugin-my-plugin/` — proxied by the watchdog to `localhost:3210`.
+
+> **Security:** The watchdog only proxies to a port that the bot explicitly registered. A plugin cannot proxy to an arbitrary port by claiming it in the manifest — the bot validates the port matches the manifest declaration before registering.
+
+> **Isolation note:** `webUi` requires binding a real port, which is not possible from a sandboxed worker thread. Plugins using `webUi` must also declare `system:raw-client` (direct/un-isolated mode) or run as a `local` (in-repo) plugin.
+
+#### Member portal pages (`webUi.memberPages`)
+
+The admin dashboard is for people who *configure* the server. The **member
+portal** (`/me`) is the self-service surface for everyone else — a member logs
+in, picks a server they're in, and sees pages that show **their own** data (my
+rank, my reminders, my tickets). It is not gated on any dashboard permission:
+any member of the guild can reach it.
+
+Declare member pages on your `webUi` block. Each entry is a route into the
+same web server you already host — the portal opens it at
+`/plugin-ui/<name><path>?guildId=<id>`:
+
+```json
+"webUi": {
+  "port": 3210,
+  "label": "My Plugin UI",
+  "memberPages": [
+    { "path": "/me/rank", "label": "My Rank", "icon": "Trophy" },
+    { "path": "/me/reminders", "label": "My Reminders" }
+  ]
+}
+```
+
+Rules:
+- `path` is required and must start with `/`; `label` is required; `icon` is
+  optional (a lucide-react icon name). Duplicate paths are dropped.
+- A page only appears in a guild's portal when the plugin is **active for that
+  guild** (same per-guild enable gate as everything else — gateable plugins are
+  off until an admin enables them).
+- The portal passes `guildId` as a query parameter and the member's session
+  cookie rides along, so your handler can scope to *this member in this guild*.
+  Resolve who the member is from the session the same way the admin API does.
+
+---
+
+## Plugin Dependencies
+
+Plugins can declare version constraints on the ADB core platform and on other plugins using the `engines` block.
+
+### engines block
+
+```json
+"engines": {
+  "core": ">=2.0.0",
+  "plugins": {
+    "administration": ">=2.0.0"
+  }
+}
+```
+
+- `engines.core` — semver range checked against the bot's `package.json` version. If unmet, the plugin refuses to load with a clear error.
+- `engines.plugins.<name>` — semver range checked against the named plugin's loaded `version`. If the dependency is not loaded or its version is too old, the plugin refuses to load.
+
+**Why `engines.plugins.administration >= 2.0.0`?**
+
+The `settings`, `commandPermissions`, and `webUi` features are served by the administration dashboard plugin. Version 2.0.0 is the first version that understands those manifest blocks. A plugin using them should declare this constraint so it fails loudly on an old install rather than silently having a dead settings page.
+
+### Load ordering
+
+`engines.plugins` names are treated as load-order dependencies — a plugin that requires `administration` will always load *after* `administration`, regardless of discovery order. Circular dependencies are detected at startup and cause both plugins to fail with a clear error.
+
+### Difference from `declaredDependencies`
+
+| Field | Purpose |
+|-------|---------|
+| `declaredDependencies` | npm packages your code `require()`s — used for manifest↔code cross-validation |
+| `engines.plugins` | sibling ADB plugins your plugin needs at runtime — enforces load order + version |
+
+### Worked example — `adb-plugin-template`
+
+The template plugin demonstrates all three features together:
+
+```json
+"engines": {
+  "core": ">=2.0.0",
+  "plugins": { "administration": ">=2.0.0" }
+},
+"settings": {
+  "commandPermissions": true,
+  "schema": [
+    { "key": "welcomeMessage",  "type": "string",  "label": "Welcome message", "default": "Hello!" },
+    { "key": "announceChannel", "type": "channel", "label": "Announcement channel" },
+    { "key": "staffRole",       "type": "role",    "label": "Staff role" },
+    { "key": "maxPerDay",       "type": "number",  "label": "Max uses per day", "default": 10 },
+    { "key": "featureEnabled",  "type": "boolean", "label": "Feature enabled", "default": true },
+    { "key": "mode",            "type": "select",  "label": "Mode", "default": "normal",
+      "options": [ { "value": "normal", "label": "Normal" }, { "value": "strict", "label": "Strict" } ] }
+  ]
+}
+```
+
+This produces a settings page in the dashboard sidebar with all six field types, plus a per-command enable/role table for every command the plugin registers.
+
+---
+
+## Dashboard Access (RBAC)
+
+The dashboard is multi-tenant. Two RBAC facts affect every plugin author; both
+work **with zero manifest changes** — the `dashboard` block is opt-in only.
+
+### Your plugin is off per-guild until an admin enables it
+
+When a host owner installs your (isolated, npm) plugin it becomes **available**
+but is **disabled in every guild by default**. Each guild's admin flips it on
+from the dashboard **Plugins** page. Until then, the platform gate blocks your
+plugin's events, hooks, and commands for that guild — you don't write any code
+for this; it's enforced at the platform chokepoints.
+
+Consequences:
+- Don't assume your handlers run in a guild just because the plugin is
+  installed. A guild that hasn't enabled you sees nothing from you.
+- `raw-client` (direct-mode) and in-repo `core`/`local` plugins are **not**
+  gateable — they're always on. The API rejects toggling them
+  (`not_toggleable`). See the isolation table above.
+
+### Dashboard permission keys
+
+Guild admins grant Discord roles fine-grained access to the dashboard. Every
+loaded plugin **automatically** contributes two permission keys — no manifest
+needed:
+
+| Key | Gates |
+|-----|-------|
+| `plugin.<name>.view` | seeing your plugin's dashboard pages |
+| `plugin.<name>.configure` | changing your plugin's settings for a guild |
+
+If you need finer-grained keys (e.g. a high-risk action), declare them in a
+`dashboard.permissions` block:
+
+```json
+"dashboard": {
+  "permissions": [
+    { "key": "resetXp", "label": "Reset user XP", "description": "Wipe a member's XP." },
+    { "key": "export",  "label": "Export data" }
+  ]
+}
+```
+
+Rules:
+- Keys are **always re-namespaced** under `plugin.<name>.` — you cannot mint a
+  permission outside your own namespace (declaring `plugins.manage` becomes
+  `plugin.<name>.plugins.manage`, which grants nothing platform-level).
+- Declaring your own `permissions` array **replaces** the default
+  `view`/`configure` pair, so include equivalents if you still want them.
+- Entries may be a plain string (`"export"`) or `{ key, label, description }`.
+
+There is no runtime enforcement helper to call — the platform filters the
+sidebar and 403s the API based on the resolved permission set. Your plugin code
+doesn't check permissions itself.
 
 ---
 

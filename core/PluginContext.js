@@ -46,7 +46,7 @@ class PluginContext {
 			// We make it writable while keeping everything else read-only
 			// to match the safety guarantees of the original Object.freeze().
 			models: null,
-			hooks: this.hooks,
+			hooks: this.buildHooksFacade(),
 			config: this.config,
 			logger: this.logger,
 		};
@@ -108,6 +108,50 @@ class PluginContext {
 		// Prevent adding new properties (non-extensible)
 		Object.preventExtensions(ctx);
 		return ctx;
+	}
+
+	/**
+	 * Wrap the shared HookBus so a plugin's hook handlers are gated by the
+	 * per-guild enable flag. When a hook payload carries a guildId and this
+	 * plugin isn't enabled for that guild, its handler is skipped — the hook
+	 * still runs for every other plugin. Non-gateable plugins (core/builtin/
+	 * in-repo, raw-client) pass through untouched.
+	 *
+	 * Only `on`/`onAny` are wrapped; emitHook and the rest are delegated as-is.
+	 */
+	buildHooksFacade() {
+		const hooks = this.hooks;
+		const pluginName = this.pluginName;
+		const pluginManager = this.pluginManager;
+		if (!hooks || !pluginManager) return hooks;
+
+		const gate = (handler) => {
+			return async (payload, ...rest) => {
+				if (pluginManager.isGuildGateable(pluginName)) {
+					const guildId =
+						payload && typeof payload === "object"
+							? payload.guildId ||
+								payload.guild?.id ||
+								payload.interaction?.guildId ||
+								payload.message?.guildId
+							: null;
+					if (guildId && !pluginManager.isEnabledForGuild(guildId, pluginName)) {
+						return; // plugin disabled for this guild — skip its handler
+					}
+				}
+				return handler(payload, ...rest);
+			};
+		};
+
+		return {
+			on: (hookName, handler, priority = 0) =>
+				hooks.on(hookName, gate(handler), priority),
+			onAny: (handler) =>
+				hooks.onAny((hookName, payload) => gate(() => handler(hookName, payload))(payload)),
+			off: (hookName, handler) => hooks.off(hookName, handler),
+			offAny: (handler) => hooks.offAny(handler),
+			emitHook: (hookName, payload) => hooks.emitHook(hookName, payload),
+		};
 	}
 
 	defineModel(modelName, schema) {

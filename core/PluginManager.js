@@ -21,6 +21,21 @@ class PluginManager {
 		this.plugins = new Map();
 		this.watchers = new Map();
 
+		// Per-guild plugin enablement gate. Enabled (guildId,pluginName) pairs are
+		// held as one Set, rebuilt from a single query on a short TTL and eagerly
+		// after a toggle, so the runtime chokepoints (event forwarding, hooks,
+		// commands) can read the gate synchronously on hot paths. An empty index
+		// means "everything gateable is off" — the safe default until the first
+		// refresh lands.
+		this._enableIndex = new Set(); // "guildId:pluginName"
+		this._enableIndexAt = 0;
+		this._enableIndexTtl = 60 * 1000;
+		this._enableIndexRefreshing = false;
+
+		// Core/platform version, checked against each plugin's engines.core range.
+		// Read once from package.json; falls back to "0.0.0" if unreadable.
+		this.coreVersion = this._readCoreVersion();
+
 		// ── Plugin Isolation (opt-in) ──────────────────────────────────────
 		// When enabled, third-party plugins load in worker_threads instead of
 		// sharing the main process.  Core plugins always load directly.
@@ -80,8 +95,87 @@ class PluginManager {
 				// Serialize the event payload for IPC transfer.
 				// For GuildMember / Message objects, extract only safe, serializable fields.
 				const payload = this._serializeDiscordEvent(eventName, args);
-				this.workerManager.broadcastEvent(`event:${eventName}`, payload);
+				const guildId = this._eventGuildId(args);
+				// Guild-scoped events only reach workers whose plugin the guild has
+				// enabled. Events with no guild (e.g. `ready`, DMs) can't be gated
+				// and go to everyone.
+				const filter = guildId
+					? (pluginId) => this.isEnabledForGuild(guildId, pluginId)
+					: null;
+				this.workerManager.broadcastEvent(`event:${eventName}`, payload, filter);
 			});
+		}
+	}
+
+	// ── Per-guild plugin enablement gate ───────────────────────────────────
+	// Installed (npm) plugins are OFF by default for every guild until that
+	// guild's admin enables them. Core/builtin/in-repo plugins are platform
+	// infrastructure and always on; raw-client plugins load un-isolated in the
+	// main process, so a per-guild gate on them would be advisory only — they
+	// are treated as non-disableable (the API refuses to toggle them).
+
+	/** Whether a plugin's activity is subject to the per-guild enable flag. */
+	isGuildGateable(pluginName) {
+		const state = this.plugins.get(pluginName);
+		if (!state) return false;
+		if (state.source !== "package") return false;
+		const sys = state.manifest?.capabilities?.system || [];
+		if (sys.includes("raw-client")) return false;
+		return true;
+	}
+
+	/** Synchronous gate read used by the hot event/hook/command paths. */
+	isEnabledForGuild(guildId, pluginName) {
+		if (!this.isGuildGateable(pluginName)) return true;
+		if (!guildId) return true;
+		this._maybeRefreshEnableIndex();
+		return this._enableIndex.has(`${guildId}:${pluginName}`);
+	}
+
+	/** First guild id found across an event's arguments, or null. */
+	_eventGuildId(args) {
+		for (const arg of args) {
+			if (!arg || typeof arg !== "object") continue;
+			if (typeof arg.guildId === "string") return arg.guildId;
+			if (arg.guild && typeof arg.guild.id === "string") return arg.guild.id;
+		}
+		return null;
+	}
+
+	_maybeRefreshEnableIndex() {
+		if (Date.now() - this._enableIndexAt < this._enableIndexTtl) return;
+		if (this._enableIndexRefreshing) return;
+		this._enableIndexRefreshing = true;
+		// Fire and forget: this call reads the current snapshot; the refresh lands
+		// for the next one. Staleness is bounded by the TTL.
+		this.refreshEnableIndex().finally(() => {
+			this._enableIndexRefreshing = false;
+		});
+	}
+
+	/**
+	 * Reflect a single toggle in the index immediately, so the change takes
+	 * effect without waiting for the next TTL refresh. The API calls this right
+	 * after persisting the enable/disable.
+	 */
+	setEnabledForGuild(guildId, pluginName, enabled) {
+		const key = `${guildId}:${pluginName}`;
+		if (enabled) this._enableIndex.add(key);
+		else this._enableIndex.delete(key);
+	}
+
+	async refreshEnableIndex() {
+		try {
+			const rows = await this.db.getAllEnabledPluginRows();
+			const next = new Set();
+			for (const row of rows) next.add(`${row.guildId}:${row.pluginName}`);
+			this._enableIndex = next;
+			this._enableIndexAt = Date.now();
+		} catch (err) {
+			this.logger.warn(`Failed to refresh plugin enable index: ${err.message}`);
+			// Keep the last good snapshot but bump the clock so a down DB isn't
+			// hammered on every event.
+			this._enableIndexAt = Date.now();
 		}
 	}
 
@@ -278,6 +372,10 @@ class PluginManager {
 			await this.loadPlugin(plugin);
 		}
 
+		// Warm the enable gate before we start delivering events, so gateable
+		// plugins don't briefly lose their enabled guilds at startup.
+		await this.refreshEnableIndex();
+
 		this.setupHotReload();
 	}
 
@@ -457,9 +555,72 @@ class PluginManager {
 
 	getDependencies(manifest) {
 		if (!manifest) return [];
-		if (Array.isArray(manifest.dependsOn)) return manifest.dependsOn;
-		if (Array.isArray(manifest.dependencies)) return manifest.dependencies;
-		return [];
+		const deps = new Set();
+		if (Array.isArray(manifest.dependsOn)) manifest.dependsOn.forEach((d) => deps.add(d));
+		if (Array.isArray(manifest.dependencies)) manifest.dependencies.forEach((d) => deps.add(d));
+		// engines.plugins names are also load-order dependencies: a plugin that
+		// requires administration >=X must load after administration.
+		if (manifest.engines && manifest.engines.plugins && typeof manifest.engines.plugins === "object") {
+			for (const name of Object.keys(manifest.engines.plugins)) deps.add(name);
+		}
+		return Array.from(deps);
+	}
+
+	/**
+	 * Read the core/platform version from package.json (once, at construction).
+	 * @private
+	 */
+	_readCoreVersion() {
+		try {
+			const pkg = require(path.join(process.cwd(), "package.json"));
+			return pkg.version || "0.0.0";
+		} catch {
+			return "0.0.0";
+		}
+	}
+
+	/**
+	 * Check a plugin's `engines` constraints (core version + sibling plugin
+	 * versions) against what's actually running. Returns an array of human
+	 * error strings — empty means all constraints satisfied. A non-empty result
+	 * means the plugin must NOT load.
+	 *
+	 * engines.plugins names must already be present in this.plugins (guaranteed
+	 * by the dependency-ordered load), so the dependency's version is known.
+	 */
+	checkEngines(manifest) {
+		const semver = require("semver");
+		const errors = [];
+		const engines = manifest && manifest.engines;
+		if (!engines || typeof engines !== "object") return errors;
+
+		if (engines.core) {
+			if (!semver.satisfies(this.coreVersion, engines.core, { includePrerelease: true })) {
+				errors.push(
+					`requires core ${engines.core}, but running core is ${this.coreVersion}`,
+				);
+			}
+		}
+
+		if (engines.plugins && typeof engines.plugins === "object") {
+			for (const [depName, range] of Object.entries(engines.plugins)) {
+				const dep = this.plugins.get(depName);
+				if (!dep || dep.enabled === false) {
+					errors.push(
+						`requires plugin "${depName}" ${range}, but it is not loaded`,
+					);
+					continue;
+				}
+				const depVersion = dep.manifest?.version || "0.0.0";
+				if (!semver.satisfies(depVersion, range, { includePrerelease: true })) {
+					errors.push(
+						`requires plugin "${depName}" ${range}, but loaded version is ${depVersion}`,
+					);
+				}
+			}
+		}
+
+		return errors;
 	}
 
 	getDependents(pluginName) {
@@ -552,6 +713,14 @@ class PluginManager {
 		this.plugins.set(plugin.name, pluginState);
 
 		try {
+			// Engine constraints: core version + sibling plugin versions.
+			// Unmet = the plugin refuses to load (surfaced via lastError), it
+			// does not crash the bot.
+			const engineErrors = this.checkEngines(plugin.manifest);
+			if (engineErrors.length) {
+				throw new Error(`Engine check failed: ${engineErrors.join("; ")}`);
+			}
+
 			// Validate capabilities if declared
 			const caps = plugin.manifest?.capabilities;
 			if (caps) {
@@ -816,7 +985,19 @@ class PluginManager {
 			throw new Error(`Plugin not loaded: ${pluginName}`);
 		}
 
-		const wrapper = (...args) => handler(...args, this.client);
+		// Gate direct-mode (un-isolated) events behind the per-guild enable flag.
+		// Isolated package plugins are gated at broadcastEvent; this covers the
+		// PLUGIN_ISOLATION=false fallback where the same package plugins load
+		// directly. Non-gateable plugins (core/builtin/in-repo, raw-client) run
+		// unconditionally.
+		const gateable = this.isGuildGateable(pluginName);
+		const wrapper = (...args) => {
+			if (gateable) {
+				const guildId = this._eventGuildId(args);
+				if (guildId && !this.isEnabledForGuild(guildId, pluginName)) return;
+			}
+			return handler(...args, this.client);
+		};
 
 		if (options.once) {
 			this.client.once(name, wrapper);
@@ -929,6 +1110,18 @@ class PluginManager {
 			lastError: plugin.lastError,
 			overrides: Array.from(plugin.overrides.keys()),
 			commands: Array.from(plugin.commandNames),
+			version: plugin.manifest?.version || null,
+			engines: plugin.manifest?.engines || null,
+			settingsSchema: plugin.manifest?.settings?.schema || [],
+			commandPermissions: plugin.manifest?.settings?.commandPermissions === true,
+			webUi: plugin.manifest?.webUi?.port
+				? {
+					port: plugin.manifest.webUi.port,
+					label: plugin.manifest.webUi.label || null,
+					icon: plugin.manifest.webUi.icon || null,
+					memberPages: plugin.manifest.webUi.memberPages || [],
+				}
+				: null,
 			hasBrochure: !!(
 				plugin.path &&
 				fs.existsSync(path.join(plugin.path, "Brochure.md"))
@@ -944,6 +1137,53 @@ class PluginManager {
 	getManifest(pluginName) {
 		const plugin = this.plugins.get(pluginName);
 		return plugin?.manifest || null;
+	}
+
+	/**
+	 * Member pages available in a specific guild — only plugins that are active
+	 * for that guild and declare webUi.memberPages contribute entries.
+	 *
+	 * Two kinds of page:
+	 *   - rendered (declares source + view): the platform reads the plugin's
+	 *     model and renders it with the built-in member-view library. No port
+	 *     needed. The entry carries `rendered:true` plus the view/source spec.
+	 *   - iframe (custom): the entry carries the plugin's `port` so the portal
+	 *     can proxy to /plugin-ui/<name><path>.
+	 *
+	 * @param {string} guildId
+	 * @returns {Array<{pluginName:string, port:number|null, path:string, label:string, icon:string|null, rendered:boolean, view?:object, source?:object}>}
+	 */
+	getMemberPages(guildId) {
+		const pages = [];
+		for (const [name, plugin] of this.plugins) {
+			if (!this.isEnabledForGuild(guildId, name)) continue;
+			const webUi = plugin.manifest?.webUi;
+			if (!webUi) continue;
+			const memberPages = webUi.memberPages;
+			if (!Array.isArray(memberPages) || memberPages.length === 0) continue;
+			for (const page of memberPages) {
+				if (!page?.path || !page?.label) continue;
+				// A page is platform-rendered when it declares both a data source
+				// (a plugin model) and a view. Those need no hosted port. Custom
+				// iframe pages do — skip them if the plugin declared no port.
+				const rendered = !!(page.rendered || (page.source?.model && page.view?.type));
+				if (!rendered && !webUi.port) continue;
+				const entry = {
+					pluginName: name,
+					port: webUi.port || null,
+					path: page.path,
+					label: page.label,
+					icon: page.icon || null,
+					rendered,
+				};
+				if (rendered) {
+					entry.view = page.view || null;
+					entry.source = page.source || null;
+				}
+				pages.push(entry);
+			}
+		}
+		return pages;
 	}
 
 	getBrochure(pluginName) {

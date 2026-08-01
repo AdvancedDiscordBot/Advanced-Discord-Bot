@@ -40,6 +40,7 @@ class PluginRegistry {
 		this.registry = null;
 		this.lastFetch = null;
 		this.cacheTimeout = 1000 * 60 * 30;
+		this.localPluginCache = new Map();
 	}
 
 	async fetchRegistry(force = false) {
@@ -189,6 +190,126 @@ class PluginRegistry {
 			fs.mkdirSync(dataDir, { recursive: true });
 		}
 		fs.writeFileSync(SUBMISSIONS_FILE, JSON.stringify(submissions, null, 2));
+	}
+
+	async refreshRegistry() {
+		this.logger.info("Force refreshing plugin registry from GitHub ...");
+		return this.fetchRegistry(true);
+	}
+
+	async getFreshPluginVersions() {
+		const pluginsDir = path.join(process.cwd(), "plugins");
+		const nodeModulesDir = path.join(process.cwd(), "node_modules");
+
+		if (!fs.existsSync(pluginsDir) && !fs.existsSync(nodeModulesDir)) {
+			return null;
+		}
+
+		const freshVersions = new Map();
+
+		// Check local plugins directory
+		if (fs.existsSync(pluginsDir)) {
+			const pluginDirs = fs.readdirSync(pluginsDir, { withFileTypes: true })
+				.filter(dir => dir.isDirectory() && !dir.name.startsWith('.'));
+
+			for (const dir of pluginDirs) {
+				const pluginJsonPath = path.join(pluginsDir, dir.name, "plugin.json");
+				if (fs.existsSync(pluginJsonPath)) {
+					try {
+						const pluginJson = JSON.parse(fs.readFileSync(pluginJsonPath, "utf8"));
+						const name = pluginJson.name || dir.name;
+						freshVersions.set(name, {
+							version: pluginJson.version,
+							npmPackage: pluginJson.name,
+							fromLocal: true
+						});
+					} catch (error) {
+							this.logger.warn(`Failed to read plugin.json for ${dir.name}:`, error.message);
+						}
+					}
+			}
+		}
+
+		// Check node_modules for adb-plugin-* packages
+		if (fs.existsSync(nodeModulesDir)) {
+			const packages = fs.readdirSync(nodeModulesDir, { withFileTypes: true })
+				.filter(pkg => pkg.isDirectory() && (
+					(pkg.name.startsWith("adb-plugin-") ||
+					(pkg.name.startsWith("@") && pkg.name.includes("/adb-plugin-")))));
+
+			for (const pkg of packages) {
+				let packageName = pkg.name;
+				let pluginDir = path.join(nodeModulesDir, pkg.name);
+
+				// Handle scoped packages
+				if (pkg.name.startsWith("@") && pkg.isDirectory()) {
+					const scopedPath = path.join(nodeModulesDir, pkg.name);
+					if (fs.existsSync(scopedPath)) {
+						const scopedEntries = fs.readdirSync(scopedPath, { withFileTypes: true })
+							.filter(entry => entry.isDirectory() && entry.name.startsWith("adb-plugin-"));
+
+						for (const scopedEntry of scopedEntries) {
+							const scopedPluginJsonPath = path.join(scopedPath, scopedEntry.name, "plugin.json");
+							if (fs.existsSync(scopedPluginJsonPath)) {
+								try {
+									const pluginJson = JSON.parse(fs.readFileSync(scopedPluginJsonPath, "utf8"));
+									const name = pluginJson.name || `${pkg.name}/${scopedEntry.name}`;
+									freshVersions.set(name, {
+										version: pluginJson.version,
+										npmPackage: pluginJson.name,
+										fromLocal: true
+									});
+								} catch (error) {
+										this.logger.warn(`Failed to read plugin.json for ${scopedEntry.name}:`, error.message);
+								}
+								}
+							}
+							continue;
+						}
+				}
+
+			if (!pkg.isDirectory()) continue;
+				const pluginJsonPath = path.join(nodeModulesDir, pkg.name, "plugin.json");
+				if (fs.existsSync(pluginJsonPath)) {
+					try {
+						const pluginJson = JSON.parse(fs.readFileSync(pluginJsonPath, "utf8"));
+						const name = pluginJson.name || pkg.name;
+						freshVersions.set(name, {
+							version: pluginJson.version,
+							npmPackage: pluginJson.name,
+							fromLocal: true
+						});
+					} catch (error) {
+							this.logger.warn(`Failed to read plugin.json for ${pkg.name}:`, error.message);
+						}
+				}
+			}
+		}
+
+		return freshVersions.size > 0 ? freshVersions : null;
+	}
+
+	async getPluginDetails(packageName) {
+		const plugins = await this.fetchRegistry();
+		let details = plugins.find((p) => p.npmPackage === packageName || p.name === packageName);
+
+		// If we have fresh local versions, use those for more accurate data
+		const freshVersions = await this.getFreshPluginVersions();
+		if (freshVersions) {
+			const freshData = freshVersions.get(packageName);
+			if (freshData) {
+				// Return fresh data with registry data merged (registry takes precedence for metadata)
+				const result = { ...freshData };
+				if (details) {
+					// Keep registry metadata (displayName, description, etc.) but use fresh version
+					result.version = freshData.version;
+					result.npmPackage = freshData.npmPackage;
+				}
+				return result;
+			}
+		}
+
+		return details;
 	}
 }
 
