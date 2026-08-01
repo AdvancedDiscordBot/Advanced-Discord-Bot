@@ -15,7 +15,7 @@ ADB is not currently part of any open source contribution program. There is no e
 
 ### Build A Platform
 
-- **Core bot** - Stable Discord.js runtime, commands, events, database, scheduling, and AI support.
+- **Core platform** - Lean Discord.js runtime, plugin loader/isolation, database, scheduling, and dashboard host. No user-facing commands live in core.
 - **Dashboard** - Admin UI for guild settings, plugin management, and activity visibility.
 - **Plugin marketplace** - Registry-backed discovery for installable community modules.
 - **Plugin API** - Commands, overrides, events, hooks, config schemas, jobs, and models.
@@ -32,7 +32,7 @@ High priority:
 
 Medium priority:
 
-- New core commands only when they belong in the base bot
+- New core/platform capabilities only when they belong in the base runtime (loader, isolation, dashboard, RPC)
 - Better observability, logs, and admin feedback
 - Performance improvements
 - Internationalization and accessibility
@@ -141,8 +141,7 @@ See [CREATE-PLUGIN.md](./CREATE-PLUGIN.md) for the complete plugin guide.
 
 ## ✅ Development Guidelines
 
-- Follow the existing command and event structure.
-- Keep core changes focused; prefer plugins for optional features.
+- Core ships no user-facing commands — features live in `adb-plugin-*` packages. Keep core changes focused on the platform (loader, plugin manager, hook bus, dashboard); prefer plugins for optional features.
 - Handle Discord permissions and missing guild/member/channel data gracefully.
 - Avoid logging tokens, session secrets, connection strings, or user private data.
 - Update documentation when behavior, setup, commands, or plugin APIs change.
@@ -159,7 +158,7 @@ For Discord behavior, also test in a private development guild and include the t
 ## 🧭 Documentation Map
 
 - [README.md](./README.md) - project overview and setup
-- [DOCUMENTATION.md](./DOCUMENTATION.md) - slash command reference
+- [DOCUMENTATION.md](./DOCUMENTATION.md) - how commands work + official plugin reference
 - [ARCHITECTURE.md](./ARCHITECTURE.md) - runtime architecture
 - [CREATE-PLUGIN.md](./CREATE-PLUGIN.md) - plugin authoring guide
 - [REGISTRY-SETUP.md](./REGISTRY-SETUP.md) - marketplace registry setup
