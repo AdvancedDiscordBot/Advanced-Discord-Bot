@@ -326,10 +326,13 @@ class WorkerManager {
 	 * @param {string} eventName
 	 * @param {object} payload
 	 */
-	broadcastEvent(eventName, payload) {
+	broadcastEvent(eventName, payload, filter = null) {
 		for (const [pluginId, entry] of this.workers) {
 			if (!entry.ready) continue;
 			if (this.broker.isSuspended(pluginId)) continue;
+			// Optional per-plugin gate (e.g. the per-guild enable flag): a plugin
+			// the target guild hasn't enabled never sees the event.
+			if (filter && !filter(pluginId)) continue;
 			try {
 				entry.worker.postMessage({
 					type: "rpc:event",

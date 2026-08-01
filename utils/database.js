@@ -12,6 +12,7 @@ const {
 	GuildEconomy,
 	ShopItem,
 	PluginConfig,
+	GuildRoleGrant,
 } = require("../models/schemas");
 
 class Database {
@@ -34,6 +35,7 @@ class Database {
 		this.GuildEconomy = GuildEconomy;
 		this.ShopItem = ShopItem;
 		this.PluginConfig = PluginConfig;
+		this.GuildRoleGrant = GuildRoleGrant;
 	}
 
 	static async getInstance() {
@@ -138,6 +140,70 @@ class Database {
 			console.error("Error listing plugin configs:", error);
 			throw error;
 		}
+	}
+
+	// 🔌 Per-guild plugin enable state.
+	// Absence of a row means "not enabled" — plugins are off by default and a
+	// guild admin has to opt in.
+	async isPluginEnabledForGuild(guildId, pluginName) {
+		await this.ensureConnection();
+		const config = await PluginConfig.findOne({ guildId, pluginName }).select(
+			"enabled",
+		);
+		return config?.enabled === true;
+	}
+
+	async setPluginEnabledForGuild(guildId, pluginName, enabled, actorId = null) {
+		await this.ensureConnection();
+		return PluginConfig.findOneAndUpdate(
+			{ guildId, pluginName },
+			{
+				$set: {
+					enabled: !!enabled,
+					enabledBy: enabled ? actorId : null,
+					enabledAt: enabled ? new Date() : null,
+				},
+			},
+			{ upsert: true, new: true },
+		);
+	}
+
+	async getEnabledPluginNames(guildId) {
+		await this.ensureConnection();
+		const rows = await PluginConfig.find({ guildId, enabled: true }).select(
+			"pluginName",
+		);
+		return rows.map((row) => row.pluginName);
+	}
+
+	// Every (guildId, pluginName) that is currently enabled, across all guilds.
+	// Powers the in-memory enable index the runtime gate reads synchronously.
+	async getAllEnabledPluginRows() {
+		await this.ensureConnection();
+		const rows = await PluginConfig.find({ enabled: true }).select(
+			"guildId pluginName",
+		);
+		return rows.map((row) => ({ guildId: row.guildId, pluginName: row.pluginName }));
+	}
+
+	// 🔐 Guild role grants (dashboard RBAC)
+	async getGuildRoleGrants(guildId) {
+		await this.ensureConnection();
+		return GuildRoleGrant.find({ guildId }).sort({ roleId: 1 });
+	}
+
+	async setGuildRoleGrant(guildId, roleId, permissions, actorId = null) {
+		await this.ensureConnection();
+		return GuildRoleGrant.findOneAndUpdate(
+			{ guildId, roleId },
+			{ $set: { permissions, updatedBy: actorId } },
+			{ upsert: true, new: true },
+		);
+	}
+
+	async deleteGuildRoleGrant(guildId, roleId) {
+		await this.ensureConnection();
+		return GuildRoleGrant.deleteOne({ guildId, roleId });
 	}
 
 	// 🎫 Ticket Methods

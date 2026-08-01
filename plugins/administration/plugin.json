@@ -1,11 +1,24 @@
 {
   "name": "administration",
-  "version": "1.0.0",
-  "description": "ADB Administration Dashboard - Web-based admin panel for bot configuration",
+  "displayName": "Administration Dashboard",
+  "version": "2.0.0",
+  "description": "ADB Administration Dashboard - Web-based admin panel, plugin settings host, and reverse-proxy target for plugin UIs",
   "author": "ADB Development Team",
   "main": "index.js",
   "requiresRestart": false,
-  "permissions": ["db.read", "db.write", "commands.register", "scheduler", "hooks"],
-  "port": 50000,
-  "configSchema": {}
+  "manifestVersion": 2,
+  "process": { "model": "persistent", "maxExecutionMs": 30000, "memoryMb": 256, "persistentReason": "Runs the always-on dashboard HTTP server and plugin-settings API" },
+  "capabilities": {
+    "system": ["raw-client"],
+    "storage": ["own-collection", "read-profiles", "write-profiles"]
+  },
+  "permissions": {
+    "storage": ["own-collection", "read-profiles", "write-profiles"],
+    "system": ["raw-client"],
+    "network": { "outbound": [] },
+    "filesystem": { "read": [], "write": [] },
+    "childProcess": false,
+    "nativeAddons": false
+  },
+  "discordPermissions": []
 }

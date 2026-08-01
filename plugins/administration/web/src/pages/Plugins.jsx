@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useOutletContext } from "react-router-dom";
 import { useApiFetch } from "../hooks/useApi";
-import { Badge, StatusDot, EmptyState, SlideOver, Button, Input } from "../components/UI";
+import { Badge, StatusDot, EmptyState, SlideOver, Button, Input, AlertTriangle } from "../components/UI";
 import { colors, fonts, fontSize, radius } from "../theme";
 import {
   Package, Search, Download, Trash2,
@@ -36,6 +36,7 @@ export function Plugins() {
   const guild = guildData?.guild;
   const [tab, setTab] = useState("Browse");
   const [plugins, setPlugins] = useState([]);
+  const [gateByName, setGateByName] = useState({}); // name -> { gateable, enabledForGuild }
   const [market, setMarket] = useState([]);
   const [categories, setCategories] = useState([]);
   const [query, setQuery] = useState("");
@@ -50,21 +51,35 @@ export function Plugins() {
   const [brochureLoading, setBrochureLoading] = useState(false);
   const [permissions, setPermissions] = useState({ integer: "0", byPlugin: [] });
   const [restarting, setRestarting] = useState(false);
+  const [isOwner, setIsOwner] = useState(false);
+  const [updatingAll, setUpdatingAll] = useState(false);
   const [deployLog, setDeployLog] = useState([]);
   const [confirmDialog, setConfirmDialog] = useState(null); // { message, onConfirm }
   const [copied, setCopied] = useState(false);
+  const [showPermsDialog, setShowPermsDialog] = useState(false);
+  const [reviewingPlugin, setReviewingPlugin] = useState(null); // { name, pkg, manifest details }
+  const [riskCard, setRiskCard] = useState(null);
+  const [showMorePerms, setShowMorePerms] = useState(false);
 
   const { request } = useApiFetch();
 
   const loadAll = useCallback(async (force = false) => {
     setLoading(true);
     try {
-      const [pluginsRes, catRes] = await Promise.all([
+      const [pluginsRes, catRes, gateRes] = await Promise.all([
         request("/api/plugins"),
         request("/api/plugins/categories").catch(() => ({ categories: [] })),
+        guild?.id
+          ? request(`/api/guild/${guild.id}/plugins`).catch(() => ({ plugins: [] }))
+          : Promise.resolve({ plugins: [] }),
       ]);
       setPlugins(pluginsRes?.plugins || []);
       setCategories(catRes?.categories || []);
+      const gates = {};
+      for (const p of gateRes?.plugins || []) {
+        gates[p.name] = { gateable: p.gateable, enabledForGuild: p.enabledForGuild };
+      }
+      setGateByName(gates);
       const marketRes = await request(`/api/plugins/marketplace${force ? "?refresh=1" : ""}`).catch(() => ({ plugins: [] }));
       setMarket(marketRes?.plugins || []);
       const permsRes = await request("/api/plugins/permissions").catch(() => ({ integer: "0", byPlugin: [] }));
@@ -74,9 +89,60 @@ export function Plugins() {
     } finally {
       setLoading(false);
     }
-  }, [request]);
+  }, [request, guild?.id]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  useEffect(() => {
+    request("/api/me").then((d) => setIsOwner(d?.isOwner || false)).catch(() => {});
+  }, [request]);
+
+  async function handleToggleEnabled(pluginName, enabled) {
+    if (!guild?.id) return;
+    setOperating(pluginName);
+    // optimistic
+    setGateByName((prev) => ({ ...prev, [pluginName]: { ...prev[pluginName], enabledForGuild: enabled } }));
+    try {
+      await request(`/api/guild/${guild.id}/plugins/${pluginName}/enabled`, {
+        method: "PUT",
+        body: JSON.stringify({ enabled }),
+      });
+    } catch (err) {
+      console.error("Toggle failed:", err);
+      setGateByName((prev) => ({ ...prev, [pluginName]: { ...prev[pluginName], enabledForGuild: !enabled } }));
+    } finally {
+      setOperating(null);
+    }
+  }
+
+  /* ── Permission dialog ──────────────────────────────────────────── */
+  async function fetchRiskCard(pkgName) {
+    try {
+      const slug = pkgName.replace(/^adb-plugin-/, "");
+      const res = await request(`/api/plugins/registry/${slug}/risk-card`);
+      setRiskCard(res);
+      setShowPermsDialog(true);
+    } catch (err) {
+      console.error("Failed to fetch risk card:", err);
+      setOperating(null);
+      alert("Could not load permission information for this plugin.");
+    }
+  }
+
+  function closeModal() {
+    setShowPermsDialog(false);
+    setReviewingPlugin(null);
+    setRiskCard(null);
+    setShowMorePerms(false);
+    setOperating(null);
+  }
+
+  /* ── Install with perm check ───────────────────────────────────── */
+  async function handleInstallWithPerm(pkgName) {
+    setOperating(pkgName);
+    setReviewingPlugin({ npmPackage: pkgName, name: pkgName.replace(/^adb-plugin-/, "") });
+    await fetchRiskCard(pkgName);
+  }
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -142,6 +208,23 @@ export function Plugins() {
       }
     } finally {
       setOperating(null);
+    }
+  }
+
+  async function handleUpdateAll() {
+    setUpdatingAll(true);
+    try {
+      const res = await request("/api/plugins/update-all", { method: "POST" });
+      const failed = (res?.updated || []).filter((r) => !r.ok);
+      if (failed.length) {
+        alert(`Some plugins failed to update:\n${failed.map((r) => `${r.name}: ${r.error || "unknown error"}`).join("\n")}`);
+      }
+      await loadAll();
+    } catch (err) {
+      console.error("Update all failed:", err);
+      alert(`Update all failed: ${err.message}`);
+    } finally {
+      setUpdatingAll(false);
     }
   }
 
@@ -229,6 +312,7 @@ export function Plugins() {
     marketByPkg.set(m.name, m);
   }
   const updateInfo = (p) => marketByPkg.get(p.npmPackage) || marketByPkg.get(p.name) || null;
+  const updatableCount = plugins.filter((p) => !p.core && updateInfo(p)?.updateAvailable).length;
   const corePlugins = plugins.filter((p) => p.core);
   const userPlugins = plugins.filter((p) => !p.core);
   const availableMarket = market.filter((p) => !installedNames.has(p.npmPackage) && !installedNames.has(p.name));
@@ -261,6 +345,12 @@ export function Plugins() {
             <ArrowUpRight size={14} />
             Submit Plugin
           </button>
+          {isOwner && updatableCount > 0 && (
+            <button style={s.primaryBtn} onClick={handleUpdateAll} disabled={updatingAll} title="Update every installed plugin that has a newer published version">
+              <ArrowUpCircle size={14} style={updatingAll ? { animation: "spin 0.7s linear infinite" } : undefined} />
+              {updatingAll ? "Updating…" : `Update All (${updatableCount})`}
+            </button>
+          )}
           <button style={s.primaryBtn} onClick={() => setShowInstallModal(true)}>
             <Download size={14} />
             Install Custom
@@ -362,6 +452,8 @@ export function Plugins() {
                   key={p.name}
                   plugin={{ ...p, _local: true }}
                   update={updateInfo(p)}
+                  gate={gateByName[p.name]}
+                  onToggleEnabled={(en) => handleToggleEnabled(p.name, en)}
                   onDetail={() => openDetail({ ...p, _local: true })}
                   onUninstall={() => handleUninstall(p.npmPackage || p.name)}
                   onUpdate={() => handleUpdate(p.npmPackage || p.name)}
@@ -389,7 +481,7 @@ export function Plugins() {
                   plugin={p}
                   marketplace
                   onDetail={() => openDetail(p)}
-                  onInstall={() => handleInstall(p.npmPackage || p.name)}
+                  onInstall={() => handleInstallWithPerm(p.npmPackage || p.name)}
                   operating={operating === p.name || operating === (p.npmPackage || p.name)}
                 />
               ))}
@@ -480,6 +572,88 @@ export function Plugins() {
         </div>
       )}
 
+      {/* Permission Disclosure Modal */}
+      {showPermsDialog && riskCard && reviewingPlugin && (
+        <div style={s.permOverlay} onClick={closeModal}>
+          <div style={s.permModal} onClick={(e) => e.stopPropagation()}>
+            <div style={s.permModalHeader}>
+              <AlertTriangle size={24} color={colors.danger} style={{ flexShrink: 0 }} />
+              <div style={{ flex: 1, marginLeft: 12 }}>
+                <h2 style={s.permModalTitle}>What this plugin can do</h2>
+                <p style={s.permModalSubtitle}>
+                  {reviewingPlugin.npmPackage} needs these permissions to function
+                </p>
+              </div>
+              <button style={s.permModalClose} onClick={closeModal}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={s.permContent}>
+              {/* Highest severity first */}
+              <div style={s.permSection}>
+                <h4 style={s.permSectionTitle}>What it CAN do</h4>
+                <ul style={s.permList}>
+                  {riskCard.granted.slice(0, 3).map((item, i) => (
+                    <li key={i} style={s.permListItem}>
+                      <span style={s.permListItemText}>✓</span>
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+                {riskCard.granted.length > 3 && (
+                  <button
+                    style={s.showMoreBtn}
+                    onClick={() => setShowMorePerms(!showMorePerms)}
+                  >
+                    {showMorePerms ? "Show less" : `Show ${riskCard.granted.length - 3} more`}
+                  </button>
+                )}
+              </div>
+
+              {!showMorePerms && riskCard.granted.length > 3 && (
+                <div style={s.permDivider} />
+              )}
+
+              {/* Withheld */}
+              <div style={s.permSection}>
+                <h4 style={s.permSectionTitle}>What it explicitly can NOT do</h4>
+                <ul style={s.permList}>
+                  {riskCard.withheld.slice(0, 3).map((item, i) => (
+                    <li key={i} style={s.permListItem}>
+                      <span style={s.permListItemText}>×</span>
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+                {riskCard.withheld.length > 3 && (
+                  <button
+                    style={s.showMoreBtn}
+                    onClick={() => setShowMorePerms(!showMorePerms)}
+                  >
+                    {showMorePerms ? "Show less" : `Show ${riskCard.withheld.length - 3} more`}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div style={s.permFooter}>
+              <button style={s.permCancelBtn} onClick={closeModal}>Close</button>
+              <button
+                style={s.permInstallBtn}
+                onClick={async () => {
+                  const pkg = reviewingPlugin.npmPackage;
+                  closeModal();
+                  await handleInstall(pkg);
+                }}
+              >
+                Install Plugin
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Deploy / restart log drawer */}
       {restarting && (
         <div style={s.deployDrawer}>
@@ -497,7 +671,7 @@ export function Plugins() {
 }
 
 /* ── PLUGIN CARD ─────────────────────────────────────────────── */
-function PluginCard({ plugin, marketplace, update, onDetail, onInstall, onUninstall, onUpdate, onReload, operating }) {
+function PluginCard({ plugin, marketplace, update, gate, onToggleEnabled, onDetail, onInstall, onUninstall, onUpdate, onReload, operating }) {
   const catMeta = CATEGORY_META[plugin.category] || null;
   const hasError = !!plugin.lastError;
   const isLoaded = plugin.enabled && !hasError;
@@ -563,6 +737,20 @@ function PluginCard({ plugin, marketplace, update, onDetail, onInstall, onUninst
           </button>
         ) : (
           <div style={s.installedCtrl}>
+            {gate?.gateable && (
+              <button
+                onClick={() => onToggleEnabled(!gate.enabledForGuild)}
+                disabled={!!operating}
+                title={gate.enabledForGuild ? "Enabled for this server — click to disable" : "Disabled for this server — click to enable"}
+                style={{
+                  ...s.toggle,
+                  ...(gate.enabledForGuild ? s.toggleOn : {}),
+                  ...(operating ? s.btnBusy : {}),
+                }}
+              >
+                <span style={{ ...s.toggleKnob, ...(gate.enabledForGuild ? s.toggleKnobOn : {}) }} />
+              </button>
+            )}
             {canUpdate && (
               <button style={s.updateBtn} onClick={onUpdate} disabled={!!operating} title={`Update to ${update.version}`}>
                 <ArrowUpCircle size={14} />
@@ -818,11 +1006,6 @@ const s = {
     borderRadius: radius.pill, background: colors.surface2, color: colors.ink2,
     border: `1px solid ${colors.hairline}`,
   },
-  permSection: { marginBottom: 16 },
-  permSectionTitle: {
-    fontFamily: fonts.body, fontSize: 11, fontWeight: 600, letterSpacing: "0.04em",
-    textTransform: "uppercase", color: colors.inkMuted, marginBottom: 2,
-  },
 
   /* update button */
   updateBtn: {
@@ -1011,7 +1194,19 @@ const s = {
     cursor: "pointer",
   },
   btnBusy: { opacity: 0.6, cursor: "not-allowed" },
-  installedCtrl: { display: "flex", gap: 6, marginLeft: "auto" },
+  installedCtrl: { display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" },
+  toggle: {
+    position: "relative", width: 38, height: 22, borderRadius: 999,
+    border: `1.5px solid ${colors.hairlineStrong}`, background: colors.surface2,
+    cursor: "pointer", padding: 0, flexShrink: 0, marginRight: 2,
+    transition: "background .15s, border-color .15s",
+  },
+  toggleOn: { background: colors.accent, borderColor: colors.accent },
+  toggleKnob: {
+    position: "absolute", top: 2, left: 2, width: 16, height: 16, borderRadius: "50%",
+    background: colors.cream, transition: "left .15s",
+  },
+  toggleKnobOn: { left: 18 },
   iconCtrlBtn: {
     display: "inline-flex", alignItems: "center", justifyContent: "center",
     width: 32, height: 32, borderRadius: radius.control,
@@ -1122,5 +1317,62 @@ const s = {
   },
   modalActions: {
     display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18,
+  },
+
+  /* permission modal */
+  permOverlay: {
+    position: "fixed", inset: 0, background: "rgba(30,26,20,0.6)",
+    display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, backdropFilter: "blur(3px)",
+  },
+  permModal: {
+    background: colors.cream, border: `1.5px solid ${colors.danger}`,
+    borderRadius: `${radius.card}px`, width: "100%", maxWidth: "520px",
+    maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
+  },
+  permModalHeader: {
+    display: "flex", alignItems: "flex-start", gap: 12, padding: "16px 20px", borderBottom: `1.5px solid ${colors.hairline}`,
+    flexShrink: 0,
+  },
+  permModalTitle: {
+    fontFamily: fonts.display, fontSize: `${fontSize.heading}px`, fontWeight: 400, color: colors.ink, margin: "0 0 4px 0",
+  },
+  permModalSubtitle: {
+    fontFamily: fonts.body, fontSize: `${fontSize.meta}px`, color: colors.inkMuted, margin: 0,
+  },
+  permModalClose: {
+    background: "none", border: "none", cursor: "pointer", color: colors.inkMuted, padding: 4, display: "flex", alignItems: "center", borderRadius: radius.control,
+  },
+  permContent: {
+    flex: 1, overflowY: "auto", padding: "16px 20px",
+  },
+  permSection: { marginBottom: 16 },
+  permSectionTitle: {
+    fontFamily: fonts.body, fontSize: 11, fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", color: colors.dangerText, marginBottom: 10,
+  },
+  permList: { listStyle: "none", margin: 0, padding: 0 },
+  permListItem: {
+    display: "flex", gap: 10, padding: "6px 0", borderBottom: `1px solid ${colors.hairlineStrong}`,
+    fontFamily: fonts.body, fontSize: 13, color: colors.ink, lineHeight: 1.6,
+  },
+  permListItemText: {
+    color: colors.danger, flexShrink: 0, fontWeight: 700, fontSize: 14,
+  },
+  showMoreBtn: {
+    background: "transparent", border: `1.5px solid ${colors.hairline}`, color: colors.inkMuted, padding: "6px 12px",
+    borderRadius: radius.pill, fontSize: 12, fontWeight: 500, cursor: "pointer", marginTop: 8, width: "100%",
+  },
+  permDivider: {
+    borderTop: `1px dashed ${colors.hairlineStrong}`, margin: "12px 0",
+  },
+  permFooter: {
+    display: "flex", justifyContent: "flex-end", gap: 10, padding: "12px 20px", borderTop: `1.5px solid ${colors.hairline}`,
+  },
+  permCancelBtn: {
+    background: "transparent", border: `1.5px solid ${colors.hairline}`, color: colors.ink, padding: "7px 16px",
+    borderRadius: radius.pill, fontSize: 13, fontWeight: 500, cursor: "pointer",
+  },
+  permInstallBtn: {
+    background: colors.danger, border: `1.5px solid ${colors.danger}`, color: colors.creamOnAccent, padding: "7px 18px",
+    borderRadius: radius.pill, fontSize: 13, fontWeight: 500, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6,
   },
 };

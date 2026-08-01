@@ -448,6 +448,49 @@ const pluginConfigSchema = new mongoose.Schema(
 			type: mongoose.Schema.Types.Mixed,
 			default: {},
 		},
+		// Per-guild opt-in. A plugin installed by the host owner stays dormant
+		// for a guild until that guild's admin enables it.
+		enabled: {
+			type: Boolean,
+			default: false,
+		},
+		enabledBy: {
+			type: String,
+			default: null,
+		},
+		enabledAt: {
+			type: Date,
+			default: null,
+		},
+	},
+	{
+		timestamps: true,
+	},
+);
+
+// 🔐 Per-guild dashboard permission grants for Discord roles.
+// Guild admins map their own roles to dashboard permissions; members inherit
+// the union of the grants matching their roles.
+const guildRoleGrantSchema = new mongoose.Schema(
+	{
+		guildId: {
+			type: String,
+			required: true,
+			index: true,
+		},
+		roleId: {
+			type: String,
+			required: true,
+		},
+		permissions: [
+			{
+				type: String,
+			},
+		],
+		updatedBy: {
+			type: String,
+			default: null,
+		},
 	},
 	{
 		timestamps: true,
@@ -570,6 +613,7 @@ birthdaySchema.index({ userId: 1, guildId: 1 }, { unique: true });
 birthdaySchema.index({ guildId: 1, birthdayDate: 1 });
 shopItemSchema.index({ guildId: 1, name: 1 }, { unique: true });
 pluginConfigSchema.index({ guildId: 1, pluginName: 1 }, { unique: true });
+guildRoleGrantSchema.index({ guildId: 1, roleId: 1 }, { unique: true });
 // Note: serverConfig, leaderboard, truthOrDareConfig, and antiRaid schemas
 // already have unique: true on guildId, so no additional index needed
 
@@ -588,5 +632,6 @@ module.exports = {
 		truthOrDareConfigSchema,
 	),
 	PluginConfig: mongoose.model("PluginConfig", pluginConfigSchema),
+	GuildRoleGrant: mongoose.model("GuildRoleGrant", guildRoleGrantSchema),
 	AntiRaid: mongoose.model("AntiRaid", antiRaidSchema),
 };

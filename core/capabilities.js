@@ -61,6 +61,13 @@ const CAPABILITY_SCHEMA = {
 			"env = read the bot's environment variables; bot-token = read the Discord login token; " +
 			"raw-client = run UN-ISOLATED in the main process with full client/host access.",
 	},
+	web: {
+		valid: ["host-ui"],
+		description:
+			"Host a plugin-owned web UI on a dedicated port. Watchdog reverse-proxies " +
+			"/plugin-ui/<name>/* to that port. Owner must approve at install. " +
+			"Declare the port in plugin.json webUi.port (allowed range: 3100–4999).",
+	},
 };
 
 // ── Validation ────────────────────────────────────────────────────────────
