@@ -4,8 +4,32 @@ import { Routes, Route, Navigate, useNavigate, useParams } from 'react-router-do
 import { useAuth } from './hooks/useAuth';
 import { getGuildIcon } from './utils/helpers';
 import { colors, fonts, radius, fontSize } from './theme';
-import { Server, ChevronRight, ChevronLeft, LogOut, User as UserIcon } from 'lucide-react';
+import { Server, ChevronRight, ChevronLeft, LogOut, User as UserIcon, Eye } from 'lucide-react';
 import MemberPluginPage from './pages/MemberPluginPage';
+
+// An admin lands here via the "View as member" button (App.jsx serves this
+// portal under /me). The ?preview=1 flag is kept in sessionStorage so the
+// "back to admin" banner survives in-portal navigation, and is the only thing
+// that distinguishes an admin preview from a real member visit — the pages
+// themselves are resolved live server-side, so the preview is truthful.
+function isPreview() {
+  try {
+    if (new URLSearchParams(window.location.search).get('preview') === '1') {
+      sessionStorage.setItem('adb-admin-preview', '1');
+      return true;
+    }
+    return sessionStorage.getItem('adb-admin-preview') === '1';
+  } catch {
+    return new URLSearchParams(window.location.search).get('preview') === '1';
+  }
+}
+
+function exitPreview() {
+  try {
+    sessionStorage.removeItem('adb-admin-preview');
+  } catch { /* ignore */ }
+  window.location.assign('/dashboard');
+}
 
 // ── Member portal ───────────────────────────────────────────────────────────
 // A self-service surface, separate from the admin dashboard. A member logs in,
@@ -17,8 +41,20 @@ import MemberPluginPage from './pages/MemberPluginPage';
 function Shell({ children }) {
   const { user, logout } = useAuth();
   const profile = user?.user || user || {};
+  const preview = isPreview();
   return (
     <div style={s.shell}>
+      {preview && (
+        <div style={s.previewBar}>
+          <Eye size={15} />
+          <span style={s.previewText}>
+            Viewing as a member — this is what regular members see.
+          </span>
+          <button style={s.previewExit} onClick={exitPreview}>
+            Exit preview
+          </button>
+        </div>
+      )}
       <header style={s.topbar}>
         <div style={s.brand}>
           <UserIcon size={18} color={colors.accent} />
@@ -233,6 +269,19 @@ export default function MemberApp() {
 
 const s = {
   shell: { minHeight: '100vh', display: 'flex', flexDirection: 'column', background: colors.cream },
+  previewBar: {
+    display: 'flex', alignItems: 'center', gap: '10px',
+    padding: '8px 24px', background: colors.accentTint, color: colors.accentOnTint,
+    fontFamily: fonts.body, fontSize: `${fontSize.meta}px`,
+    borderBottom: `1px solid ${colors.hairlineStrong}`,
+  },
+  previewText: { flex: 1 },
+  previewExit: {
+    padding: '5px 12px', borderRadius: radius.sm || '8px',
+    border: `1px solid ${colors.accent}`, background: 'transparent',
+    color: colors.accentOnTint, cursor: 'pointer',
+    fontFamily: fonts.body, fontSize: `${fontSize.meta}px`, fontWeight: 500,
+  },
   topbar: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
     padding: '14px 24px', borderBottom: `1px solid ${colors.hairlineStrong}`,

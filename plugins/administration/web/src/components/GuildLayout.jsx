@@ -88,7 +88,7 @@ export function GuildLayout() {
 
   return (
     <div style={styles.layout}>
-      <Header onOpenPalette={() => setPaletteOpen(true)} />
+      <Header onOpenPalette={() => setPaletteOpen(true)} guild={guildData?.guild} plugins={plugins} />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} guild={guildData?.guild} />
       <div style={styles.container}>
         <Sidebar guild={guildData?.guild} plugins={plugins} access={guildData?.access} />

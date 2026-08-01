@@ -1,15 +1,29 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { getAvatarUrl } from '../utils/helpers';
-import { LogOut, Search } from 'lucide-react';
+import { LogOut, Search, Eye, LayoutGrid, ChevronDown, ExternalLink } from 'lucide-react';
 import { colors, fonts, fontSize, radius } from '../theme';
 import { ThemeToggle } from './ThemeToggle';
 
-export function Header({ onOpenPalette }) {
+// Cross-surface hop: the admin dashboard runs under the /dashboard router
+// basename, the member portal under /me (see App.jsx). Router navigation would
+// stay inside /dashboard, so we do a real navigation to switch surfaces. The
+// ?preview=1 flag tells the member portal an admin is previewing, so it can
+// offer a way back (see MemberApp).
+function viewAsMember() {
+  window.location.assign('/me?preview=1');
+}
+
+export function Header({ onOpenPalette, guild = null, plugins = [] }) {
   const { user, logout } = useAuth();
+  const [menuOpen, setMenuOpen] = useState(false);
   if (!user) return null;
 
   const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform);
+
+  // Plugin dashboards a member could reach for this guild: enabled here and
+  // shipping a web UI. Mirrors the Sidebar's plugin-UI links.
+  const pluginDashboards = plugins.filter((p) => p.enabledForGuild && p.webUi);
 
   return (
     <header style={styles.header}>
@@ -31,6 +45,51 @@ export function Header({ onOpenPalette }) {
       </button>
 
       <div style={styles.right}>
+        {guild && (
+          <>
+            <button
+              onClick={viewAsMember}
+              style={styles.viewAsBtn}
+              title="Preview the dashboard as a regular member sees it"
+            >
+              <Eye size={14} />
+              <span>View as member</span>
+            </button>
+
+            <div style={styles.menuWrap} onMouseLeave={() => setMenuOpen(false)}>
+              <button
+                onClick={() => setMenuOpen((o) => !o)}
+                style={styles.viewAsBtn}
+                title="Open a member or plugin dashboard"
+              >
+                <LayoutGrid size={14} />
+                <span>Dashboards</span>
+                <ChevronDown size={13} />
+              </button>
+              {menuOpen && (
+                <div style={styles.menu}>
+                  <button style={styles.menuItem} onClick={viewAsMember}>
+                    <Eye size={14} />
+                    <span>Member dashboard</span>
+                  </button>
+                  {pluginDashboards.length > 0 && <div style={styles.menuDivider} />}
+                  {pluginDashboards.map((p) => (
+                    <a
+                      key={p.name}
+                      href={`/plugin-ui/${p.name}/`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={styles.menuItem}
+                    >
+                      <ExternalLink size={13} />
+                      <span style={{ flex: 1 }}>{p.displayName || p.name}</span>
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
         <ThemeToggle />
         <img src={getAvatarUrl(user.user)} alt="" style={styles.avatar} />
         <span style={styles.username}>{user.user.global_name || user.user.username}</span>
@@ -110,6 +169,62 @@ const styles = {
     alignItems: 'center',
     gap: '10px',
     flexShrink: 0,
+  },
+  viewAsBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '7px 12px',
+    borderRadius: `${radius.pill}px`,
+    border: `1.5px solid ${colors.hairlineStrong}`,
+    background: 'transparent',
+    color: colors.ink2,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
+    fontWeight: 500,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  },
+  menuWrap: {
+    position: 'relative',
+    display: 'inline-flex',
+  },
+  menu: {
+    position: 'absolute',
+    top: 'calc(100% + 6px)',
+    right: 0,
+    minWidth: '220px',
+    background: colors.surface1,
+    border: `1.5px solid ${colors.hairline}`,
+    borderRadius: `${radius.control}px`,
+    boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+    padding: '6px',
+    zIndex: 100,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+  },
+  menuItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '8px 10px',
+    borderRadius: `${radius.control}px`,
+    border: 'none',
+    background: 'transparent',
+    color: colors.ink2,
+    fontFamily: fonts.body,
+    fontSize: `${fontSize.caption}px`,
+    fontWeight: 400,
+    cursor: 'pointer',
+    textDecoration: 'none',
+    textAlign: 'left',
+    width: '100%',
+  },
+  menuDivider: {
+    height: '1px',
+    background: colors.hairline,
+    margin: '4px 2px',
   },
   avatar: {
     width: '28px',
