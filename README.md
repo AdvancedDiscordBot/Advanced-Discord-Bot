@@ -280,7 +280,10 @@ reference, and [CREATE-PLUGIN.md](./CREATE-PLUGIN.md) to build your own.
    DISCORD_TOKEN=your_discord_bot_token_here
    CLIENT_ID=your_bot_client_id_here
    GUILD_ID=your_test_guild_id_here
-   MONGODB_URI=mongodb://advance:bot@mongo:27017/discord-bot?authSource=admin&retryWrites=true&w=majority
+   # Docker: "mongo" is the compose service name; creds must match MONGO_INITDB_ROOT_* below
+   MONGO_INITDB_ROOT_USERNAME=adb
+   MONGO_INITDB_ROOT_PASSWORD=pick_a_long_random_password
+   MONGODB_URI=mongodb://adb:pick_a_long_random_password@mongo:27017/discord-bot?authSource=admin
    GEMINI_API_KEY=your_gemini_api_key_here
    SESSION_SECRET=replace_with_a_long_random_secret
    ```

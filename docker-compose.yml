@@ -6,8 +6,9 @@ services:
     container_name: adb-prod-mongo
     restart: unless-stopped
     environment:
-      MONGO_INITDB_ROOT_USERNAME: advance
-      MONGO_INITDB_ROOT_PASSWORD: bot
+      # Read from .env — keep in sync with MONGODB_URI
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
     ports:
       - "27018:27017"
     volumes:

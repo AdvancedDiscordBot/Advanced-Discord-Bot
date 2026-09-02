@@ -123,8 +123,10 @@ else
     TRIAL_MODE="false"
 fi
 
-# Generate session secret
+# Generate session secret and Mongo password
 SESSION_SECRET=$(openssl rand -hex 32 2>/dev/null || tr -dc 'a-zA-Z0-9' < /dev/urandom | fold -w 32 | head -n 1)
+MONGO_USER=adb
+MONGO_PASS=$(openssl rand -hex 16 2>/dev/null || tr -dc 'a-zA-Z0-9' < /dev/urandom | fold -w 32 | head -n 1)
 
 # Write .env file
 echo -e "\n${BLUE}Generating .env file...${NC}"
@@ -142,7 +144,10 @@ GUILD_ID=
 # ==============================================
 # 🗄️ Database Configuration (Configured for Docker Mongo)
 # ==============================================
-MONGODB_URI=mongodb://advance:bot@mongo:27017/discord-bot?authSource=admin
+# mongo = docker-compose service name; creds must match MONGO_INITDB_* above
+MONGO_INITDB_ROOT_USERNAME=${MONGO_USER}
+MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASS}
+MONGODB_URI=mongodb://${MONGO_USER}:${MONGO_PASS}@mongo:27017/discord-bot?authSource=admin
 
 # ==============================================
 # 🤖 AI Configuration
