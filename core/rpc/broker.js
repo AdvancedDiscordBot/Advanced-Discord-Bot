@@ -502,12 +502,18 @@ class CapabilityBroker extends EventEmitter {
 			// ── Plugin-Scoped Model CRUD ───────────────────────────────
 			case "modelFind":
 				return this._serialize(
-					await this._getModel(pluginId, p.modelName).find(p.query || {}),
+					await this._applyQueryOptions(
+						this._getModel(pluginId, p.modelName).find(p.query || {}),
+						p.options,
+					),
 				);
 
 			case "modelFindOne":
 				return this._serialize(
-					await this._getModel(pluginId, p.modelName).findOne(p.query || {}),
+					await this._applyQueryOptions(
+						this._getModel(pluginId, p.modelName).findOne(p.query || {}),
+						p.options,
+					),
 				);
 
 			case "modelCreate":
@@ -520,10 +526,29 @@ class CapabilityBroker extends EventEmitter {
 					await this._getModel(pluginId, p.modelName).updateOne(p.query || {}, p.update || {}),
 				);
 
+			case "modelUpdateMany": {
+				const res = await this._getModel(pluginId, p.modelName).updateMany(p.query || {}, p.update || {});
+				return this._serialize({ acknowledged: res.acknowledged, modifiedCount: res.modifiedCount, matchedCount: res.matchedCount });
+			}
+
+			case "modelFindOneAndUpdate":
+				return this._serialize(
+					await this._getModel(pluginId, p.modelName).findOneAndUpdate(
+						p.query || {},
+						p.update || {},
+						p.options || {},
+					),
+				);
+
 			case "modelDeleteOne":
 				return this._serialize(
 					await this._getModel(pluginId, p.modelName).deleteOne(p.query || {}),
 				);
+
+			case "modelDeleteMany": {
+				const res = await this._getModel(pluginId, p.modelName).deleteMany(p.query || {});
+				return this._serialize({ acknowledged: res.acknowledged, deletedCount: res.deletedCount });
+			}
 
 			case "modelCountDocuments":
 				return this._serialize(
@@ -880,6 +905,18 @@ class CapabilityBroker extends EventEmitter {
 		const model = this._modelRegistry.get(key);
 		if (!model) throw new Error(`Model '${modelName}' not registered for plugin '${pluginId}'`);
 		return model;
+	}
+
+	/**
+	 * Apply chained query options (.sort/.limit/.skip/.lean equivalents) sent
+	 * from a worker's model proxy, then execute.
+	 * @private
+	 */
+	async _applyQueryOptions(query, options = {}) {
+		if (options.sort) query = query.sort(options.sort);
+		if (options.limit != null) query = query.limit(options.limit);
+		if (options.skip != null) query = query.skip(options.skip);
+		return options.lean ? query.lean() : query;
 	}
 }
 

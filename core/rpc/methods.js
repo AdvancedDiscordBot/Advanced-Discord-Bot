@@ -231,10 +231,25 @@ const RPC_METHODS = {
 		handler: "modelUpdateOne",
 		description: "Update one document in a plugin-scoped model",
 	},
+	"model.updateMany": {
+		capability: "storage:own-collection",
+		handler: "modelUpdateMany",
+		description: "Update many documents in a plugin-scoped model",
+	},
+	"model.findOneAndUpdate": {
+		capability: "storage:own-collection",
+		handler: "modelFindOneAndUpdate",
+		description: "Find one document and update it in a plugin-scoped model",
+	},
 	"model.deleteOne": {
 		capability: "storage:own-collection",
 		handler: "modelDeleteOne",
 		description: "Delete one document in a plugin-scoped model",
+	},
+	"model.deleteMany": {
+		capability: "storage:own-collection",
+		handler: "modelDeleteMany",
+		description: "Delete many documents in a plugin-scoped model",
 	},
 	"model.countDocuments": {
 		capability: "storage:own-collection",

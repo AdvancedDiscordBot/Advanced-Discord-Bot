@@ -152,42 +152,69 @@ function createShimContext(rpc, grantedEnv = {}) {
 
 	// Model definition: registers schema in Core, returns a proxy that routes CRUD through RPC
 	const { serializeSchema } = require("./schema-serialize");
+	// modelName -> Promise that resolves once Core has registered the model.
+	// Without this guard, a query fired immediately after defineModel can
+	// reach the broker before the registration RPC does ("Model not
+	// registered" crash at plugin startup).
+	const modelReady = new Map();
 	const defineModel = (modelName, schema) => {
 		// A compiled mongoose Schema can't cross the IPC boundary (its field
 		// types are the String/Number/Date constructors, which structured-clone
 		// rejects). Flatten it to a plain descriptor first; Core rehydrates it.
+		let ready;
 		try {
 			const descriptor = serializeSchema(schema);
-			rpc.call("plugin.defineModel", { modelName, schema: descriptor }).catch((err) => {
-				console.warn(`[plugin:${pluginId}] defineModel ${modelName} failed:`, err.message);
-			});
+			ready = rpc.call("plugin.defineModel", { modelName, schema: descriptor });
 		} catch (err) {
 			console.warn(`[plugin:${pluginId}] Could not serialize model ${modelName}:`, err.message);
+			ready = Promise.reject(err);
 		}
+		modelReady.set(modelName, ready);
+
+		const call = (method, params) =>
+			(modelReady.get(modelName) || Promise.resolve()).then(() =>
+				rpc.call(method, params),
+			);
+
+		// Chainable query for find/findOne — plugins use the mongoose query
+		// API (await Model.find(q).sort({x:1}).limit(10).lean()), so a bare
+		// Promise return breaks .limit()/.sort() calls.
+		const makeQuery = (method, base) => {
+			const opts = {};
+			const exec = () => call(method, { ...base, options: opts });
+			const query = {
+				limit(n) { opts.limit = n; return query; },
+				sort(s) { opts.sort = s; return query; },
+				skip(n) { opts.skip = n; return query; },
+				lean() { opts.lean = true; return query; },
+				then: (onFulfilled, onRejected) => exec().then(onFulfilled, onRejected),
+				catch: (fn) => exec().catch(fn),
+				finally: (fn) => exec().finally(fn),
+			};
+			return query;
+		};
 
 		// Return a model proxy that routes all operations through RPC
 		return {
-			find: async (query = {}) => {
-				return rpc.call("model.find", { modelName, query });
-			},
-			findOne: async (query = {}) => {
-				return rpc.call("model.findOne", { modelName, query });
-			},
-			create: async (data) => {
-				return rpc.call("model.create", { modelName, data });
-			},
-			updateOne: async (query = {}, update = {}) => {
-				return rpc.call("model.updateOne", { modelName, query, update });
-			},
-			deleteOne: async (query = {}) => {
-				return rpc.call("model.deleteOne", { modelName, query });
-			},
-			countDocuments: async (query = {}) => {
-				return rpc.call("model.countDocuments", { modelName, query });
-			},
+			find: (query = {}) => makeQuery("model.find", { modelName, query }),
+			findOne: (query = {}) => makeQuery("model.findOne", { modelName, query }),
+			findById: (id) => makeQuery("model.findOne", { modelName, query: { _id: id } }),
+			create: (data) => call("model.create", { modelName, data }),
+			updateOne: (query = {}, update = {}) =>
+				call("model.updateOne", { modelName, query, update }),
+			updateMany: (query = {}, update = {}) =>
+				call("model.updateMany", { modelName, query, update }),
+			findOneAndUpdate: (query = {}, update = {}, options = {}) =>
+				call("model.findOneAndUpdate", { modelName, query, update, options }),
+			deleteOne: (query = {}) =>
+				call("model.deleteOne", { modelName, query }),
+			deleteMany: (query = {}) =>
+				call("model.deleteMany", { modelName, query }),
+			countDocuments: (query = {}) =>
+				call("model.countDocuments", { modelName, query }),
 			// Save a previously-fetched document (apply mutations + save in Core)
 			save: async (doc, changes, markModifiedField) => {
-				return rpc.call("model.save", { modelName, docId: doc._id, changes, markModifiedField });
+				return call("model.save", { modelName, docId: doc._id, changes, markModifiedField });
 			},
 		};
 	};

@@ -294,3 +294,72 @@ test("RpcClient: convenience methods build correct params", async () => {
 
 	client.close();
 });
+
+// ── Worker model proxy (createShimContext.defineModel) ───────────────────
+
+const { createShimContext } = require("../core/rpc/worker-bootstrap");
+const mongoose = require("mongoose");
+
+function makeMockRpc() {
+	const calls = [];
+	const delays = {}; // method -> ms delay before resolving
+	return {
+		calls,
+		on: () => () => {},
+		call: (method, params) => {
+			calls.push({ method, params, at: calls.length });
+			return new Promise((resolve) => {
+				setTimeout(() => resolve({ ok: true }), delays[method] || 0);
+			});
+		},
+		delay: (method, ms) => { delays[method] = ms; },
+	};
+}
+
+test("defineModel proxy supports chained mongoose query API", async () => {
+	const rpc = makeMockRpc();
+	const ctx = createShimContext(rpc, {});
+	const schema = new mongoose.Schema({ guildId: String, n: Number });
+	const Model = ctx.defineModel("thing", schema);
+
+	const q = Model.find({ guildId: "g1" }).sort({ n: 1 }).limit(10).skip(5).lean();
+	assert.ok(typeof q.limit === "function"); // still chainable
+	const result = await q;
+	assert.strictEqual(result.ok, true);
+
+	const findCall = rpc.calls.find((c) => c.method === "model.find");
+	assert.ok(findCall, "model.find RPC sent");
+	assert.deepStrictEqual(findCall.params.query, { guildId: "g1" });
+	assert.deepStrictEqual(findCall.params.options, { sort: { n: 1 }, limit: 10, skip: 5, lean: true });
+});
+
+test("model queries wait for defineModel registration RPC", async () => {
+	const rpc = makeMockRpc();
+	rpc.delay("plugin.defineModel", 50); // registration is slow
+	const ctx = createShimContext(rpc, {});
+	const Model = ctx.defineModel("slow", new mongoose.Schema({ a: String }));
+
+	await Model.findOne({ a: "x" });
+	// The registration RPC must have been sent (and settled) BEFORE the query
+	const regIdx = rpc.calls.findIndex((c) => c.method === "plugin.defineModel");
+	const findIdx = rpc.calls.findIndex((c) => c.method === "model.findOne");
+	assert.ok(regIdx !== -1 && findIdx !== -1);
+	assert.ok(regIdx < findIdx);
+});
+
+test("proxy exposes updateMany, findOneAndUpdate, deleteMany", async () => {
+	const rpc = makeMockRpc();
+	const ctx = createShimContext(rpc, {});
+	const Model = ctx.defineModel("m2", new mongoose.Schema({ a: String }));
+
+	await Model.updateMany({ a: "x" }, { $set: { a: "y" } });
+	await Model.findOneAndUpdate({ a: "x" }, { $inc: { n: 1 } }, { upsert: true });
+	await Model.deleteMany({ a: "gone" });
+
+	const upd = rpc.calls.find((c) => c.method === "model.updateMany");
+	assert.deepStrictEqual(upd.params, { modelName: "m2", query: { a: "x" }, update: { $set: { a: "y" } } });
+	const fou = rpc.calls.find((c) => c.method === "model.findOneAndUpdate");
+	assert.deepStrictEqual(fou.params, { modelName: "m2", query: { a: "x" }, update: { $inc: { n: 1 } }, options: { upsert: true } });
+	const del = rpc.calls.find((c) => c.method === "model.deleteMany");
+	assert.deepStrictEqual(del.params, { modelName: "m2", query: { a: "gone" } });
+});
