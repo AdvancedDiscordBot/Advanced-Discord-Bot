@@ -6,6 +6,7 @@ const {
 	generateFullRiskCard,
 	diffRiskCards,
 	UnmappedCapabilityError,
+	riskCardManifest,
 	RISK_TEMPLATES,
 } = require("../core/risk-disclosure");
 
@@ -167,4 +168,40 @@ test("generateFullRiskCard returns both granted and withheld", () => {
 	assert.ok(Array.isArray(card.withheld));
 	assert.ok(card.granted.includes("send data from your server to: api.openweathermap.org"));
 	assert.ok(card.withheld.includes("manage your server's members (ban, kick, or timeout)"));
+});
+
+// ── legacy flat permission lists ─────────────────────────────────────────
+
+test("riskCardManifest adapts flat permission lists to v2 facets", () => {
+	const statements = generateRiskCard(
+		riskCardManifest({
+			name: "adb-plugin-aegis",
+			permissions: ["db.read", "db.write", "commands.register", "manageWebhooks"],
+		}),
+	);
+	assert.ok(statements.includes("store and retrieve its own data (isolated from other plugins)"));
+	assert.ok(statements.includes("register slash commands in your server"));
+	assert.ok(statements.includes("create and use webhooks in your server"));
+	// db.read + db.write collapse into one statement, not two
+	assert.strictEqual(
+		statements.filter((s) => s.includes("own data")).length,
+		1,
+	);
+});
+
+test("riskCardManifest passes v2 manifests through untouched", () => {
+	const v2 = {
+		manifestVersion: 2,
+		process: { model: "pooled" },
+		permissions: { discord: ["BanMembers"] },
+	};
+	assert.strictEqual(riskCardManifest(v2), v2);
+	assert.strictEqual(riskCardManifest(null), null);
+});
+
+test("unknown flat permission keys fail loud via UnmappedCapabilityError", () => {
+	assert.throws(
+		() => generateRiskCard(riskCardManifest({ permissions: ["totally.made.up"] })),
+		UnmappedCapabilityError,
+	);
 });

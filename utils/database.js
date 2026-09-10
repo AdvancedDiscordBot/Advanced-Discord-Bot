@@ -106,11 +106,15 @@ class Database {
 	async getPluginConfig(guildId, pluginName) {
 		await this.ensureConnection();
 		try {
-			let config = await PluginConfig.findOne({ guildId, pluginName });
-			if (!config) {
-				config = await PluginConfig.create({ guildId, pluginName, data: {} });
-			}
-			return config;
+			// Atomic upsert — a plain findOne-then-create races when the
+			// dashboard and bot events request the same missing config
+			// concurrently; both miss, both insert, and the unique
+			// guildId+pluginName index rejects one with E11000.
+			return await PluginConfig.findOneAndUpdate(
+				{ guildId, pluginName },
+				{ $setOnInsert: { guildId, pluginName, data: {} } },
+				{ upsert: true, new: true },
+			);
 		} catch (error) {
 			console.error("Error getting plugin config:", error);
 			throw error;

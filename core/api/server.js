@@ -17,7 +17,7 @@ const {
 const adminPlugin = require("../adminPlugin");
 const { PermissionResolver, TIERS } = require("../permission-resolver");
 const { buildCatalog, catalogKeys, viewPermission, configurePermission } = require("../dashboard-permissions");
-const { generateFullRiskCard, diffRiskCards, UnmappedCapabilityError } = require("../risk-disclosure");
+const { generateFullRiskCard, diffRiskCards, UnmappedCapabilityError, riskCardManifest } = require("../risk-disclosure");
 
 const ADMIN_PERMISSION = 0x8;
 const MANAGE_GUILD_PERMISSION = 0x20;
@@ -83,7 +83,10 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 	permissions.watch(client);
 
 	const fastify = fastifyFactory({
-		logger: false,
+		// warn-level logging: fastify's own diagnostics (e.g. the
+		// "Reply was already sent, did you forget to return reply" warning
+		// that names the offending route) must reach docker logs.
+		logger: { level: "warn" },
 		trustProxy: true,
 	});
 
@@ -998,7 +1001,7 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 	// Risk card for an installed plugin — the plain-language "worst case" list
 	// generated deterministically from the plugin's own manifest.
 	fastify.get("/api/plugins/:name/risk-card", async (request, reply) => {
-		const manifest = pluginManager.getManifest(request.params.name);
+		const manifest = riskCardManifest(pluginManager.getManifest(request.params.name));
 		if (!manifest) {
 			return reply.code(404).send({ error: "Plugin not found" });
 		}
@@ -1022,7 +1025,9 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		if (!plugin) {
 			return reply.code(404).send({ error: "Plugin not found in registry" });
 		}
-		const manifest = plugin.manifest || plugin.pluginJson || null;
+		// Registry entries carry no separate manifest — their flat
+		// `permissions` list IS the manifest. riskCardManifest adapts it.
+		const manifest = riskCardManifest(plugin.manifest || plugin.pluginJson || plugin);
 		if (!manifest) {
 			return reply.code(422).send({
 				error: "Registry entry has no manifest; cannot generate a risk card.",

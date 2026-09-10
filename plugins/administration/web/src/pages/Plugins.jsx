@@ -110,6 +110,7 @@ export function Plugins() {
     } catch (err) {
       console.error("Toggle failed:", err);
       setGateByName((prev) => ({ ...prev, [pluginName]: { ...prev[pluginName], enabledForGuild: !enabled } }));
+      alert(`Failed to ${enabled ? "enable" : "disable"} plugin: ${err.message}`);
     } finally {
       setOperating(null);
     }
@@ -160,6 +161,7 @@ export function Plugins() {
       await loadAll();
     } catch (err) {
       console.error("Install failed:", err);
+      alert(`Install failed: ${err.message}`);
     } finally {
       setOperating(null);
     }
@@ -183,6 +185,7 @@ export function Plugins() {
         });
       } else {
         console.error("Uninstall failed:", err);
+        alert(`Uninstall failed: ${err.message}`);
       }
     } finally {
       setOperating(null);
@@ -205,6 +208,7 @@ export function Plugins() {
         });
       } else {
         console.error("Update failed:", err);
+        alert(`Update failed: ${err.message}`);
       }
     } finally {
       setOperating(null);

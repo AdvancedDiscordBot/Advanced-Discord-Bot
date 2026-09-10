@@ -69,7 +69,68 @@ const RISK_TEMPLATES = {
 	"process.persistent": "run continuously in the background ({reason})",
 	"childProcess": "launch other programs on the host machine",
 	"nativeAddons": "load native code extensions on the host machine",
+
+	// Legacy flat-list permission keys (the format every registry-published
+	// plugin ships: permissions: ["db.read", ...]).
+	"commands.register": "register slash commands in your server",
+	"events.register": "receive your server's events (messages, member joins, moderation, …)",
 };
+
+// Legacy flat key → [v2 category, value] for keys whose power is already
+// described by an existing v2 facet.
+const FLAT_PERMISSIONS_MAP = {
+	"db.read": ["storage", "own-collection"],
+	"db.write": ["storage", "own-collection"],
+	"messages.read": ["discord", "ReadMessageHistory"],
+	"manageWebhooks": ["discord", "ManageWebhooks"],
+};
+
+/**
+ * Registry entries and legacy plugins ship `permissions: ["db.read", ...]` —
+ * a flat string list, not the nested v2 manifest shape the generator reads.
+ * Build the v2 shape from it. Keys with an existing facet are mapped; keys
+ * with their own template pass through verbatim; anything else is kept so
+ * generateRiskCard's UnmappedCapabilityError fails loud instead of silently
+ * showing a reassuringly-empty card.
+ *
+ * @param {object} entry - registry entry or plugin.json with flat permissions
+ * @returns {object} v2-shaped pseudo-manifest
+ */
+function manifestFromFlatPermissions(entry) {
+	const perm = {
+		discord: [],
+		storage: [],
+		ai: [],
+		hooks: [],
+		scheduler: [],
+		system: [],
+		network: { outbound: [] },
+		filesystem: { read: [], write: [] },
+		childProcess: false,
+		nativeAddons: false,
+	};
+	const direct = [];
+	for (const key of Array.isArray(entry?.permissions) ? entry.permissions : []) {
+		const mapped = FLAT_PERMISSIONS_MAP[key];
+		if (mapped && !perm[mapped[0]].includes(mapped[1])) perm[mapped[0]].push(mapped[1]);
+		else if (mapped) continue; // already mapped — one statement is enough
+		else direct.push(key);
+	}
+	return { ...entry, manifestVersion: 2, permissions: perm, _flatDirect: direct };
+}
+
+/**
+ * Adapt any manifest: nested v2 manifests pass through untouched; flat
+ * permission lists are converted. Returns null if there is nothing to go on.
+ *
+ * @param {object} manifest - raw manifest or registry entry
+ * @returns {object|null} v2-shaped manifest
+ */
+function riskCardManifest(manifest) {
+	if (!manifest) return null;
+	if (Array.isArray(manifest.permissions)) return manifestFromFlatPermissions(manifest);
+	return manifest;
+}
 
 // Negative-disclosure facets — the "does NOT have access to" list. Each facet is
 // a category of power a server owner cares about, with a predicate over the
@@ -196,6 +257,10 @@ function generateRiskCard(manifest) {
 	if (perm.childProcess) push("childProcess");
 	if (perm.nativeAddons) push("nativeAddons");
 
+	// Keys carried over from a legacy flat permission list (see
+	// manifestFromFlatPermissions) that have their own template.
+	for (const key of m._flatDirect || []) push(key);
+
 	if (unmapped.length) {
 		throw new UnmappedCapabilityError(unmapped);
 	}
@@ -257,6 +322,8 @@ module.exports = {
 	RISK_TEMPLATES,
 	WITHHELD_FACETS,
 	UnmappedCapabilityError,
+	manifestFromFlatPermissions,
+	riskCardManifest,
 	generateRiskCard,
 	generateWithheld,
 	generateFullRiskCard,
