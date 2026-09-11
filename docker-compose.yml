@@ -35,7 +35,13 @@ services:
     env_file:
       - ./.env
     working_dir: /app
+    volumes:
+      # Dashboard-installed plugin manifest + registry cache + submissions.
+      # Without this, every rebuild loses npm-installed plugins and anything
+      # else the running container wrote under data/.
+      - bot-data:/app/data
     command: ["npm", "start"]
 
 volumes:
   mongo-prod-data:
+  bot-data:

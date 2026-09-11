@@ -10,6 +10,7 @@ const Database = require("./utils/database");
 const { HookBus } = require("./core/HookBus");
 const { PluginManager } = require("./core/PluginManager");
 const { syncAllGuilds, syncGuildCommands } = require("./core/command-sync");
+const { reconcileInstalledPlugins } = require("./core/plugin-persistence");
 const { startApiServer } = require("./core/api/server");
 const { createLogger } = require("./core/logger");
 
@@ -283,6 +284,16 @@ async function startADB() {
 				startListening: false,
 			});
 			client.fastify = apiServer.fastify;
+		}
+
+		// Dashboard-installed plugins live in the container's node_modules,
+		// which a rebuild replaces — re-install them from the persisted
+		// manifest before plugins load.
+		try {
+			const { changed } = await reconcileInstalledPlugins();
+			if (changed) console.log(`🔁 Reconciled ${changed} dashboard-installed plugin(s)`);
+		} catch (error) {
+			console.error("❌ Plugin reconcile failed:", error);
 		}
 
 		await pluginManager.loadAll();

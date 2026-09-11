@@ -1630,6 +1630,13 @@ async function runNpmInstall(packageName, pluginManager, logger, emitLog) {
 
 	logger.info(`Installed ${packageName}`);
 
+	// Persist the install so a container rebuild reinstalls it.
+	try {
+		require("../plugin-persistence").recordInstall(packageName.split("@")[0]);
+	} catch (error) {
+		logger.error("Failed to record install in persistence manifest", error);
+	}
+
 	try {
 		await pluginManager.loadAll();
 	} catch (error) {
@@ -1664,6 +1671,13 @@ async function runNpmUninstall(packageName, logger, emitLog) {
 		child.on("close", (code) => {
 			if (code === 0) {
 				logger.info(`Uninstalled ${packageName}`);
+				// Persist as desired-absent — image-pinned packages would
+				// otherwise come back on the next rebuild.
+				try {
+					require("../plugin-persistence").recordUninstall(packageName);
+				} catch (error) {
+					logger.error("Failed to record uninstall in persistence manifest", error);
+				}
 				resolve({ ok: true });
 			} else {
 				resolve({ ok: false, error: `npm uninstall exited with code ${code}` });
