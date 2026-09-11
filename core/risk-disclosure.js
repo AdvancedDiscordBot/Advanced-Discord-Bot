@@ -41,6 +41,9 @@ const RISK_TEMPLATES = {
 	"discord.MentionEveryone": "ping @everyone and @here",
 	"discord.GuildInfo": "read information about your server",
 	"discord.ChannelInfo": "read information about your channels",
+	"discord.UseApplicationCommands": "use application commands in your server",
+	"discord.Connect": "connect to voice channels in your server",
+	"discord.MoveMembers": "move members between voice channels in your server",
 
 	// storage.<scope>
 	"storage.own-collection": "store and retrieve its own data (isolated from other plugins)",
@@ -114,7 +117,18 @@ function manifestFromFlatPermissions(entry) {
 		const mapped = FLAT_PERMISSIONS_MAP[key];
 		if (mapped && !perm[mapped[0]].includes(mapped[1])) perm[mapped[0]].push(mapped[1]);
 		else if (mapped) continue; // already mapped — one statement is enough
-		else direct.push(key);
+		else {
+			// v2-style "category.Value" keys (e.g. discord.ManageChannels) route
+			// into the category list so the withheld facets see them too.
+			const dot = key.indexOf(".");
+			const category = dot > 0 ? key.slice(0, dot) : null;
+			if (category && Array.isArray(perm[category])) {
+				const value = key.slice(dot + 1);
+				if (!perm[category].includes(value)) perm[category].push(value);
+			} else {
+				direct.push(key);
+			}
+		}
 	}
 	return { ...entry, manifestVersion: 2, permissions: perm, _flatDirect: direct };
 }
@@ -155,7 +169,7 @@ const WITHHELD_FACETS = [
 	{
 		label: "manage your server's members (ban, kick, or timeout)",
 		granted: (perm) =>
-			["BanMembers", "KickMembers", "ModerateMembers"].some((p) => perm.discord.includes(p)),
+			["BanMembers", "KickMembers", "ModerateMembers", "MoveMembers"].some((p) => perm.discord.includes(p)),
 	},
 	{
 		label: "manage your server's roles",

@@ -140,11 +140,6 @@ class PluginRegistry {
 		return filtered;
 	}
 
-	async getPluginDetails(packageName) {
-		const plugins = await this.fetchRegistry();
-		return plugins.find((p) => p.npmPackage === packageName || p.name === packageName);
-	}
-
 	isNewer(installed, candidate) {
 		const a = semver.valid(semver.coerce(installed));
 		const b = semver.valid(semver.coerce(candidate));
@@ -290,22 +285,35 @@ class PluginRegistry {
 	}
 
 	async getPluginDetails(packageName) {
+		if (!packageName) return undefined;
+		// Callers may pass the slug with or without the adb-plugin- prefix
+		// (the dashboard strips it), while registry entries carry the full
+		// name — match in either direction.
+		const candidates = new Set(
+			[packageName, `adb-plugin-${packageName}`, packageName.replace(/^adb-plugin-/, "")]
+				.map((n) => n.toLowerCase()),
+		);
+		const matches = (n) => n && candidates.has(n.toLowerCase());
 		const plugins = await this.fetchRegistry();
-		let details = plugins.find((p) => p.npmPackage === packageName || p.name === packageName);
+		let details = plugins.find((p) => matches(p.npmPackage) || matches(p.name));
 
 		// If we have fresh local versions, use those for more accurate data
 		const freshVersions = await this.getFreshPluginVersions();
 		if (freshVersions) {
-			const freshData = freshVersions.get(packageName);
-			if (freshData) {
-				// Return fresh data with registry data merged (registry takes precedence for metadata)
-				const result = { ...freshData };
-				if (details) {
-					// Keep registry metadata (displayName, description, etc.) but use fresh version
-					result.version = freshData.version;
-					result.npmPackage = freshData.npmPackage;
+			// Fresh versions are keyed by the full adb-plugin-* name from plugin.json.
+			let freshData = freshVersions.get(packageName);
+			if (!freshData) {
+				for (const key of freshVersions.keys()) {
+					if (matches(key)) {
+						freshData = freshVersions.get(key);
+						break;
+					}
 				}
-				return result;
+			}
+			if (freshData) {
+				// Registry metadata (displayName, permissions, …) is preserved;
+				// the fresh local version info overlays it.
+				return details ? { ...details, ...freshData } : { ...freshData };
 			}
 		}
 

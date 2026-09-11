@@ -205,3 +205,16 @@ test("unknown flat permission keys fail loud via UnmappedCapabilityError", () =>
 		UnmappedCapabilityError,
 	);
 });
+
+test("flat discord.<Flag> keys produce the grant AND clear the matching withheld facet", () => {
+	const card = generateFullRiskCard(
+		riskCardManifest({ permissions: ["discord.ManageChannels", "discord.Connect"] }),
+	);
+	assert.ok(card.granted.includes("create, delete, or modify any channel"));
+	assert.ok(card.granted.includes("connect to voice channels in your server"));
+	assert.ok(!card.withheld.includes("manage your server's channels"));
+	// MoveMembers clears the member-management facet
+	const moved = generateFullRiskCard(riskCardManifest({ permissions: ["discord.MoveMembers"] }));
+	assert.ok(moved.granted.includes("move members between voice channels in your server"));
+	assert.ok(!moved.withheld.includes("manage your server's members (ban, kick, or timeout)"));
+});
