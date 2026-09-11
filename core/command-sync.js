@@ -29,12 +29,23 @@ const logger = createLogger("CommandSync");
  */
 function guildCommandBody(pluginManager, client, guildId) {
 	const body = [];
+	const seen = new Map(); // command name → plugin that owns it
 	for (const [pluginName, state] of pluginManager.plugins) {
 		const gateable = pluginManager.isGuildGateable(pluginName);
 		if (gateable && !pluginManager.isEnabledForGuild(guildId, pluginName)) {
 			continue;
 		}
 		for (const commandName of state.commandNames || []) {
+			// Two plugins registering the same command name would make the bulk
+			// PUT fail wholesale with an opaque "Invalid Form Body" — first
+			// registration wins (matches the client.commands Map behavior).
+			if (seen.has(commandName)) {
+				logger.warn(
+					`Command /${commandName} registered by both ${seen.get(commandName)} and ${pluginName}; keeping ${seen.get(commandName)}'s`,
+				);
+				continue;
+			}
+			seen.set(commandName, pluginName);
 			const command = client.commands.get(commandName);
 			if (!command?.data) continue;
 			// Worker plugins send pre-serialized plain JSON; in-repo plugins may
@@ -60,7 +71,13 @@ async function syncGuildCommands(pluginManager, client, guildId) {
 		logger.info(`Synced ${body.length} commands to guild ${guildId}`);
 		return { ok: true, count: body.length };
 	} catch (err) {
-		logger.error(`Failed to sync commands to guild ${guildId}: ${err.message}`);
+		// Discord's "Invalid Form Body" alone is useless — the detailed
+		// per-field errors live in err.rawError.errors (or err.errors).
+		const detail = err.rawError?.errors || err.errors;
+		logger.error(
+			`Failed to sync commands to guild ${guildId}: ${err.message}`,
+			detail ? JSON.stringify(detail) : "",
+		);
 		return { ok: false, error: err.message };
 	}
 }
