@@ -598,7 +598,7 @@ export function Plugins() {
               <div style={s.permSection}>
                 <h4 style={s.permSectionTitle}>What it CAN do</h4>
                 <ul style={s.permList}>
-                  {riskCard.granted.slice(0, 3).map((item, i) => (
+                  {(showMorePerms ? riskCard.granted : riskCard.granted.slice(0, 3)).map((item, i) => (
                     <li key={i} style={s.permListItem}>
                       <span style={s.permListItemText}>✓</span>
                       <span>{item}</span>
@@ -623,7 +623,7 @@ export function Plugins() {
               <div style={s.permSection}>
                 <h4 style={s.permSectionTitle}>What it explicitly can NOT do</h4>
                 <ul style={s.permList}>
-                  {riskCard.withheld.slice(0, 3).map((item, i) => (
+                  {(showMorePerms ? riskCard.withheld : riskCard.withheld.slice(0, 3)).map((item, i) => (
                     <li key={i} style={s.permListItem}>
                       <span style={s.permListItemText}>×</span>
                       <span>{item}</span>
