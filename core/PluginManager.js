@@ -303,7 +303,13 @@ class PluginManager {
 				try {
 					self.broker.registerModel(pluginId, modelName, schema);
 				} catch (err) {
-					// Model may already be registered — that's fine
+					// A duplicate registration is fine (worker restart), but any
+					// other error leaves the model permanently unregistered and
+					// every later query on it fails — surface it instead of
+					// swallowing it.
+					self.logger.warn(
+						`defineModel failed for ${pluginId}:${modelName}: ${err.message}`,
+					);
 				}
 				return { id: request.id, ok: true, result: { registered: true } };
 			}

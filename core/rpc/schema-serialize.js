@@ -99,7 +99,9 @@ function serializeSchema(schema) {
 		if (schema.options.timestamps) options.timestamps = schema.options.timestamps;
 	}
 
-	const descriptor = { fields, indexes, options };
+	// __adbSchema marks the payload as a serialized descriptor (not a raw
+	// Schema) so the broker knows to rehydrate it before calling mongoose.model.
+	const descriptor = { fields, indexes, options, __adbSchema: 1 };
 	if (skipped.length) descriptor.skipped = skipped;
 	return descriptor;
 }

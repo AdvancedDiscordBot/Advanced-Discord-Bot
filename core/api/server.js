@@ -818,6 +818,14 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 
 		await pluginManager.loadAll();
 
+		// The uninstalled plugin's commands are gone — refresh every guild's set.
+		try {
+			const { syncAllGuilds } = require("../command-sync");
+			await syncAllGuilds(pluginManager, pluginManager.client);
+		} catch (error) {
+			logger.error("Command sync after uninstall failed", error);
+		}
+
 		return { ok: true };
 	});
 
@@ -847,6 +855,15 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 			return reply.code(409).send({ error: "Plugin not reloadable" });
 		}
 
+		if (result.ok) {
+			// Reload re-registers commands — refresh the guild set.
+			try {
+				const { syncAllGuilds } = require("../command-sync");
+				await syncAllGuilds(pluginManager, pluginManager.client);
+			} catch (error) {
+				logger.error("Command sync after reload failed", error);
+			}
+		}
 		return { ok: true };
 	});
 
@@ -1239,6 +1256,13 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		await db.setPluginEnabledForGuild(guildId, name, enabled, request.session.user?.id);
 		// Reflect the toggle in the runtime gate immediately.
 		pluginManager.setEnabledForGuild(guildId, name, enabled);
+		// The plugin's commands appear/disappear with the gate.
+		try {
+			const { syncGuildCommands } = require("../command-sync");
+			await syncGuildCommands(pluginManager, pluginManager.client, guildId);
+		} catch (error) {
+			logger.error(`Command sync for guild ${guildId} failed`, error);
+		}
 		return { name, enabled };
 	});
 
@@ -1610,6 +1634,14 @@ async function runNpmInstall(packageName, pluginManager, logger, emitLog) {
 		await pluginManager.loadAll();
 	} catch (error) {
 		logger.error("Failed to refresh plugins after install", error);
+	}
+
+	// New commands (or new plugin) — push the gated set to every guild.
+	try {
+		const { syncAllGuilds } = require("../command-sync");
+		await syncAllGuilds(pluginManager, pluginManager.client);
+	} catch (error) {
+		logger.error("Command sync after install failed", error);
 	}
 
 	return result;

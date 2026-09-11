@@ -883,7 +883,7 @@ class CapabilityBroker extends EventEmitter {
 	registerModel(pluginId, modelName, schema) {
 		if (!this._modelRegistry) this._modelRegistry = new Map();
 		const mongoose = require("mongoose");
-		const { deserializeSchema } = require("./schema-serialize");
+		const { rehydrateSchema } = require("./schema-serialize");
 		const prefixedName = `plugin_${pluginId}_${modelName}`;
 		if (!mongoose.models[prefixedName]) {
 			// Isolated plugins send a plain schema descriptor over IPC (a real
@@ -891,7 +891,7 @@ class CapabilityBroker extends EventEmitter {
 			// Direct callers may still pass a real Schema — pass those through.
 			const realSchema =
 				schema && schema.__adbSchema
-					? deserializeSchema(schema)
+					? rehydrateSchema(schema)
 					: schema;
 			mongoose.model(prefixedName, realSchema);
 		}

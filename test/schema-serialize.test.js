@@ -88,4 +88,21 @@ describe("schema-serialize", () => {
 		assert.equal(rebuilt.path("guildId").instance, "String");
 		assert.equal(rebuilt.path("level").defaultValue, 0);
 	});
+
+	it("marks descriptors with __adbSchema so the broker rehydrates them", () => {
+		// Regression: the broker checked schema.__adbSchema to decide whether to
+		// rehydrate, but serializeSchema never set the marker — descriptors were
+		// passed to mongoose.model() raw, which throws "Invalid schema
+		// configuration", and PluginManager swallowed the error, leaving every
+		// isolated-plugin model unregistered.
+		const schema = new Schema({ guildId: { type: String, required: true } });
+		const descriptor = serializeSchema(schema);
+		assert.ok(descriptor.__adbSchema, "descriptor must carry the __adbSchema marker");
+
+		const { CapabilityBroker } = require("../core/rpc/broker");
+		const broker = Object.create(CapabilityBroker.prototype);
+		assert.doesNotThrow(() => broker.registerModel("x-plugin", "thing", descriptor));
+		const model = broker._getModel("x-plugin", "thing");
+		assert.equal(model.modelName, "plugin_x-plugin_thing");
+	});
 });

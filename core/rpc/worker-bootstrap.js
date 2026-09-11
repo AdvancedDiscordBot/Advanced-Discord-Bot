@@ -121,9 +121,13 @@ function createShimContext(rpc, grantedEnv = {}) {
 		if (!command || !command.data || !command.execute) {
 			throw new Error(`Invalid command for plugin ${pluginId}`);
 		}
-		// Serialize the command for IPC (strip functions, keep data + metadata)
+		// Serialize the command for IPC (strip functions, keep data + metadata).
+		// A JSON round-trip is the sanitizer: SlashCommandBuilder.toJSON() already
+		// returns plain JSON, and hand-built data objects may carry a
+		// `toJSON() { return this; }` that returns the same function-bearing
+		// object — postMessage's structured clone would throw on it.
 		const serialized = {
-			data: command.data.toJSON ? command.data.toJSON() : command.data,
+			data: JSON.parse(JSON.stringify(command.data.toJSON ? command.data.toJSON() : command.data)),
 			// We can't send execute functions over IPC — Core will need to
 			// register a proxy handler that calls back to the worker
 			hasExecute: true,

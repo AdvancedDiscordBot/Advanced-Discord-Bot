@@ -9,6 +9,7 @@ const {
 const Database = require("./utils/database");
 const { HookBus } = require("./core/HookBus");
 const { PluginManager } = require("./core/PluginManager");
+const { syncAllGuilds, syncGuildCommands } = require("./core/command-sync");
 const { startApiServer } = require("./core/api/server");
 const { createLogger } = require("./core/logger");
 
@@ -164,6 +165,21 @@ client.once("ready", async () => {
 	setInterval(updateBotActivity, 30000);
 
 	console.log("🎯 ADB is fully operational and ready to serve!");
+
+	// Push every registered (gated) command to Discord — plugin commands only
+	// exist in the in-memory dispatch map until this runs.
+	try {
+		await syncAllGuilds(pluginManager, client);
+	} catch (err) {
+		console.error("❌ Initial command sync failed:", err.message);
+	}
+});
+
+// New guild → install the gated command set for it.
+client.on("guildCreate", (guild) => {
+	syncGuildCommands(pluginManager, client, guild.id).catch((err) =>
+		console.error(`Command sync failed for new guild ${guild.id}:`, err.message),
+	);
 });
 
 // 🔍 Raw Gateway Event Logger for Debugging Bot Joins
