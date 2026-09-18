@@ -1,0 +1,39 @@
+# Demo instance compose — MUST stay untracked (survives `git reset --hard`).
+# Differs from prod docker-compose.yml: adb-demo-* container names (no clash
+# with running prod), bot on host port 3010 (cloudflared demo-adb target),
+# mongo not exposed to host, own data volume.
+name: adb-demo
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: adb-demo-mongo
+    restart: unless-stopped
+    volumes:
+      - mongo-demo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.runCommand({ ping: 1 })"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NODE_ENV: production
+    container_name: adb-demo-bot
+    restart: unless-stopped
+    ports:
+      - "3010:3010"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    env_file:
+      - ./.env
+    working_dir: /app
+    command: ["npm", "start"]
+
+volumes:
+  mongo-demo-data:
