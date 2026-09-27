@@ -18,6 +18,7 @@ const {
 	isResponse,
 	isEvent,
 } = require("./protocol");
+const { serializeValue } = require("./schema-serialize");
 
 class RpcClient {
 	/**
@@ -40,7 +41,7 @@ class RpcClient {
 		this.closed = false;
 
 		// Listen for messages from Core
-		this.port.on("message", (msg) => {
+		this._onMessage = (msg) => {
 			if (this.closed) return;
 
 			if (isResponse(msg)) {
@@ -49,22 +50,27 @@ class RpcClient {
 					clearTimeout(entry.timer);
 					this.pending.delete(msg.id);
 					if (msg.ok) {
-						entry.resolve(msg.result);
+						entry.resolve(serializeValue(msg.result));
 					} else {
 						entry.reject(new Error(msg.error));
 					}
 				}
 			} else if (isEvent(msg)) {
 				const handlers = this.eventListeners.get(msg.event) || [];
-				for (const handler of handlers) {
+				for (const handler of [...handlers]) {
 					try {
-						handler(msg.payload);
+						Promise.resolve(handler(msg.payload)).catch((err) => {
+							console.error(`[RpcClient] Error in event handler for "${msg.event}":`, err);
+						});
 					} catch (err) {
 						console.error(`[RpcClient] Error in event handler for "${msg.event}":`, err);
 					}
 				}
 			}
-		});
+		};
+		this._onClose = () => this.close();
+		this.port.on("message", this._onMessage);
+		this.port.on("close", this._onClose);
 	}
 
 	// ── RPC Calls ────────────────────────────────────────────────────────
@@ -82,7 +88,7 @@ class RpcClient {
 		if (this.closed) throw new Error("RpcClient is closed");
 
 		const timeout = timeoutMs || this.defaultTimeoutMs;
-		const request = createRequest(method, params);
+		const request = createRequest(method, serializeValue(params));
 
 		return new Promise((resolve, reject) => {
 			const timer = setTimeout(() => {
@@ -159,6 +165,7 @@ class RpcClient {
 			if (list) {
 				const idx = list.indexOf(handler);
 				if (idx !== -1) list.splice(idx, 1);
+				if (list.length === 0) this.eventListeners.delete(eventName);
 			}
 		};
 	}
@@ -194,7 +201,10 @@ class RpcClient {
 	 * Close the client, rejecting any pending requests.
 	 */
 	close() {
+		if (this.closed) return;
 		this.closed = true;
+		this.port.removeListener?.("message", this._onMessage);
+		this.port.removeListener?.("close", this._onClose);
 		for (const [, entry] of this.pending) {
 			clearTimeout(entry.timer);
 			entry.reject(new Error("RpcClient closed"));

@@ -191,7 +191,7 @@ Defined in `models/schemas.js`, exposed via `utils/database.js`:
 Core bot:
 - `DISCORD_TOKEN` (required) — bot token
 - `CLIENT_ID` (for `deploy-commands.js`) — application id
-- `GUILD_ID` (optional) — guild-scoped command deploy
+- `GUILD_ID` (required for manual deploy) — target guild; startup syncs each joined guild separately
 - `MONGODB_URI` (required) — Mongo connection string
 - `GEMINI_API_KEY` (optional) — Google Gemini
 

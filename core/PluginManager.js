@@ -4,6 +4,9 @@ const chokidar = require("chokidar");
 const { PluginContext } = require("./PluginContext");
 const { validateCapabilities } = require("./capabilities");
 const { createLogger } = require("./logger");
+const { randomUUID } = require("crypto");
+const { serializeValue } = require("./rpc/schema-serialize");
+const DISCORD_PRIVATE_KEYS = new Set(["client", "token", "webhook", "authorization"]);
 
 class PluginManager {
 	constructor({ client, db, scheduler, hooks, config = {} }) {
@@ -15,11 +18,17 @@ class PluginManager {
 			pluginsDir: config.pluginsDir || path.join(process.cwd(), "plugins"),
 			nodeModulesDir:
 				config.nodeModulesDir || path.join(process.cwd(), "node_modules"),
+			commandTimeoutMs: config.commandTimeoutMs ?? 15000,
+			commandCollection: config.commandCollection === true,
 		};
 
 		this.logger = createLogger("PluginManager");
 		this.plugins = new Map();
+		this._commandOwners = new WeakMap();
 		this.watchers = new Map();
+		this._loads = new Set();
+		this._shuttingDown = false;
+		this._shutdownPromise = null;
 
 		// Per-guild plugin enablement gate. Enabled (guildId,pluginName) pairs are
 		// held as one Set, rebuilt from a single query on a short TTL and eagerly
@@ -64,47 +73,37 @@ class PluginManager {
 			hooks: this.hooks,
 		});
 
-		// Forward Discord events from the Client to all workers
-		this._forwardDiscordEvents();
-
 		// Register RPC handlers for plugin.registerCommand / registerEvent
 		this._registerIsolationRpcHandlers();
+		this._onWorkerUnregistered = (pluginId) => this.clearPluginRegistrations(pluginId);
+		this.broker.on("plugin:unregistered", this._onWorkerUnregistered);
 
 		this.isolationEnabled = true;
 		this.logger.info("Plugin isolation enabled (worker_threads)");
 	}
 
 	/**
-	 * Forward Discord client events to workers via the WorkerManager.
-	 * Only events that plugins commonly subscribe to are forwarded.
+	 * Subscribe only to events a worker actually registered, and retain teardown
+	 * ownership through the normal manager event registry.
 	 */
-	_forwardDiscordEvents() {
-		const EVENTS_TO_FORWARD = [
-			"guildMemberAdd", "guildMemberRemove",
-			"messageCreate", "messageDelete", "messageUpdate",
-			"guildCreate", "guildDelete",
-			"interactionCreate",
-			"voiceStateUpdate",
-			"guildMemberUpdate",
-			"ready",
-		];
-
-		for (const eventName of EVENTS_TO_FORWARD) {
-			this.client.on(eventName, (...args) => {
-				if (!this.workerManager) return;
-				// Serialize the event payload for IPC transfer.
-				// For GuildMember / Message objects, extract only safe, serializable fields.
-				const payload = this._serializeDiscordEvent(eventName, args);
-				const guildId = this._eventGuildId(args);
-				// Guild-scoped events only reach workers whose plugin the guild has
-				// enabled. Events with no guild (e.g. `ready`, DMs) can't be gated
-				// and go to everyone.
-				const filter = guildId
-					? (pluginId) => this.isEnabledForGuild(guildId, pluginId)
-					: null;
-				this.workerManager.broadcastEvent(`event:${eventName}`, payload, filter);
-			});
-		}
+	_forwardDiscordEvents(pluginId, eventName) {
+		const { Events } = require("discord.js");
+		// discord.js 14 still supports the deprecated "ready" event used by shipped plugins.
+		if (eventName !== "ready" && !Object.values(Events).includes(eventName)) throw new Error(`Unknown Discord event: ${eventName}`);
+		const state = this.plugins.get(pluginId);
+		if (state.eventHandlers.some((handler) => handler.name === eventName)) return;
+		this.registerEvent(pluginId, eventName, (...args) => {
+			args.pop(); // registerEvent appends the raw client; never send it to a worker.
+			const payload = { args: this._serializeDiscordEvent(eventName, args) };
+			if (eventName === "interactionCreate") {
+				const interaction = args[0];
+				const ownsAutocomplete = interaction.type === 4 && state.commandNames.has(interaction.commandName);
+				if (ownsAutocomplete || this.broker.interactionOwner(interaction) === pluginId) {
+					payload.args[0]._handle = this.broker.bindInteraction(pluginId, interaction);
+				}
+			}
+			this.workerManager.sendEvent(pluginId, `event:${eventName}`, payload);
+		});
 	}
 
 	// ── Per-guild plugin enablement gate ───────────────────────────────────
@@ -164,7 +163,7 @@ class PluginManager {
 		else this._enableIndex.delete(key);
 	}
 
-	async refreshEnableIndex() {
+	async refreshEnableIndex({ strict = false } = {}) {
 		try {
 			const rows = await this.db.getAllEnabledPluginRows();
 			const next = new Set();
@@ -176,6 +175,7 @@ class PluginManager {
 			// Keep the last good snapshot but bump the clock so a down DB isn't
 			// hammered on every event.
 			this._enableIndexAt = Date.now();
+			if (strict) throw err;
 		}
 	}
 
@@ -184,41 +184,9 @@ class PluginManager {
 	 * @private
 	 */
 	_serializeDiscordEvent(eventName, args) {
-		// Default: try structuredClone, fall back to JSON round-trip
-		const trySerialize = (obj) => {
-			try {
-				if (obj && typeof obj.toJSON === "function") return obj.toJSON();
-				return JSON.parse(JSON.stringify(obj, (key, val) => {
-					if (typeof val === "function") return undefined;
-					if (val && val.constructor && val.constructor.name === "GuildMember") {
-						return {
-							id: val.id,
-							user: { id: val.user?.id, tag: val.user?.tag, username: val.user?.username, bot: val.user?.bot, avatarURL: val.user?.displayAvatarURL?.({ extension: "png", size: 256 }) || null },
-							nickname: val.nickname,
-							guildId: val.guild?.id,
-							roles: Array.from(val.roles?.cache?.keys() || []),
-							joinedAt: val.joinedAt,
-						};
-					}
-					if (val && val.constructor && val.constructor.name === "Message") {
-						return {
-							id: val.id,
-							content: val.content,
-							author: { id: val.author?.id, tag: val.author?.tag, username: val.author?.username, bot: val.author?.bot },
-							guildId: val.guild?.id,
-							channelId: val.channel?.id,
-						};
-					}
-					return val;
-				}));
-			} catch {
-				return { _unserializable: true, eventName };
-			}
-		};
-
-		if (args.length === 0) return {};
-		if (args.length === 1) return trySerialize(args[0]);
-		return args.map(trySerialize);
+		return args.map((arg) => eventName === "interactionCreate"
+			? this._serializeInteraction(arg)
+			: serializeValue(arg, DISCORD_PRIVATE_KEYS));
 	}
 
 	/**
@@ -227,112 +195,99 @@ class PluginManager {
 	 * @private
 	 */
 	_registerIsolationRpcHandlers() {
-		// Store the original execute method so we can proxy through RPC
-		// plugin.registerCommand RPC: worker sends serialized command data,
-		// we create a proxy execute that calls back to the worker.
-		this._registerCommandRpcHandler();
-		this._registerEventRpcHandler();
-		this._registerModelRpcHandler();
-	}
-
-	/**
-	 * Handle plugin.registerCommand RPC from workers.
-	 * @private
-	 */
-	_registerCommandRpcHandler() {
 		// Intercept in the broker's handleRequest — we patch the execute method
 		// on the broker to add our custom handlers.
 		const origHandleRequest = this.broker.handleRequest.bind(this.broker);
 		const self = this;
 
 		this.broker.handleRequest = async function (pluginId, request) {
-			if (request.method === "plugin.registerCommand") {
-				const { command } = request.params;
-				if (!command || !command.data) {
-					return { id: request.id, ok: false, error: "Invalid command" };
+			if (self.config.commandCollection && ["scheduler.schedule", "scheduler.cancel"].includes(request.method)
+				&& this.hasCapability(pluginId, "scheduler:cron") && !this.isSuspended(pluginId)) {
+				if (request.method === "scheduler.schedule" && !require("node-cron").validate(request.params.expression)) {
+					return { id: request.id, ok: false, error: "Invalid cron expression" };
+				}
+				return { id: request.id, ok: true, result: { taskId: `collection:${pluginId}:${request.params.name || "task"}` } };
+			}
+			if (!["plugin.registerCommand", "plugin.registerEvent", "plugin.defineModel"].includes(request.method)) {
+				return origHandleRequest(pluginId, request);
+			}
+			if (!this.pluginCapabilities.has(pluginId) || this.isSuspended(pluginId) || !self.plugins.get(pluginId)?.enabled) {
+				return { id: request.id, ok: false, error: "Plugin is not available for registration" };
+			}
+			try {
+				if (request.method === "plugin.registerCommand") {
+					const { command } = request.params;
+					if (!command?.data) throw new Error("Invalid command");
+					const proxy = {
+						data: command.data,
+						cooldown: command.cooldown,
+						guildIds: command.guildIds,
+						guildData: command.guildData,
+						permissions: command.permissions,
+						execute: (interaction) => self._executeWorkerInteraction(pluginId, command.data.name, "execute", interaction),
+					};
+					if (command.hasAutocomplete) {
+						proxy.autocomplete = (interaction) => self._executeWorkerInteraction(pluginId, command.data.name, "autocomplete", interaction);
+					}
+					self.registerCommand(pluginId, proxy);
 				}
 
-				// Create a proxy execute that sends the interaction back to the worker
-				const proxyExecute = async (interaction) => {
-					const workerEntry = self.workerManager?.workers?.get(pluginId);
-					if (!workerEntry || !workerEntry.ready) {
-						await interaction.reply({ content: "Plugin is not available.", ephemeral: true });
-						return;
-					}
+				if (request.method === "plugin.registerEvent") {
+					self._forwardDiscordEvents(pluginId, request.params.name);
+				}
 
-					// Serialize the interaction for IPC
-					const serializedInteraction = self._serializeInteraction(interaction);
-
-					// Send to worker and wait for response
-					const response = await new Promise((resolve) => {
-						const callId = `cmd_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-						const timer = setTimeout(() => resolve({ error: "Command execution timed out" }), 15000);
-
-						const handler = (msg) => {
-							if (msg.type === "rpc:response" && msg.id === callId) {
-								clearTimeout(timer);
-								workerEntry.worker.removeListener("message", handler);
-								resolve(msg);
-							}
-						};
-						workerEntry.worker.on("message", handler);
-
-						workerEntry.worker.postMessage({
-							type: "rpc:event",
-							event: "command:execute",
-							payload: { callId, commandName: command.data.name, interaction: serializedInteraction },
-						});
-					});
-
-					if (response.error) {
-						try { await interaction.reply({ content: `Error: ${response.error}`, ephemeral: true }); } catch {}
-					}
-				};
-
-				self.registerCommand(pluginId, { data: command.data, execute: proxyExecute });
-				return { id: request.id, ok: true, result: { registered: true } };
-			}
-
-			if (request.method === "plugin.registerEvent") {
-				// Events are registered client-side by the WorkerManager forwarding
-				return { id: request.id, ok: true, result: { registered: true } };
-			}
-
-			if (request.method === "plugin.defineModel") {
-				const { modelName, schema } = request.params;
-				try {
+				if (request.method === "plugin.defineModel") {
+					const { modelName, schema } = request.params;
+					if (!this.hasCapability(pluginId, "storage:own-collection")) throw new Error("Missing capability: storage:own-collection");
 					self.broker.registerModel(pluginId, modelName, schema);
-				} catch (err) {
-					// A duplicate registration is fine (worker restart), but any
-					// other error leaves the model permanently unregistered and
-					// every later query on it fails — surface it instead of
-					// swallowing it.
-					self.logger.warn(
-						`defineModel failed for ${pluginId}:${modelName}: ${err.message}`,
-					);
 				}
 				return { id: request.id, ok: true, result: { registered: true } };
+			} catch (error) {
+				return { id: request.id, ok: false, error: error.message };
 			}
-
-			// Fall through to normal broker handling
-			return origHandleRequest(pluginId, request);
 		};
 	}
 
-	/**
-	 * Handle plugin.registerEvent RPC from workers.
-	 * @private
-	 */
-	_registerEventRpcHandler() {
-		// Already handled in _registerCommandRpcHandler above
-	}
-
-	/**
-	 * Handle plugin.defineModel RPC from workers.
-	 * @private
-	 */
-	_registerModelRpcHandler() {
-		// Already handled in _registerCommandRpcHandler above
+	_executeWorkerInteraction(pluginId, commandName, action, interaction) {
+		const entry = this.workerManager?.workers.get(pluginId);
+		const state = this.plugins.get(pluginId);
+		if (!entry?.ready || !state?.enabled || !state.commandNames.has(commandName) || this.broker.isSuspended(pluginId)) {
+			return Promise.reject(new Error("Plugin is not available"));
+		}
+		const handle = this.broker.bindInteraction(pluginId, interaction);
+		const callId = randomUUID();
+		return new Promise((resolve, reject) => {
+			let finished = false;
+			const finish = (error) => {
+				if (finished) return;
+				finished = true;
+				clearTimeout(timer);
+				entry.worker.removeListener("message", onMessage);
+				entry.worker.removeListener("exit", onExit);
+				entry.worker.removeListener("error", onError);
+				state.pendingExecutions.delete(finish);
+				if (error) {
+					this.broker.releaseInteraction(handle);
+					reject(error);
+				} else resolve();
+			};
+			const onMessage = (msg) => {
+				if (msg.type === "rpc:response" && msg.id === callId) finish(msg.ok ? null : new Error(msg.error || "Command failed"));
+			};
+			const onExit = () => finish(new Error("Plugin worker stopped"));
+			const onError = (error) => finish(error);
+			const timer = setTimeout(() => finish(new Error("Command execution timed out")), this.config.commandTimeoutMs);
+			state.pendingExecutions.add(finish);
+			entry.worker.on("message", onMessage);
+			entry.worker.once("exit", onExit);
+			entry.worker.once("error", onError);
+			try {
+				entry.worker.postMessage({
+					type: "rpc:event", event: "command:execute",
+					payload: { callId, commandName, action, interaction: { ...this._serializeInteraction(interaction), _handle: handle } },
+				});
+			} catch (error) { finish(error); }
+		});
 	}
 
 	/**
@@ -340,52 +295,83 @@ class PluginManager {
 	 * @private
 	 */
 	_serializeInteraction(interaction) {
-		try {
-			return {
-				id: interaction.id,
-				type: interaction.type,
-				commandName: interaction.commandName,
-				options: interaction.options?.data || [],
-				guildId: interaction.guildId,
-				channelId: interaction.channelId,
-				user: interaction.user ? {
-					id: interaction.user.id,
-					tag: interaction.user.tag,
-					username: interaction.user.username,
-				} : null,
-				member: interaction.member ? {
-					id: interaction.member.id,
-					user: { id: interaction.member.user?.id, tag: interaction.member.user?.tag, username: interaction.member.user?.username },
-					guildId: interaction.member.guild?.id,
-					nickname: interaction.member.nickname,
-					roles: Array.from(interaction.member.roles?.cache?.keys() || []),
-				} : null,
-				// Store methods that need to be called back via RPC
-				_replies: [],
-			};
-		} catch {
-			return { id: interaction.id, _unserializable: true };
-		}
+		const pick = (value, keys) => value ? Object.fromEntries(keys.map((key) => [key, value[key]])) : null;
+		const user = (value) => pick(value, ["id", "tag", "username", "globalName", "discriminator", "bot", "avatar"]);
+		const member = (value, id) => value ? {
+			id: value.id || value.user?.id || id,
+			user: user(value.user),
+			guildId: value.guild?.id || interaction.guildId,
+			nickname: value.nickname || value.nick,
+			roles: Array.isArray(value.roles) ? value.roles : Array.from(value.roles?.cache?.keys() || []),
+			permissions: value.permissions?.bitfield ?? value.permissions,
+		} : null;
+		const resolved = interaction.options?.resolved;
+		const getResolved = (key, id) => resolved?.[key]?.get?.(id) || resolved?.[key]?.[id];
+		const options = (items) => (items || []).map((option) => {
+			const value = pick(option, ["name", "type", "value", "focused"]);
+			if (option.options) value.options = options(option.options);
+			const optionUser = option.user || getResolved("users", option.value);
+			const optionRole = option.role || getResolved("roles", option.value);
+			if (optionUser || option.type === 6) value.user = user(optionUser) || { id: option.value };
+			value.member = member(option.member || getResolved("members", option.value), option.value);
+			if (optionRole || option.type === 8) value.role = pick(optionRole, ["id", "name", "color", "position"]) || { id: option.value };
+			if (option.type === 7) value.channel = pick(option.channel || getResolved("channels", option.value), ["id", "name", "type", "guildId"]) || { id: option.value };
+			if (option.type === 11) value.attachment = pick(option.attachment || getResolved("attachments", option.value), ["id", "name", "filename", "url", "proxyURL", "size", "contentType"]) || { id: option.value };
+			return value;
+		});
+		return serializeValue({
+			id: interaction.id,
+			type: interaction.type,
+			commandName: interaction.commandName,
+			commandType: interaction.commandType,
+			customId: interaction.customId,
+			componentType: interaction.componentType,
+			values: interaction.values,
+			options: options(interaction.options?.data),
+			guildId: interaction.guildId,
+			channelId: interaction.channelId,
+			guild: pick(interaction.guild, ["id", "name"]),
+			channel: pick(interaction.channel, ["id", "name", "type"]),
+			user: user(interaction.user),
+			member: member(interaction.member, interaction.user?.id),
+			message: pick(interaction.message, ["id", "content", "embeds", "components", "attachments"]),
+			fields: Array.from(interaction.fields?.fields?.values() || []).map((field) => pick(field, ["customId", "type", "value"])),
+			deferred: !!interaction.deferred,
+			replied: !!interaction.replied,
+			ephemeral: interaction.ephemeral ?? null,
+			responded: !!interaction.responded,
+		}, DISCORD_PRIVATE_KEYS);
 	}
 
 	async loadAll() {
+		if (this._shuttingDown) throw new Error("PluginManager is shutting down");
 		await this.loadCore();
+		if (this._shuttingDown) return;
 
 		const discovered = this.discoverPlugins();
 		const ordered = this.sortByDependencies(discovered);
+		if (this.config.commandCollection && discovered.some((plugin) => plugin.disabled)) {
+			throw new Error("Cannot collect commands with missing plugin dependencies");
+		}
 
 		for (const plugin of ordered) {
+			if (this._shuttingDown) return;
 			await this.loadPlugin(plugin);
+			if (this.config.commandCollection && this.plugins.get(plugin.name)?.lastError) {
+				throw new Error(`Command collection failed for ${plugin.name}: ${this.plugins.get(plugin.name).lastError}`);
+			}
 		}
+		if (this._shuttingDown) return;
 
 		// Warm the enable gate before we start delivering events, so gateable
 		// plugins don't briefly lose their enabled guilds at startup.
-		await this.refreshEnableIndex();
+		await this.refreshEnableIndex({ strict: this.config.commandCollection });
 
 		this.setupHotReload();
 	}
 
 	async loadCore() {
+		if (this._shuttingDown) throw new Error("PluginManager is shutting down");
 		const pluginName = "core";
 
 		if (this.plugins.has(pluginName)) {
@@ -402,103 +388,71 @@ class PluginManager {
 		this.plugins.set(pluginName, pluginState);
 
 		pluginState.source = "builtin";
-
-		const ctx = this.buildContext(pluginName, logger);
-
-		const commandsPath = path.join(process.cwd(), "commands");
-		const eventsPath = path.join(process.cwd(), "events");
-
-		this.loadCommandsFromDir(commandsPath, pluginName, ctx);
-		this.loadEventsFromDir(eventsPath, pluginName, ctx, {
-			excludeFiles: ["helpInteraction.js", "modalCreate.js"],
-		});
-
-		await this.hooks.emitHook("onPluginLoad", { pluginName });
+		let finishLoad;
+		const loading = new Promise((resolve) => { finishLoad = resolve; });
+		this._loads.add(loading);
+		try {
+			const ctx = this.buildContext(pluginName, logger);
+			this.loadCommandsFromDir(path.join(process.cwd(), "commands"), pluginName, ctx);
+			if (!this.config.commandCollection) {
+				this.loadEventsFromDir(path.join(process.cwd(), "events"), pluginName, ctx, {
+					excludeFiles: ["helpInteraction.js", "modalCreate.js"],
+				});
+			}
+			pluginState.loaded = true;
+			if (!this.config.commandCollection) await this.hooks.emitHook("onPluginLoad", { pluginName });
+		} finally {
+			this._loads.delete(loading);
+			finishLoad();
+		}
 	}
 
 	discoverPlugins() {
 		const discovered = [];
-
-		if (fs.existsSync(this.config.pluginsDir)) {
-			const items = fs.readdirSync(this.config.pluginsDir, {
-				withFileTypes: true,
+		const directories = (dir) => {
+			if (!fs.existsSync(dir)) return [];
+			return fs.readdirSync(dir, { withFileTypes: true }).filter((entry) => {
+				if (entry.isDirectory()) return true;
+				if (!entry.isSymbolicLink()) return false;
+				try { return fs.statSync(path.join(dir, entry.name)).isDirectory(); }
+				catch { return false; } // Ignore broken npm links.
 			});
-
-			for (const item of items) {
-				if (!item.isDirectory()) continue;
-
-				const pluginPath = path.join(this.config.pluginsDir, item.name);
-				const manifestPath = path.join(pluginPath, "plugin.json");
-				if (!fs.existsSync(manifestPath)) continue;
-
+		};
+		const discover = (pluginPath, source, packageName) => {
+			const manifestPath = path.join(pluginPath, "plugin.json");
+			if (!fs.existsSync(manifestPath)) return;
+			try {
 				const manifest = this.readManifest(manifestPath);
-				const name = manifest.name || item.name;
-
-				discovered.push({
-					name,
-					manifest,
-					basePath: pluginPath,
-					entryPath: path.join(pluginPath, manifest.main || "index.js"),
-					source: "local",
-				});
-			}
-		}
-
-		if (fs.existsSync(this.config.nodeModulesDir)) {
-			const packages = fs.readdirSync(this.config.nodeModulesDir, {
-				withFileTypes: true,
-			});
-
-			for (const pkg of packages) {
-				if (pkg.name.startsWith("@") && pkg.isDirectory()) {
-					const scopedPath = path.join(this.config.nodeModulesDir, pkg.name);
-					const scopedPackages = fs.readdirSync(scopedPath, {
-						withFileTypes: true,
-					});
-
-					for (const scopedPkg of scopedPackages) {
-						if (!scopedPkg.isDirectory()) continue;
-						const packageName = `${pkg.name}/${scopedPkg.name}`;
-						if (!scopedPkg.name.startsWith("adb-plugin-")) continue;
-
-						const pluginPath = path.join(scopedPath, scopedPkg.name);
-						const manifestPath = path.join(pluginPath, "plugin.json");
-						if (!fs.existsSync(manifestPath)) continue;
-
-						const manifest = this.readManifest(manifestPath);
-						const name = manifest.name || packageName;
-
-						discovered.push({
-							name,
-							manifest,
-							basePath: pluginPath,
-							entryPath: path.join(pluginPath, manifest.main || "index.js"),
-							source: "package",
-							packageName,
-						});
-					}
-
-					continue;
+				if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+					throw new Error("Manifest must be an object");
 				}
-
-				if (!pkg.isDirectory()) continue;
-				if (!pkg.name.startsWith("adb-plugin-")) continue;
-
-				const pluginPath = path.join(this.config.nodeModulesDir, pkg.name);
-				const manifestPath = path.join(pluginPath, "plugin.json");
-				if (!fs.existsSync(manifestPath)) continue;
-
-				const manifest = this.readManifest(manifestPath);
-				const name = manifest.name || pkg.name;
-
 				discovered.push({
-					name,
+					name: manifest.name || packageName || path.basename(pluginPath),
 					manifest,
 					basePath: pluginPath,
 					entryPath: path.join(pluginPath, manifest.main || "index.js"),
-					source: "package",
-					packageName: pkg.name,
+					source,
+					...(packageName ? { packageName } : {}),
 				});
+			} catch (error) {
+				this.logger.warn(`Skipping plugin at ${pluginPath}: ${error.message}`);
+				if (this.config.commandCollection) throw error;
+			}
+		};
+
+		for (const item of directories(this.config.pluginsDir)) {
+			discover(path.join(this.config.pluginsDir, item.name), "local");
+		}
+		for (const pkg of directories(this.config.nodeModulesDir)) {
+			const packagePath = path.join(this.config.nodeModulesDir, pkg.name);
+			if (pkg.name.startsWith("@")) {
+				for (const scopedPkg of directories(packagePath)) {
+					if (scopedPkg.name.startsWith("adb-plugin-")) {
+						discover(path.join(packagePath, scopedPkg.name), "package", `${pkg.name}/${scopedPkg.name}`);
+					}
+				}
+			} else if (pkg.name.startsWith("adb-plugin-")) {
+				discover(packagePath, "package", pkg.name);
 			}
 		}
 
@@ -578,7 +532,7 @@ class PluginManager {
 	 */
 	_readCoreVersion() {
 		try {
-			const pkg = require(path.join(process.cwd(), "package.json"));
+			const pkg = require(path.join(__dirname, "..", "package.json"));
 			return pkg.version || "0.0.0";
 		} catch {
 			return "0.0.0";
@@ -650,6 +604,7 @@ class PluginManager {
 			logger,
 			config: {
 				env: grantedEnv,
+				commandCollection: this.config.commandCollection,
 			},
 		});
 
@@ -690,9 +645,12 @@ class PluginManager {
 			name: pluginName,
 			manifest,
 			enabled: true,
+			loaded: false,
 			hasCommands: false,
 			commandNames: new Set(),
 			eventHandlers: [],
+			hookUnsubscribers: new Set(),
+			pendingExecutions: new Set(),
 			overrides: new Map(),
 			hotReloadEligible: true,
 			lastError: null,
@@ -704,6 +662,7 @@ class PluginManager {
 	}
 
 	async loadPlugin(plugin) {
+		if (this._shuttingDown) throw new Error("PluginManager is shutting down");
 		if (this.plugins.has(plugin.name)) {
 			this.logger.warn(`Plugin already loaded: ${plugin.name}`);
 			return;
@@ -717,6 +676,9 @@ class PluginManager {
 		pluginState.packageName = plugin.packageName || null;
 
 		this.plugins.set(plugin.name, pluginState);
+		let finishLoad;
+		const loading = new Promise((resolve) => { finishLoad = resolve; });
+		this._loads.add(loading);
 
 		try {
 			// Engine constraints: core version + sibling plugin versions.
@@ -788,12 +750,17 @@ class PluginManager {
 			pluginState.hotReloadEligible =
 				!plugin.manifest.requiresRestart && !pluginState.hasCommands;
 
-			await this.hooks.emitHook("onPluginLoad", { pluginName: plugin.name });
+			pluginState.loaded = true;
+			if (!this.config.commandCollection) await this.hooks.emitHook("onPluginLoad", { pluginName: plugin.name });
 			this.logger.info(`Loaded plugin ${plugin.name}`);
 		} catch (error) {
 			pluginState.enabled = false;
 			pluginState.lastError = error.message;
+			await this._teardownPlugin(plugin.name, pluginState, "load-failed");
 			this.logger.error(`Failed to load plugin ${plugin.name}`, error);
+		} finally {
+			this._loads.delete(loading);
+			finishLoad();
 		}
 	}
 
@@ -855,22 +822,29 @@ class PluginManager {
 		}
 	}
 
-	async unloadPlugin(pluginName, reason = "manual") {
+	/** Remove runtime registrations without deleting state; also used on worker teardown. */
+	clearPluginRegistrations(pluginName) {
 		const pluginState = this.plugins.get(pluginName);
-		if (!pluginState || pluginName === "core") return false;
-
-		// If the plugin was running in a worker, terminate it
-		if (pluginState.isolated && this.workerManager) {
-			await this.workerManager.terminateWorker(pluginName);
+		if (!pluginState) return;
+		for (const finish of pluginState.pendingExecutions || []) {
+			finish(new Error("Plugin worker stopped"));
 		}
+		this.broker?.releasePluginInteractions(pluginName);
+		for (const unsubscribe of pluginState.hookUnsubscribers || []) {
+			try { unsubscribe(); }
+			catch (error) { this.logger.warn(`Hook teardown failed for ${pluginName}: ${error.message}`); }
+		}
+		pluginState.hookUnsubscribers?.clear();
 
 		for (const handler of pluginState.eventHandlers) {
 			this.client.off(handler.name, handler.wrapper);
 		}
 
 		for (const commandName of pluginState.commandNames) {
-			this.client.commands.delete(commandName);
+			const command = this.client.commands.get(commandName);
+			if (command && this._commandOwners.get(command) === pluginState) this.client.commands.delete(commandName);
 		}
+		if (pluginName === "core") this.client.runtimeCommandDispatch = false;
 
 		for (const [
 			commandName,
@@ -881,16 +855,72 @@ class PluginManager {
 				command.execute = originalExecute;
 			}
 		}
+		pluginState.eventHandlers.length = 0;
+		pluginState.commandNames.clear();
+		pluginState.overrides.clear();
+		pluginState.hasCommands = false;
+	}
 
+	_teardownPlugin(pluginName, pluginState, reason) {
+		if (pluginState.unloading) return pluginState.unloading;
 		pluginState.enabled = false;
-
-		await this.hooks.emitHook("onPluginUnload", {
-			pluginName,
-			reason,
+		pluginState.loaded = false;
+		clearTimeout(pluginState.reloadTimer);
+		pluginState.unloading = Promise.resolve().then(async () => {
+			try {
+				await this.hooks.emitHook("onPluginUnload", { pluginName, reason });
+			} finally {
+				this.clearPluginRegistrations(pluginName);
+				const watcher = this.watchers.get(pluginName);
+				this.watchers.delete(pluginName);
+				pluginState.watching = false;
+				try {
+					if (watcher) await watcher.close();
+				} finally {
+					if (this.workerManager?.workers.has(pluginName)) await this.workerManager.terminateWorker(pluginName);
+				}
+			}
 		});
+		return pluginState.unloading;
+	}
 
-		this.plugins.delete(pluginName);
+	async unloadPlugin(pluginName, reason = "manual") {
+		const pluginState = this.plugins.get(pluginName);
+		if (!pluginState || (pluginName === "core" && !this._shuttingDown)) return false;
+
+		try {
+			await this._teardownPlugin(pluginName, pluginState, reason);
+		} finally {
+			if (this.plugins.get(pluginName) === pluginState) this.plugins.delete(pluginName);
+		}
 		return true;
+	}
+
+	/** Stop plugin-owned resources only; the caller still owns DB, scheduler and client shutdown. */
+	shutdown(reason = "shutdown") {
+		if (this._shutdownPromise) return this._shutdownPromise;
+		this._shuttingDown = true;
+		for (const state of this.plugins.values()) clearTimeout(state.reloadTimer);
+		this._shutdownPromise = (async () => {
+			const errors = [];
+			for (const [name, entry] of this.workerManager?.workers || []) {
+				if (!entry.ready) {
+					try { await this.workerManager.terminateWorker(name); }
+					catch (error) { errors.push(error); }
+				}
+			}
+			await Promise.allSettled([...this._loads]);
+			for (const name of [...this.plugins.keys()].reverse()) {
+				try { await this.unloadPlugin(name, reason); }
+				catch (error) { errors.push(error); }
+			}
+			try {
+				if (this.workerManager) await this.workerManager.shutdown();
+			} catch (error) { errors.push(error); }
+			if (this.broker && this._onWorkerUnregistered) this.broker.off("plugin:unregistered", this._onWorkerUnregistered);
+			if (errors.length) throw new AggregateError(errors, "Plugin shutdown failed");
+		})();
+		return this._shutdownPromise;
 	}
 
 	async reloadPlugin(pluginName, { force = false } = {}) {
@@ -919,6 +949,7 @@ class PluginManager {
 		};
 
 		await this.loadPlugin(plugin);
+		if (!this._shuttingDown) this.setupHotReload();
 		return this.plugins.get(pluginName)?.enabled === true;
 	}
 
@@ -941,17 +972,35 @@ class PluginManager {
 		}
 	}
 
+	/** Resolve only the exact, currently loaded registration, never a stale name reservation. */
+	getCommandOwner(command) {
+		if (!command || this.client.commands.get(command.data?.name) !== command) return null;
+		const state = this._commandOwners.get(command);
+		return state?.loaded && this.plugins.get(state.name) === state && state.commandNames.has(command.data.name)
+			? state.name : null;
+	}
+
 	registerCommand(pluginName, command) {
 		const pluginState = this.plugins.get(pluginName);
-		if (!pluginState) {
+		if (!pluginState || !pluginState.enabled || this._shuttingDown) {
 			throw new Error(`Plugin not loaded: ${pluginName}`);
 		}
 
-		if (!command || !command.data || !command.execute) {
+		if (!command?.data || typeof command.data.name !== "string" || !command.data.name || typeof command.execute !== "function") {
 			throw new Error(`Invalid command for plugin ${pluginName}`);
+		}
+		for (const [owner, state] of this.plugins) {
+			if (!this.client.commands.has(command.data.name)) {
+				state.commandNames.delete(command.data.name);
+				state.hasCommands = state.commandNames.size > 0;
+			}
+			if (owner !== pluginName && state.commandNames.has(command.data.name)) {
+				throw new Error(`Command ${command.data.name} is already owned by ${owner}`);
+			}
 		}
 
 		this.client.commands.set(command.data.name, command);
+		this._commandOwners.set(command, pluginState);
 		pluginState.commandNames.add(command.data.name);
 		pluginState.hasCommands = true;
 	}
@@ -987,9 +1036,10 @@ class PluginManager {
 
 	registerEvent(pluginName, name, handler, options = {}) {
 		const pluginState = this.plugins.get(pluginName);
-		if (!pluginState) {
+		if (!pluginState || !pluginState.enabled || this._shuttingDown) {
 			throw new Error(`Plugin not loaded: ${pluginName}`);
 		}
+		if (this.config.commandCollection) return;
 
 		// Gate direct-mode (un-isolated) events behind the per-guild enable flag.
 		// Isolated package plugins are gated at broadcastEvent; this covers the
@@ -998,11 +1048,18 @@ class PluginManager {
 		// unconditionally.
 		const gateable = this.isGuildGateable(pluginName);
 		const wrapper = (...args) => {
+			if (this._shuttingDown || !pluginState.enabled) return;
 			if (gateable) {
 				const guildId = this._eventGuildId(args);
 				if (guildId && !this.isEnabledForGuild(guildId, pluginName)) return;
 			}
-			return handler(...args, this.client);
+			try {
+				return Promise.resolve(handler(...args, this.client)).catch((error) => {
+					this.logger.error(`Event ${name} failed in ${pluginName}:`, error);
+				});
+			} catch (error) {
+				this.logger.error(`Event ${name} failed in ${pluginName}:`, error);
+			}
 		};
 
 		if (options.once) {
@@ -1012,6 +1069,7 @@ class PluginManager {
 		}
 
 		pluginState.eventHandlers.push({ name, wrapper });
+		if (pluginName === "core" && name === "interactionCreate") this.client.runtimeCommandDispatch = true;
 	}
 
 	loadCommandsFromDir(dir, pluginName, ctx) {
@@ -1036,6 +1094,7 @@ class PluginManager {
 				}
 			} catch (error) {
 				this.logger.error(`Failed to load command ${itemPath}`, error);
+				if (this.config.commandCollection) throw error;
 			}
 		}
 	}
@@ -1070,8 +1129,10 @@ class PluginManager {
 	}
 
 	setupHotReload() {
+		if (this._shuttingDown || this.config.commandCollection) return;
 		for (const [pluginName, pluginState] of this.plugins.entries()) {
 			if (pluginName === "core") continue;
+			if (!pluginState.enabled) continue;
 			if (!pluginState.hotReloadEligible) continue;
 			if (!pluginState.path) continue;
 			if (pluginState.watching) continue;
@@ -1080,12 +1141,15 @@ class PluginManager {
 				ignoreInitial: true,
 			});
 
-			let reloadTimer = null;
 			const triggerReload = () => {
-				if (reloadTimer) clearTimeout(reloadTimer);
-				reloadTimer = setTimeout(async () => {
+				if (this._shuttingDown || this.plugins.get(pluginName) !== pluginState || !pluginState.enabled) return;
+				clearTimeout(pluginState.reloadTimer);
+				pluginState.reloadTimer = setTimeout(async () => {
+					pluginState.reloadTimer = null;
+					if (this._shuttingDown) return;
 					this.logger.info(`Reloading plugin ${pluginName}`);
-					await this.reloadPlugin(pluginName);
+					try { await this.reloadPlugin(pluginName); }
+					catch (error) { this.logger.warn(`Reload failed for ${pluginName}: ${error.message}`); }
 				}, 200);
 			};
 

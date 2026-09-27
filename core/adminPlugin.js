@@ -3,8 +3,7 @@ const fs = require('fs');
 
 const { TIERS } = require('./permission-resolver');
 
-async function register(fastify, { client, db, permissions }) {
-  const webDir = path.join(__dirname, '..', 'plugins', 'administration', 'web', 'build');
+async function register(fastify, { client, db, permissions, webDir = path.join(__dirname, '..', 'plugins', 'administration', 'web', 'build') }) {
 
   if (fs.existsSync(webDir)) {
     fastify.register(require('@fastify/static'), {
@@ -101,7 +100,10 @@ async function register(fastify, { client, db, permissions }) {
   });
 
   fastify.setNotFoundHandler(async (request, reply) => {
-    if (request.url.startsWith('/api/')) {
+    const pathname = request.url.split('?')[0];
+    const isPage = /^\/(dashboard|me)(\/|$)/.test(pathname);
+    const isAsset = pathname.startsWith('/dashboard/static/') || /\.(js|css|map|json|ico|png|svg|jpe?g|gif|woff2?|ttf|webmanifest)$/i.test(pathname);
+    if (!['GET', 'HEAD'].includes(request.method) || !isPage || isAsset) {
       return reply.code(404).send({ error: 'Not found' });
     }
     const indexPath = path.join(webDir, 'index.html');

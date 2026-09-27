@@ -77,7 +77,7 @@ class PluginRegistry {
 			return this.registry;
 		} catch (error) {
 			this.logger.warn("Failed to fetch remote registry, using cache", error.message);
-			return this.loadCache() || [];
+			return this.registry || this.loadCache() || [];
 		}
 	}
 
@@ -141,15 +141,15 @@ class PluginRegistry {
 	}
 
 	isNewer(installed, candidate) {
-		const a = semver.valid(semver.coerce(installed));
-		const b = semver.valid(semver.coerce(candidate));
+		const a = semver.valid(installed);
+		const b = semver.valid(candidate);
 		if (!a || !b) return false;
 		return semver.gt(b, a);
 	}
 
 	getCategories() {
 		return [
-			{ id: "features", name: "Features", icon: "Zap" },
+			{ id: "core features", name: "Features", icon: "Zap" },
 			{ id: "moderation", name: "Moderation", icon: "Shield" },
 			{ id: "entertainment", name: "Entertainment", icon: "Gamepad2" },
 			{ id: "utility", name: "Utility", icon: "Wrench" },
@@ -284,8 +284,8 @@ class PluginRegistry {
 		return freshVersions.size > 0 ? freshVersions : null;
 	}
 
-	async getPluginDetails(packageName) {
-		if (!packageName) return undefined;
+	async getRegistryPluginDetails(packageName) {
+		if (typeof packageName !== "string" || !packageName) return undefined;
 		// Callers may pass the slug with or without the adb-plugin- prefix
 		// (the dashboard strips it), while registry entries carry the full
 		// name — match in either direction.
@@ -295,9 +295,17 @@ class PluginRegistry {
 		);
 		const matches = (n) => n && candidates.has(n.toLowerCase());
 		const plugins = await this.fetchRegistry();
-		let details = plugins.find((p) => matches(p.npmPackage) || matches(p.name));
+		return plugins.find((p) => matches(p.npmPackage) || matches(p.name));
+	}
 
-		// If we have fresh local versions, use those for more accurate data
+	async getPluginDetails(packageName) {
+		if (typeof packageName !== "string" || !packageName) return undefined;
+		const details = await this.getRegistryPluginDetails(packageName);
+		const candidates = new Set([packageName, `adb-plugin-${packageName}`, packageName.replace(/^adb-plugin-/, "")].map((name) => name.toLowerCase()));
+		const matches = (name) => typeof name === "string" && candidates.has(name.toLowerCase());
+
+		// Local inspection retains its installed-version overlay. Install/update
+		// targets and pre-install disclosure must use getRegistryPluginDetails.
 		const freshVersions = await this.getFreshPluginVersions();
 		if (freshVersions) {
 			// Fresh versions are keyed by the full adb-plugin-* name from plugin.json.

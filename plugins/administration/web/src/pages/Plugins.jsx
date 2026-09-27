@@ -25,6 +25,7 @@ const TABS = ["Browse", "Installed", "Core"];
 
 const CATEGORY_META = {
   features:      { label: "Features",      Icon: Zap },
+  "core features": { label: "Features",    Icon: Zap },
   moderation:    { label: "Moderation",    Icon: Shield },
   entertainment: { label: "Entertainment", Icon: Gamepad2 },
   utility:       { label: "Utility",       Icon: Wrench },
@@ -120,7 +121,7 @@ export function Plugins() {
   async function fetchRiskCard(pkgName) {
     try {
       const slug = pkgName.replace(/^adb-plugin-/, "");
-      const res = await request(`/api/plugins/registry/${slug}/risk-card`);
+      const res = await request(`/api/plugins/registry/${encodeURIComponent(slug)}/risk-card`);
       setRiskCard(res);
       setShowPermsDialog(true);
     } catch (err) {
@@ -157,8 +158,9 @@ export function Plugins() {
   async function handleInstall(pkgName) {
     setOperating(pkgName);
     try {
-      await request("/api/plugins/install", { method: "POST", body: JSON.stringify({ packageName: pkgName }) });
+      const result = await request("/api/plugins/install", { method: "POST", body: JSON.stringify({ packageName: pkgName }) });
       await loadAll();
+      if (result.restartRequired) window.alert("Package installed. Restart the bot to activate the new version; the previous version is still running.");
     } catch (err) {
       console.error("Install failed:", err);
       alert(`Install failed: ${err.message}`);
@@ -195,11 +197,12 @@ export function Plugins() {
   async function handleUpdate(pkgName, confirm = false) {
     setOperating(pkgName);
     try {
-      await request("/api/plugins/update", {
+      const result = await request("/api/plugins/update", {
         method: "POST",
         body: JSON.stringify({ packageName: pkgName, confirm }),
       });
       await loadAll();
+      if (result.restartRequired) window.alert("Package updated. Restart the bot to activate the new version; the previous version is still running.");
     } catch (err) {
       if (err.message && err.message.includes("depend")) {
         setConfirmDialog({
@@ -223,6 +226,8 @@ export function Plugins() {
       if (failed.length) {
         alert(`Some plugins failed to update:\n${failed.map((r) => `${r.name}: ${r.error || "unknown error"}`).join("\n")}`);
       }
+      const pending = (res?.updated || []).filter((r) => r.restartRequired);
+      if (pending.length) window.alert(`Restart the bot to activate the updated versions of: ${pending.map((r) => r.name).join(", ")}.`);
       await loadAll();
     } catch (err) {
       console.error("Update all failed:", err);
@@ -522,7 +527,7 @@ export function Plugins() {
             brochureLoading={brochureLoading}
             operating={operating === detailPlugin.name || operating === (detailPlugin.npmPackage || detailPlugin.name)}
             onInstall={() => {
-              handleInstall(detailPlugin.npmPackage || detailPlugin.name);
+              handleInstallWithPerm(detailPlugin.npmPackage || detailPlugin.name);
               setDetailPlugin(null);
             }}
             onUninstall={() => {
@@ -926,13 +931,21 @@ function SkeletonGrid() {
 
 /* ── MARKDOWN PARSER ─────────────────────────────────────────── */
 function parseMarkdown(md) {
-  const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   const inline = (s) => {
     s = esc(s);
     s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
     s = s.replace(/\*(.+?)\*/g, "<em>$1</em>");
     s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
-    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label, href) => {
+      try {
+        const url = new URL(href, window.location.origin);
+        if (!['http:', 'https:', 'mailto:'].includes(url.protocol)) return label;
+        return `<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+      } catch {
+        return label;
+      }
+    });
     return s;
   };
   const lines = md.split("\n");

@@ -2,84 +2,85 @@ const cron = require("node-cron");
 const Database = require("./database");
 
 class TaskScheduler {
-  constructor(client) {
-    this.client = client;
-    this.pluginTasks = new Map();
-    this.setupTasks();
-  }
+	constructor(client, { env = process.env, timers = globalThis } = {}) {
+		this.client = client;
+		this.env = env;
+		this.timers = timers;
+		this.pluginTasks = new Map();
+		this._running = new Map();
+		this._timeouts = new Set();
+		this._stopping = false;
+		try {
+			this.setupTasks();
+		} catch (error) {
+			for (const task of this.pluginTasks.values()) task.stop();
+			this.pluginTasks.clear();
+			throw error;
+		}
+	}
 
-  // Generic cron API exposed to plugins via ctx.scheduler.schedule(name, cronExpr, fn)
-  schedule(name, cronExpression, fn) {
-    if (this.pluginTasks.has(name)) {
-      this.pluginTasks.get(name).stop();
-    }
+	// Keep the shipped direct-plugin signature and return the underlying cron task.
+	schedule(name, cronExpression, fn) {
+		if (this._stopping) throw new Error("TaskScheduler is shut down");
+		if (typeof fn !== "function") throw new TypeError("Scheduled task callback must be a function");
+		const task = cron.schedule(cronExpression, () => {
+			if (this._stopping || this.pluginTasks.get(name) !== task || this._running.has(name)) return Promise.resolve();
+			const running = Promise.resolve().then(() => {
+				if (!this._stopping && this.pluginTasks.get(name) === task) return fn();
+			}).catch((error) => {
+				console.error(`Error in scheduled task "${name}":`, error);
+			}).finally(() => this._running.delete(name));
+			this._running.set(name, running);
+			return running;
+		}, { scheduled: false, timezone: "UTC" });
+		this.unschedule(name);
+		this.pluginTasks.set(name, task);
+		task.start();
+		return task;
+	}
 
-    const task = cron.schedule(cronExpression, async () => {
-      try {
-        await fn();
-      } catch (error) {
-        console.error(`Error in plugin scheduled task "${name}":`, error);
-      }
-    });
+	unschedule(name) {
+		const task = this.pluginTasks.get(name);
+		if (!task) return false;
+		task.stop();
+		this.pluginTasks.delete(name);
+		return true;
+	}
 
-    this.pluginTasks.set(name, task);
-    return task;
-  }
+	setupTasks() {
+		for (const [name, expression, method] of [
+			["daily-reset", "0 0 * * *", "runDailyReset"],
+			["weekly-reset", "0 0 * * 1", "runWeeklyReset"],
+			["leaderboards", "0 * * * *", "updateLeaderboards"],
+			["role-rewards", "*/30 * * * *", "checkAllRoleRewards"],
+			["birthdays", "0 8 * * *", "checkBirthdays"],
+		]) {
+			this.schedule(`core:${name}`, expression, () => this[method]());
+		}
+		if (this.env.TRIAL_MODE === "true") {
+			this.schedule("core:trial-reset", "0 */5 * * *", () => this.runTrialReset());
+		}
+	}
 
-  unschedule(name) {
-    const task = this.pluginTasks.get(name);
-    if (!task) return false;
-    task.stop();
-    this.pluginTasks.delete(name);
-    return true;
-  }
-
-  setupTasks() {
-    // Daily reset at midnight UTC
-    cron.schedule("0 0 * * *", async () => {
-      console.log("🕛 Running daily reset task...");
-      await this.runDailyReset();
-    });
-
-    // Weekly reset on Monday at midnight UTC
-    cron.schedule("0 0 * * 1", async () => {
-      console.log("🗓️ Running weekly reset task...");
-      await this.runWeeklyReset();
-    });
-
-    // Update leaderboards every hour
-    cron.schedule("0 * * * *", async () => {
-      console.log("🏆 Updating leaderboards...");
-      await this.updateLeaderboards();
-    });
-
-    // Role check every 30 minutes
-    cron.schedule("*/30 * * * *", async () => {
-      console.log("🎭 Running role checks...");
-      await this.checkAllRoleRewards();
-    });
-
-    // Birthday check daily at 8 AM UTC
-    cron.schedule("0 8 * * *", async () => {
-      console.log("🎂 Checking birthdays...");
-      await this.checkBirthdays();
-    });
-
-    // Trial reset every 5 hours (only when TRIAL_MODE is enabled)
-    if (process.env.TRIAL_MODE === "true") {
-      cron.schedule("0 */5 * * *", async () => {
-        console.log("🔄 Running trial reset task (every 5 hours)...");
-        await this.runTrialReset();
-      });
-      console.log("⚖️ Trial mode scheduler active: will reset every 5 hours");
-    }
-
-    console.log("⏰ Task scheduler initialized");
-  }
+	shutdown() {
+		if (this._shutdownPromise) return this._shutdownPromise;
+		this._stopping = true;
+		const errors = [];
+		for (const task of this.pluginTasks.values()) {
+			try { task.stop(); } catch (error) { errors.push(error); }
+		}
+		this.pluginTasks.clear();
+		for (const timer of this._timeouts) this.timers.clearTimeout(timer);
+		this._timeouts.clear();
+		this._shutdownPromise = Promise.allSettled([...this._running.values(), this._birthdayWork]).then(() => {
+			if (errors.length) throw new AggregateError(errors, "Scheduled task shutdown failed");
+		});
+		return this._shutdownPromise;
+	}
 
   async runDailyReset() {
     try {
-      const db = await Database.getInstance();
+      const db = this.client.db || await Database.getInstance();
       for (const guild of this.client.guilds.cache.values()) {
         await db.resetDailyStats(guild.id);
         console.log(`📅 Reset daily stats for ${guild.name}`);
@@ -91,7 +92,7 @@ class TaskScheduler {
 
   async runWeeklyReset() {
     try {
-      const db = await Database.getInstance();
+      const db = this.client.db || await Database.getInstance();
       for (const guild of this.client.guilds.cache.values()) {
         await db.resetWeeklyStats(guild.id);
         console.log(`🗓️ Reset weekly stats for ${guild.name}`);
@@ -103,7 +104,7 @@ class TaskScheduler {
 
   async updateLeaderboards() {
     try {
-      const db = await Database.getInstance();
+      const db = this.client.db || await Database.getInstance();
       for (const guild of this.client.guilds.cache.values()) {
         const topUsers = await db.getTopUsers(guild.id, 50);
 
@@ -123,7 +124,7 @@ class TaskScheduler {
 
   async checkAllRoleRewards() {
     try {
-      const db = await Database.getInstance();
+      const db = this.client.db || await Database.getInstance();
       for (const guild of this.client.guilds.cache.values()) {
         const config = await db.getServerConfig(guild.id);
 
@@ -163,7 +164,7 @@ class TaskScheduler {
 
   async checkAndAssignRoles(member, guildId) {
     try {
-      const db = await Database.getInstance();
+      const db = this.client.db || await Database.getInstance();
       const roleCheck = await db.checkRoleRewards(member.id, guildId);
       const currentRoleIds = member.roles.cache.map((role) => role.id);
 
@@ -266,12 +267,23 @@ class TaskScheduler {
     }
   }
 
-  async checkBirthdays() {
+	checkBirthdays(member) {
+		// Join-triggered and daily checks share a queue so they cannot announce
+		// the same birthday from two stale lastCelebrated snapshots.
+		this._birthdayWork = (this._birthdayWork || Promise.resolve()).then(() => {
+			if (!this._stopping) return this._checkBirthdays(member);
+		}).catch((error) => console.error("Error checking birthdays:", error));
+		return this._birthdayWork;
+	}
+
+  async _checkBirthdays(joiningMember) {
     try {
-      const db = await Database.getInstance();
+      const db = this.client.db || await Database.getInstance();
       const today = new Date();
 
-      for (const guild of this.client.guilds.cache.values()) {
+      const guilds = joiningMember ? [joiningMember.guild] : this.client.guilds.cache.values();
+      for (const guild of guilds) {
+        if (this._stopping) break;
         try {
           // Get server config for birthday settings
           const config = await db.getServerConfig(guild.id);
@@ -291,6 +303,7 @@ class TaskScheduler {
           const birthdays = await db.Birthday.find({
             guildId: guild.id,
             isPrivate: false,
+            ...(joiningMember ? { userId: joiningMember.id } : {}),
           });
 
           const todaysBirthdays = birthdays.filter((birthday) => {
@@ -301,29 +314,30 @@ class TaskScheduler {
 
             // Check if it's their birthday today and hasn't been celebrated today
             const isBirthdayToday =
-              birthDate.getMonth() === today.getMonth() &&
-              birthDate.getDate() === today.getDate();
+              birthDate.getUTCMonth() === today.getUTCMonth() &&
+              birthDate.getUTCDate() === today.getUTCDate();
 
             const notCelebratedToday =
               !lastCelebrated ||
-              lastCelebrated.toDateString() !== today.toDateString();
+              lastCelebrated.toISOString().slice(0, 10) !== today.toISOString().slice(0, 10);
 
             return isBirthdayToday && notCelebratedToday;
           });
 
           for (const birthday of todaysBirthdays) {
+            if (this._stopping) break;
             try {
-              const member = await guild.members
+              const member = joiningMember || await guild.members
                 .fetch(birthday.userId)
                 .catch(() => null);
               if (!member) continue;
 
               // Calculate age if birth year is available
               let ageText = "";
-              const birthYear = birthday.birthdayDate.getFullYear();
+              const birthYear = new Date(birthday.birthdayDate).getUTCFullYear();
               if (birthYear > 1900) {
                 // If a real year was provided
-                const age = today.getFullYear() - birthYear;
+                const age = today.getUTCFullYear() - birthYear;
                 ageText = ` (turning ${age})`;
               }
 
@@ -373,21 +387,20 @@ class TaskScheduler {
                     );
 
                     // Schedule role removal after 24 hours
-                    setTimeout(async () => {
-                      try {
-                        if (member.roles.cache.has(birthdayRole.id)) {
-                          await member.roles.remove(
-                            birthdayRole,
-                            "Birthday celebration ended"
-                          );
-                          console.log(
-                            `🎂 Removed birthday role from ${member.user.username}`
-                          );
-                        }
-                      } catch (error) {
-                        console.error("Error removing birthday role:", error);
-                      }
-                    }, 24 * 60 * 60 * 1000); // 24 hours
+					if (!this._stopping) {
+						const timer = this.timers.setTimeout(() => {
+							this._timeouts.delete(timer);
+							if (this._stopping) return;
+							const removal = Promise.resolve().then(async () => {
+								if (member.roles.cache.has(birthdayRole.id)) {
+									await member.roles.remove(birthdayRole, "Birthday celebration ended");
+								}
+							}).catch((error) => console.error("Error removing birthday role:", error))
+								.finally(() => this._running.delete(timer));
+							this._running.set(timer, removal);
+						}, 24 * 60 * 60 * 1000);
+						this._timeouts.add(timer);
+					}
                   } catch (error) {
                     console.error("Error giving birthday role:", error);
                   }

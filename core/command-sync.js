@@ -15,6 +15,7 @@
  */
 
 const { createLogger } = require("./logger");
+const { inspect } = require("util");
 
 const logger = createLogger("CommandSync");
 
@@ -29,29 +30,36 @@ const logger = createLogger("CommandSync");
  */
 function guildCommandBody(pluginManager, client, guildId) {
 	const body = [];
-	const seen = new Map(); // command name → plugin that owns it
-	for (const [pluginName, state] of pluginManager.plugins) {
-		const gateable = pluginManager.isGuildGateable(pluginName);
-		if (gateable && !pluginManager.isEnabledForGuild(guildId, pluginName)) {
-			continue;
+	// Resolve ownership before filtering: a stale enabled owner must never
+	// expose a disabled owner's command through a first-wins deduplication.
+	const seen = new Set();
+	for (const [commandName, command] of client.commands) {
+		const pluginName = pluginManager.getCommandOwner(command);
+		const state = pluginManager.plugins.get(pluginName);
+		if (!state || state.enabled === false || state.loaded === false) continue;
+		if (pluginManager.isGuildGateable(pluginName) && !pluginManager.isEnabledForGuild(guildId, pluginName)) continue;
+		if (!command?.data) continue;
+		if (command.guildIds !== undefined) {
+			if (!Array.isArray(command.guildIds)) throw new Error(`Invalid guildIds for "${commandName}"`);
+			if (!command.guildIds.includes(guildId)) continue;
 		}
-		for (const commandName of state.commandNames || []) {
-			// Two plugins registering the same command name would make the bulk
-			// PUT fail wholesale with an opaque "Invalid Form Body" — first
-			// registration wins (matches the client.commands Map behavior).
-			if (seen.has(commandName)) {
-				logger.warn(
-					`Command /${commandName} registered by both ${seen.get(commandName)} and ${pluginName}; keeping ${seen.get(commandName)}'s`,
-				);
-				continue;
+		const data = command.guildData === undefined
+			? command.data
+			: Object.prototype.hasOwnProperty.call(command.guildData || {}, guildId) && command.guildData[guildId];
+		if (!data) continue;
+		let definition;
+		try {
+			definition = JSON.parse(JSON.stringify(typeof data.toJSON === "function" ? data.toJSON() : data));
+			if (!definition || definition.name !== commandName || ![1, 2, 3].includes(definition.type ?? 1)) {
+				throw new Error("Invalid application-command name or type");
 			}
-			seen.set(commandName, pluginName);
-			const command = client.commands.get(commandName);
-			if (!command?.data) continue;
-			// Worker plugins send pre-serialized plain JSON; in-repo plugins may
-			// still hand over a SlashCommandBuilder.
-			body.push(command.data.toJSON ? command.data.toJSON() : command.data);
+		} catch (error) {
+			throw new Error(`Cannot serialize command "${commandName}" for guild ${guildId}: ${error.message}`);
 		}
+		const key = `${definition.type ?? 1}:${definition.name}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		body.push(definition);
 	}
 	return body;
 }
@@ -65,8 +73,8 @@ async function syncGuildCommands(pluginManager, client, guildId) {
 	if (!guild?.commands?.set) {
 		return { ok: false, error: "guild unavailable" };
 	}
-	const body = guildCommandBody(pluginManager, client, guildId);
 	try {
+		const body = guildCommandBody(pluginManager, client, guildId);
 		await guild.commands.set(body);
 		logger.info(`Synced ${body.length} commands to guild ${guildId}`);
 		return { ok: true, count: body.length };
@@ -76,7 +84,7 @@ async function syncGuildCommands(pluginManager, client, guildId) {
 		const detail = err.rawError?.errors || err.errors;
 		logger.error(
 			`Failed to sync commands to guild ${guildId}: ${err.message}`,
-			detail ? JSON.stringify(detail) : "",
+			detail ? inspect(detail, { depth: 4, customInspect: false, getters: false }) : "",
 		);
 		return { ok: false, error: err.message };
 	}

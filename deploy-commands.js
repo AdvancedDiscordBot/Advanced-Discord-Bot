@@ -1,168 +1,70 @@
-const { REST, Routes } = require("discord.js");
-const { readdirSync, existsSync } = require("fs");
-const path = require("path");
-require("dotenv").config();
+const { Client, Collection, REST, Routes, ApplicationCommandManager } = require("discord.js");
+const Database = require("./utils/database");
+const { HookBus } = require("./core/HookBus");
+const { PluginManager } = require("./core/PluginManager");
+const { guildCommandBody } = require("./core/command-sync");
+const { createLogger } = require("./core/logger");
 
-// 🚀 Initialize commands array
-const commands = [];
+async function deployCommands({ clientId, guildId, token, dryRun = false, allowEmpty = false }) {
+	if (!/^\d{17,20}$/.test(clientId || "")) throw new Error("A valid CLIENT_ID is required");
+	if (!/^\d{17,20}$/.test(guildId || "")) throw new Error("A valid GUILD_ID is required; global overwrites are not supported");
+	if (!dryRun && !token) throw new Error("DISCORD_TOKEN is required for deployment");
 
-// 📁 Load all command files
-const commandsPath = path.join(__dirname, "commands");
-const pluginsPath = path.join(__dirname, "plugins");
-
-console.log("🔄 Loading commands...");
-
-// Function to recursively load commands from folders
-function loadCommandsFromDirectory(dirPath) {
-	const items = readdirSync(dirPath, { withFileTypes: true });
-
-	for (const item of items) {
-		const fullPath = path.join(dirPath, item.name);
-
-		if (item.isDirectory()) {
-			loadCommandsFromDirectory(fullPath);
-		} else if (item.isFile() && item.name.endsWith(".js")) {
-			try {
-				const command = require(fullPath);
-
-				if ("data" in command && "execute" in command) {
-					commands.push(command.data.toJSON());
-
-					const relativePath = path.relative(commandsPath, fullPath);
-					const category =
-						path.dirname(relativePath) === "."
-							? "root"
-							: path.dirname(relativePath);
-
-					console.log(`✅ Loaded: ${command.data.name} (${category})`);
-				} else {
-					console.log(
-						`⚠️ Skipped: ${fullPath} (missing "data" or "execute" property)`,
-					);
-				}
-			} catch (error) {
-				console.error(`❌ Error loading command ${fullPath}:`, error.message);
+	const client = new Client({ intents: [] });
+	client.commands = new Collection();
+	client.hooks = new HookBus(createLogger("DeployHooks"));
+	let db;
+	let manager;
+	try {
+		db = await Database.getInstance();
+		manager = new PluginManager({ client, db, hooks: client.hooks, config: { commandCollection: true } });
+		client.pluginManager = manager;
+		// Keep the normal trust boundary: only explicitly raw-client plugins
+		// load in-process. No gateway login or ready event is needed to collect.
+		manager.enableIsolation();
+		await manager.loadAll();
+		const commands = guildCommandBody(manager, client, guildId)
+			.map((command) => ApplicationCommandManager.transformCommand(command));
+		if (!dryRun) {
+			if (!commands.length && !allowEmpty) {
+				throw new Error("Refusing an empty command overwrite; inspect --dry-run or explicitly pass --allow-empty");
 			}
+			const rest = new REST({ timeout: 15000 }).setToken(token);
+			await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: commands });
+		}
+		return { dryRun, clientId, guildId, count: commands.length, commands };
+	} finally {
+		try {
+			if (manager) await manager.shutdown("command-collection");
+		} finally {
+			try { await client.destroy(); }
+			finally { if (db) await db.close(); }
 		}
 	}
 }
 
-function loadPluginCommands(pluginsDir) {
-	if (!pluginsDir) return;
-
-	if (!existsSync(pluginsDir)) {
+async function main(argv = process.argv.slice(2), env = process.env) {
+	if (argv.includes("--help")) {
+		console.log("CLIENT_ID=<application> GUILD_ID=<guild> node deploy-commands.js [--dry-run] [--allow-empty]\nRequires the configured MongoDB database; writes require DISCORD_TOKEN. Never performs a global overwrite.");
 		return;
 	}
-
-	const pluginDirs = readdirSync(pluginsDir, { withFileTypes: true });
-
-	for (const pluginDir of pluginDirs) {
-		if (!pluginDir.isDirectory()) continue;
-
-		const pluginCommandsPath = path.join(
-			pluginsDir,
-			pluginDir.name,
-			"commands",
-		);
-
-		if (!existsSync(pluginCommandsPath)) {
-			continue;
-		}
-
-		loadCommandsFromDirectory(pluginCommandsPath);
+	for (const arg of argv) {
+		if (!["--dry-run", "--allow-empty"].includes(arg)) throw new Error(`Unknown argument: ${arg}`);
 	}
+	const result = await deployCommands({
+		clientId: env.CLIENT_ID, guildId: env.GUILD_ID, token: env.DISCORD_TOKEN,
+		dryRun: argv.includes("--dry-run"), allowEmpty: argv.includes("--allow-empty"),
+	});
+	console.log(JSON.stringify(result, null, 2));
+	return result;
 }
 
-// Load all commands
-if (existsSync(commandsPath)) {
-	loadCommandsFromDirectory(commandsPath);
+if (require.main === module) {
+	require("dotenv").config();
+	main().catch((error) => {
+		console.error(`Command deployment failed: ${error.message}`);
+		process.exitCode = 1;
+	});
 }
-loadPluginCommands(pluginsPath);
 
-// 🌐 Initialize REST client
-const rest = new REST().setToken(process.env.DISCORD_TOKEN);
-
-// ⏱️ Timeout wrapper — forces rejection if Discord hangs instead of responding
-const withTimeout = (promise, ms = 15000) =>
-	Promise.race([
-		promise,
-		new Promise((_, reject) =>
-			setTimeout(
-				() =>
-					reject(
-						Object.assign(new Error("timeout"), {
-							status: 429,
-							retryAfter: 60,
-						}),
-					),
-				ms,
-			),
-		),
-	]);
-
-// 🔁 Retry wrapper — waits on rate limit and retries automatically
-const deployWithRetry = async (route, body, retries = 5) => {
-	for (let i = 0; i < retries; i++) {
-		try {
-			return await withTimeout(rest.put(route, { body }));
-		} catch (error) {
-			if (error.status === 429) {
-				const wait = (error.retryAfter ?? 60) * 1000;
-				console.log(
-					`⏳ Rate limited. Waiting ${wait / 1000}s before retry ${i + 1}/${retries}...`,
-				);
-				await new Promise((r) => setTimeout(r, wait));
-			} else {
-				throw error;
-			}
-		}
-	}
-	throw new Error("Max retries exceeded");
-};
-
-// 🚀 Deploy commands
-(async () => {
-	try {
-		console.log(
-			`\n🚀 Started refreshing ${commands.length} application (/) commands.`,
-		);
-
-		// Optional: log REST responses for debugging
-		rest.on("response", (req, res) => {
-			console.log(`[REST] ${req.method} ${req.path} → ${res.status}`);
-		});
-
-		// Single PUT replaces all existing commands — no need to clear first
-		const data = await deployWithRetry(
-			process.env.GUILD_ID
-				? Routes.applicationGuildCommands(
-						process.env.CLIENT_ID,
-						process.env.GUILD_ID,
-					)
-				: Routes.applicationCommands(process.env.CLIENT_ID),
-			commands,
-		);
-
-		console.log(
-			`✅ Successfully reloaded ${data.length} application (/) commands.`,
-		);
-		console.log(
-			`📍 Deployment: ${
-				process.env.GUILD_ID
-					? "Guild-specific (Development)"
-					: "Global (Production)"
-			}`,
-		);
-
-		// 📋 List deployed commands
-		console.log("\n📋 Deployed commands:");
-		commands.forEach((cmd, index) => {
-			console.log(`${index + 1}. /${cmd.name} - ${cmd.description}`);
-		});
-
-		console.log("\n🎉 Command deployment completed successfully!");
-	} catch (error) {
-		console.error("❌ Error deploying commands:", error.message);
-		process.exit(1);
-	}
-})();
+module.exports = { deployCommands, main };

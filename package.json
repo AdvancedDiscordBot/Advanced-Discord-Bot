@@ -7,7 +7,9 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "deploy": "node scripts/build-plugins.js && node deploy-commands.js",
-    "test": "node --test"
+    "test": "node --test",
+    "test:integration": "node --test scripts/check-plugin-runtime.js",
+    "test:dashboard": "node plugins/administration/web/checks/dashboard-runtime.cjs"
   },
   "keywords": [
     "discord",
@@ -69,6 +71,6 @@
     "nodemon": "^3.0.2"
   },
   "engines": {
-    "node": ">=16.0.0"
+    "node": ">=20.0.0"
   }
 }

@@ -5,26 +5,25 @@ module.exports = {
 	name: Events.MessageCreate,
 	async execute(message, client) {
 		// 🚫 Ignore bot messages and DMs
-		if (message.author.bot || !message.guild) return;
-
-		if (client.hooks) {
-			const hookResult = await client.hooks.emitHook("beforeMessage", {
-				message,
-			});
-
-			if (hookResult.cancelled) {
-				return;
-			}
-
-			message = hookResult.payload.message || message;
-		}
-
-		const db = await Database.getInstance();
-		await db.ensureConnection();
+		if (message.author.bot || !message.guild || client.shuttingDown) return;
 
 		try {
-			// 🎯 XP TRACKING LOGIC FIRST
-			await handleXPTracking(message, db, client);
+			if (client.hooks) {
+				const hookResult = await client.hooks.emitHook("beforeMessage", {
+					message,
+				});
+
+				if (hookResult.cancelled) return;
+
+				message = hookResult.payload.message || message;
+			}
+
+			const manager = client.pluginManager;
+			const levels = manager?.plugins.get("adb-plugin-levels");
+			if (!levels?.enabled || levels.loaded === false || !manager.isEnabledForGuild(message.guild.id, "adb-plugin-levels")) {
+				const db = client.db || await Database.getInstance();
+				await handleXPTracking(message, db, client);
+			}
 
 			if (client.hooks) {
 				await client.hooks.emitHook("afterMessage", { message });
@@ -87,6 +86,7 @@ async function handleXPTracking(message, db, client) {
 			if (client.hooks) {
 				await client.hooks.emitHook("onLevelUp", {
 					user: message.author,
+					guild: message.guild,
 					guildId,
 					newLevel: result.newLevel,
 					profile: result.profile,

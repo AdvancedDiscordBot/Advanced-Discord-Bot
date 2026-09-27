@@ -10,7 +10,26 @@
  * declared the required capability in its manifest, the call is denied.
  */
 
+// Only these methods can be invoked on a Core-owned interaction. This is not
+// an arbitrary Discord.js method dispatcher.
+const INTERACTION_METHODS = {
+	reply: "Reply to an owned interaction",
+	deferReply: "Defer an owned interaction reply",
+	editReply: "Edit an owned interaction reply",
+	followUp: "Send a follow-up to an owned interaction",
+	fetchReply: "Fetch an owned interaction reply",
+	deleteReply: "Delete an owned interaction reply",
+	update: "Update an owned message component interaction",
+	deferUpdate: "Defer an owned message component update",
+	showModal: "Show a modal for an owned interaction",
+	respond: "Respond to owned autocomplete choices",
+};
+
 const RPC_METHODS = {
+	...Object.fromEntries(Object.entries(INTERACTION_METHODS).map(([method, description]) => [
+		`interaction.${method}`,
+		{ capability: "discord:SendMessages", handler: `interaction.${method}`, description },
+	])),
 	// ── Database: Plugin Config (own-collection) ────────────────────────
 	"db.getPluginConfig": {
 		capability: "storage:own-collection",
@@ -299,7 +318,7 @@ const RPC_METHODS = {
  * @returns {object|null}
  */
 function getMethodDef(method) {
-	return RPC_METHODS[method] || null;
+	return isValidMethod(method) ? RPC_METHODS[method] : null;
 }
 
 /**
@@ -308,7 +327,7 @@ function getMethodDef(method) {
  * @returns {boolean}
  */
 function isValidMethod(method) {
-	return method in RPC_METHODS;
+	return typeof method === "string" && Object.hasOwn(RPC_METHODS, method);
 }
 
 /**
@@ -325,6 +344,7 @@ function listMethods() {
 
 module.exports = {
 	RPC_METHODS,
+	INTERACTION_METHODS,
 	getMethodDef,
 	isValidMethod,
 	listMethods,

@@ -10,9 +10,8 @@
  * `serializeSchema()` (worker side) walks a compiled schema and emits a plain,
  * clone-safe descriptor. `rehydrateSchema()` (Core side) rebuilds an equivalent
  * `mongoose.Schema` from that descriptor. Only the flat scalar field shapes the
- * ADB plugins use are supported; anything unrecognized is skipped with a note
- * rather than throwing, so a partially-understood schema still yields a usable
- * model instead of a hard failure.
+ * ADB plugins use are supported. Unsupported definitions fail explicitly rather
+ * than registering a model that silently drops fields or validation.
  */
 
 // Mongoose SchemaType `.instance` name → the constructor used in a definition.
@@ -36,11 +35,45 @@ const FUNC_DEFAULTS = {
 
 function serializeDefault(def) {
 	if (typeof def === "function") {
-		if (def === Date.now || def.name === "now") return { __fn: "Date.now" };
-		return undefined; // arbitrary functions are dropped (no safe transport)
+		if (def === Date.now) return { __fn: "Date.now" };
+		throw new Error("Function defaults other than Date.now require direct mode");
 	}
-	// primitives, arrays and plain objects clone fine
-	return { __val: def };
+	return { __val: serializeValue(def) };
+}
+
+// Shared by both sides of IPC: BSON prototypes and document methods do not
+// survive structured clone. IDs travel as strings that Mongoose can cast back.
+function serializeValue(value, omitKeys = new Set(), seen = new WeakSet()) {
+	if (typeof value === "function" || typeof value === "symbol") return undefined;
+	if (value === null || typeof value !== "object") return value;
+	if (value instanceof Date || value instanceof RegExp) return value;
+	if (Buffer.isBuffer(value)) return Buffer.from(value);
+	if (ArrayBuffer.isView(value)) return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+	if (value instanceof ArrayBuffer) return Buffer.from(value);
+	if (value._bsontype === "ObjectId") return value.toHexString();
+	if (value._bsontype === "Decimal128") return value.toString();
+	if (value._bsontype === "Binary") return Buffer.from(value.buffer);
+	if (seen.has(value)) return undefined;
+	seen.add(value);
+	try {
+		if (typeof value.toObject === "function") {
+			const plain = value.toObject({ flattenMaps: true, transform: false, virtuals: false });
+			if (plain !== value) return serializeValue(plain, omitKeys, seen);
+		}
+		if (typeof value.toJSON === "function") {
+			const plain = value.toJSON();
+			if (plain !== value) return serializeValue(plain, omitKeys, seen);
+		}
+		if (Array.isArray(value) || value instanceof Set) {
+			return Array.from(value, (item) => serializeValue(item, omitKeys, seen));
+		}
+		const entries = value instanceof Map ? [...value] : Object.entries(value);
+		return Object.fromEntries(entries
+			.filter(([key, item]) => !omitKeys.has(String(key).toLowerCase()) && typeof item !== "function" && typeof item !== "symbol")
+			.map(([key, item]) => [key, serializeValue(item, omitKeys, seen)]));
+	} finally {
+		seen.delete(value);
+	}
 }
 
 /**
@@ -54,23 +87,27 @@ function serializeSchema(schema) {
 	}
 
 	const fields = {};
-	const skipped = [];
 
 	for (const [pathName, schemaType] of Object.entries(schema.paths)) {
 		if (pathName === "_id" || pathName === "__v") continue;
 
 		const instance = schemaType.instance;
-		if (!INSTANCE_TO_TYPE[instance]) {
-			skipped.push(`${pathName}:${instance}`);
-			continue;
+		if (!Object.hasOwn(INSTANCE_TO_TYPE, instance)) {
+			throw new Error(`Unsupported isolated schema field: ${pathName}:${instance}`);
 		}
 
 		const opts = schemaType.options || {};
 		const field = { type: instance };
 
-		if (opts.required) field.required = true;
+		if (typeof opts.required === "function" || opts.validate || opts.get || opts.set) {
+			throw new Error(`Custom validation/accessors require direct mode: ${pathName}`);
+		}
+		if (opts.required) field.required = opts.required;
 		if (Array.isArray(opts.enum)) field.enum = opts.enum;
-		if ("default" in opts) {
+		for (const key of ["min", "max", "minlength", "maxlength", "minLength", "maxLength", "match", "trim", "lowercase", "uppercase"]) {
+			if (opts[key] !== undefined) field[key] = opts[key];
+		}
+		if (opts.default !== undefined) {
 			const d = serializeDefault(opts.default);
 			if (d !== undefined) field.default = d;
 		}
@@ -102,7 +139,6 @@ function serializeSchema(schema) {
 	// __adbSchema marks the payload as a serialized descriptor (not a raw
 	// Schema) so the broker knows to rehydrate it before calling mongoose.model.
 	const descriptor = { fields, indexes, options, __adbSchema: 1 };
-	if (skipped.length) descriptor.skipped = skipped;
 	return descriptor;
 }
 
@@ -119,17 +155,24 @@ function rehydrateSchema(descriptor) {
 
 	const def = {};
 	for (const [pathName, field] of Object.entries(descriptor.fields)) {
+		if (!field || !Object.hasOwn(INSTANCE_TO_TYPE, field.type)) {
+			throw new Error(`Unsupported isolated schema field: ${pathName}:${field?.type}`);
+		}
 		const typeFactory = INSTANCE_TO_TYPE[field.type];
-		if (!typeFactory) continue;
 
 		const pathDef = { type: typeFactory() };
-		if (field.required) pathDef.required = true;
+		if (field.required) pathDef.required = field.required;
 		if (Array.isArray(field.enum)) pathDef.enum = field.enum;
+		for (const key of ["min", "max", "minlength", "maxlength", "minLength", "maxLength", "match", "trim", "lowercase", "uppercase"]) {
+			if (field[key] !== undefined) pathDef[key] = field[key];
+		}
 		if (field.default && typeof field.default === "object") {
-			if ("__fn" in field.default && FUNC_DEFAULTS[field.default.__fn]) {
+			if ("__fn" in field.default && Object.hasOwn(FUNC_DEFAULTS, field.default.__fn)) {
 				pathDef.default = FUNC_DEFAULTS[field.default.__fn]();
 			} else if ("__val" in field.default) {
 				pathDef.default = field.default.__val;
+			} else {
+				throw new Error(`Unsupported isolated schema default: ${pathName}`);
 			}
 		}
 		def[pathName] = pathDef;
@@ -148,4 +191,4 @@ function rehydrateSchema(descriptor) {
 	return schema;
 }
 
-module.exports = { serializeSchema, rehydrateSchema };
+module.exports = { serializeSchema, rehydrateSchema, serializeValue };

@@ -43,10 +43,11 @@ const RISK_TEMPLATES = {
 	"discord.ChannelInfo": "read information about your channels",
 	"discord.UseApplicationCommands": "use application commands in your server",
 	"discord.Connect": "connect to voice channels in your server",
+	"discord.Speak": "speak and play audio in your server's voice channels",
 	"discord.MoveMembers": "move members between voice channels in your server",
 
 	// storage.<scope>
-	"storage.own-collection": "store and retrieve its own data (isolated from other plugins)",
+	"storage.own-collection": "store and retrieve its own data",
 	"storage.read-profiles": "read member profiles (XP, levels, warnings, points)",
 	"storage.write-profiles": "modify member profiles (XP, levels, warnings, points)",
 
@@ -296,6 +297,8 @@ function generateRiskCard(manifest) {
 function generateWithheld(manifest) {
 	const m = normalize(manifest);
 	const perm = m.permissions;
+	// Full host access bypasses every broker restriction; do not promise otherwise.
+	if (perm.system.includes("raw-client")) return [];
 	return WITHHELD_FACETS.filter((f) => !f.granted(perm)).map((f) => f.label);
 }
 

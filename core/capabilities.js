@@ -33,6 +33,7 @@ const CAPABILITY_SCHEMA = {
 			"ChannelInfo",
 			"UseApplicationCommands",
 			"Connect",
+			"Speak",
 			"MoveMembers",
 		],
 		description: "Discord API actions the plugin may perform",

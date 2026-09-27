@@ -18,6 +18,7 @@ function fakeManager({ enabled = [], gateable = [], plugins = {} } = {}) {
 		),
 		isGuildGateable: (name) => gateable.includes(name),
 		isEnabledForGuild: (guildId, name) => enabled.includes(`${guildId}:${name}`),
+		getCommandOwner: (command) => Object.entries(plugins).find(([, names]) => names.includes(command.data.name))?.[0] || null,
 	};
 }
 
@@ -75,7 +76,7 @@ describe("command-sync", () => {
 	it("serializes SlashCommandBuilder-style data via toJSON", () => {
 		const pm = fakeManager({ plugins: { administration: ["logs"] } });
 		const client = fakeClient({
-			logs: { data: { toJSON: () => ({ name: "logs", description: "x" }) } },
+			logs: { data: { name: "logs", toJSON: () => ({ name: "logs", description: "x" }) } },
 		});
 
 		const body = guildCommandBody(pm, client, "g1");

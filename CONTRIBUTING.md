@@ -46,7 +46,7 @@ Plugin-first contributions:
 
 ### Prerequisites
 
-- Node.js 18 or higher
+- Node.js 20 or higher (Node 22 or 24 recommended)
 - MongoDB, local or cloud
 - Discord bot token
 - Discord application client ID

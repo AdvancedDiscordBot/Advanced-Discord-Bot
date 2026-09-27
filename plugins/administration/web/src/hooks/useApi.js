@@ -4,9 +4,12 @@ export function useApi(url) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [revision, setRevision] = useState(0);
 
   useEffect(() => {
     if (!url) {
+      setData(null);
+      setError(null);
       setLoading(false);
       return;
     }
@@ -31,10 +34,10 @@ export function useApi(url) {
     fetchData();
 
     return () => { cancelled = true; };
-  }, [url]);
+  }, [url, revision]);
 
   const refetch = useCallback(() => {
-    setLoading(true);
+    setRevision((value) => value + 1);
   }, []);
 
   return { data, loading, error, refetch };

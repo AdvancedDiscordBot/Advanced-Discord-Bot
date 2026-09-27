@@ -11,7 +11,9 @@
  */
 
 const { EventEmitter } = require("events");
-const { getMethodDef, isValidMethod } = require("./methods");
+const { randomUUID } = require("crypto");
+const { getMethodDef, isValidMethod, INTERACTION_METHODS } = require("./methods");
+const { serializeValue } = require("./schema-serialize");
 const { createLogger } = require("../logger");
 const { ResourceTracker, withResourceLimits, createLimitsFromCapabilities } = require("./resource-limits");
 const { metricsCollector } = require("./metrics");
@@ -23,6 +25,8 @@ const NETWORK_MAX_BODY_BYTES = 5 * 1024 * 1024;
 // Wall-clock ceiling for a single network.fetch, independent of the plugin's
 // per-call execution budget.
 const NETWORK_TIMEOUT_MS = 15_000;
+const INTERACTION_TTL_MS = 15 * 60 * 1000;
+const DISCORD_PRIVATE_KEYS = new Set(["client", "token", "webhook", "authorization"]);
 
 class CapabilityBroker extends EventEmitter {
 	/**
@@ -61,6 +65,10 @@ class CapabilityBroker extends EventEmitter {
 
 		/** Stats for observability */
 		this.stats = { requests: 0, denied: 0, errors: 0, suspended: 0 };
+		this.interactions = new Map();
+		this.interactionOwners = new Map();
+		this.modalOwners = new Map();
+		this.messageOwners = new Map();
 
 		// Start metrics collection
 		metricsCollector.start(60000);
@@ -94,6 +102,7 @@ class CapabilityBroker extends EventEmitter {
 	 * Remove a plugin's capabilities (on unload).
 	 */
 	unregisterCapabilities(pluginId) {
+		const wasRegistered = this.pluginCapabilities.has(pluginId);
 		this.pluginCapabilities.delete(pluginId);
 		this.pluginNames.delete(pluginId);
 		this.networkAllowlists.delete(pluginId);
@@ -103,7 +112,156 @@ class CapabilityBroker extends EventEmitter {
 			tracker.stop();
 			this.resourceTrackers.delete(pluginId);
 		}
-		metricsCollector.unregisterPlugin(pluginId);
+		if (wasRegistered) metricsCollector.unregisterPlugin(pluginId);
+		this.releasePluginInteractions(pluginId);
+		for (const [key, unsubscribe] of this._hookSubscriptions || []) {
+			if (!key.startsWith(`${pluginId}:`)) continue;
+			unsubscribe();
+			this._hookSubscriptions.delete(key);
+		}
+		for (const [key, entry] of this._scheduledTasks || []) {
+			if (entry.pluginId !== pluginId) continue;
+			entry.task.stop();
+			this._scheduledTasks.delete(key);
+		}
+		for (const key of this._modelRegistry?.keys() || []) {
+			if (key.startsWith(`${pluginId}:`)) this._modelRegistry.delete(key);
+		}
+		this.emit("plugin:unregistered", pluginId);
+	}
+
+	// Interaction tokens never leave this registry in the Core process.
+	bindInteraction(pluginId, interaction) {
+		if (!this.pluginCapabilities.has(pluginId) || this.isSuspended(pluginId)) {
+			throw new Error("Plugin is not available for interaction handling");
+		}
+		const existing = this.interactions.get(this.interactionOwners.get(interaction.id));
+		if (existing) {
+			if (existing.pluginId !== pluginId) throw new Error("Interaction is owned by another plugin");
+			return existing.handle;
+		}
+		const handle = randomUUID();
+		const expiresAt = Math.min(interaction.createdTimestamp || Date.now(), Date.now()) + INTERACTION_TTL_MS;
+		const timer = setTimeout(() => this.releaseInteraction(handle), Math.max(0, expiresAt - Date.now()));
+		timer.unref();
+		this.interactions.set(handle, { pluginId, interaction, handle, expiresAt, timer, queue: Promise.resolve(), messageIds: new Set(), modalKeys: new Set() });
+		this.interactionOwners.set(interaction.id, handle);
+		return handle;
+	}
+
+	releaseInteraction(handle) {
+		const entry = this.interactions.get(handle);
+		if (!entry) return;
+		clearTimeout(entry.timer);
+		this.interactions.delete(handle);
+		this.interactionOwners.delete(entry.interaction.id);
+		for (const key of entry.modalKeys) {
+			if (this.modalOwners.get(key) === handle) this.modalOwners.delete(key);
+		}
+		for (const key of entry.messageIds) {
+			if (this.messageOwners.get(key) === handle) this.messageOwners.delete(key);
+		}
+	}
+
+	releasePluginInteractions(pluginId) {
+		for (const [handle, entry] of this.interactions) {
+			if (entry.pluginId === pluginId) this.releaseInteraction(handle);
+		}
+	}
+
+	/** Only continuations of this plugin's own messages/modals may gain reply authority. */
+	interactionOwner(interaction) {
+		let handle;
+		if (interaction.type === 5) {
+			handle = this.modalOwners.get(`${interaction.guildId || ""}:${interaction.user?.id}:${interaction.customId}`);
+		} else if (interaction.type === 3) {
+			handle = this.messageOwners.get(interaction.message?.id)
+				|| this.interactionOwners.get(interaction.message?.interactionMetadata?.id || interaction.message?.interaction?.id);
+		}
+		const entry = this.interactions.get(handle);
+		return entry && entry.expiresAt > Date.now() ? entry.pluginId : null;
+	}
+
+	async _interactionAction(pluginId, action, params) {
+		const entry = this.interactions.get(params.handle);
+		if (!entry || entry.pluginId !== pluginId || entry.expiresAt <= Date.now()) {
+			throw new Error("Interaction is not authorized or has expired");
+		}
+		const run = entry.queue.then(async () => {
+			if (this.interactions.get(params.handle) !== entry || entry.expiresAt <= Date.now()
+				|| !this.pluginCapabilities.has(pluginId) || this.isSuspended(pluginId)) {
+				throw new Error("Interaction is not authorized or has expired");
+			}
+			const interaction = entry.interaction;
+			if (typeof interaction[action] !== "function") throw new Error(`Interaction does not support ${action}`);
+			let payload = params.payload;
+			if (!["showModal", "respond", "fetchReply", "deleteReply"].includes(action)) {
+				payload = this._messagePayload(payload ?? {});
+			}
+			const messageId = ["fetchReply", "deleteReply"].includes(action) ? payload : payload?.message;
+			if (messageId != null && messageId !== "@original" && !entry.messageIds.has(messageId)) {
+				throw new Error("Reply message is not owned by this interaction");
+			}
+			const modalKey = action === "showModal" && payload?.custom_id
+				? `${interaction.guildId || ""}:${interaction.user?.id}:${payload.custom_id}` : null;
+			const previousModal = this.modalOwners.get(modalKey);
+			if (modalKey) {
+				const owner = this.interactions.get(previousModal);
+				if (owner && owner.expiresAt > Date.now() && owner.pluginId !== pluginId) {
+					throw new Error("Modal custom ID is already owned by another plugin; use a unique ID");
+				}
+				// Reserve before awaiting Discord so concurrent plugins cannot race
+				// to claim the same user's pending modal.
+				this.modalOwners.set(modalKey, entry.handle);
+				entry.modalKeys.add(modalKey);
+			}
+			let result;
+			try {
+				result = await interaction[action](payload);
+			} catch (error) {
+				if (modalKey && this.modalOwners.get(modalKey) === entry.handle) {
+					if (this.interactions.has(previousModal)) this.modalOwners.set(modalKey, previousModal);
+					else this.modalOwners.delete(modalKey);
+				}
+				throw error;
+			}
+			if (this.interactions.get(entry.handle) !== entry) throw new Error("Interaction expired during execution");
+			const message = result?.resource?.message || result;
+			if (message?.id) {
+				entry.messageIds.add(message.id);
+				this.messageOwners.set(message.id, entry.handle);
+			}
+			return {
+				result: serializeValue(result, DISCORD_PRIVATE_KEYS),
+				state: {
+					deferred: !!interaction.deferred,
+					replied: !!interaction.replied,
+					ephemeral: interaction.ephemeral ?? null,
+					responded: !!interaction.responded,
+				},
+			};
+		});
+		entry.queue = run.catch(() => {});
+		return run;
+	}
+
+	_messagePayload(payload) {
+		if (typeof payload === "string") return { content: payload };
+		const result = { ...payload };
+		if (result.files) {
+			result.files = result.files.map((file) => {
+				let bytes = file?.attachment ?? file?.data ?? file;
+				if (bytes?.type === "Buffer") bytes = bytes.data;
+				if (Array.isArray(bytes) && bytes.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255)) bytes = Buffer.from(bytes);
+				if (ArrayBuffer.isView(bytes)) bytes = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+				if (bytes instanceof ArrayBuffer) bytes = Buffer.from(bytes);
+				// Passing a path or URL here would let discord.js read/fetch on the
+				// host with the Core's authority. Workers must supply upload bytes.
+				if (!Buffer.isBuffer(bytes)) throw new Error("File attachments must contain bytes, not host paths or URLs");
+				return { attachment: bytes, name: file.name || "attachment.bin", ...(file.description ? { description: file.description } : {}) };
+			});
+		}
+		return result;
 	}
 
 	// ── Capability Checking ──────────────────────────────────────────────
@@ -258,8 +416,11 @@ class CapabilityBroker extends EventEmitter {
 	 * send { args: [...] }, _resolveArgs maps them to named params.
 	 * When callers send named params directly, `p === params`.
 	 */
-	async execute(handler, params, pluginId) {
-		const p = params.args ? this._resolveArgs(handler, params.args) : params;
+	async execute(handler, params = {}, pluginId) {
+		if (handler.startsWith("interaction.") && Object.hasOwn(INTERACTION_METHODS, handler.slice(12))) {
+			return this._interactionAction(pluginId, handler.slice(12), params);
+		}
+		const p = serializeValue(params.args ? this._resolveArgs(handler, params.args) : params);
 
 		switch (handler) {
 			// ── Plugin Config ──────────────────────────────────────────
@@ -382,26 +543,8 @@ class CapabilityBroker extends EventEmitter {
 			case "discordSendRichMessage": {
 				const richChannel = await this.client.channels.fetch(p.channelId);
 				if (!richChannel) throw new Error(`Channel not found: ${p.channelId}`);
-				const { EmbedBuilder: RichEmbedBuilder, AttachmentBuilder } = require("discord.js");
-				const sendPayload = {};
-				if (p.content) sendPayload.content = p.content;
-				if (p.embeds && p.embeds.length > 0) {
-					sendPayload.embeds = p.embeds.map((e) => new RichEmbedBuilder(e));
-				}
-				if (p.files && p.files.length > 0) {
-					sendPayload.files = p.files.map((f) => {
-						if (f.data && f.data.type === "Buffer") {
-							return new AttachmentBuilder(Buffer.from(f.data.data), { name: f.name || "attachment.png" });
-						}
-						if (Buffer.isBuffer(f.data)) {
-							return new AttachmentBuilder(f.data, { name: f.name || "attachment.png" });
-						}
-						if (Array.isArray(f.data)) {
-							return new AttachmentBuilder(Buffer.from(f.data), { name: f.name || "attachment.png" });
-						}
-						return f;
-					});
-				}
+				const { channelId, ...payload } = p;
+				const sendPayload = this._messagePayload(payload);
 				const richMsg = await richChannel.send(sendPayload);
 				return { messageId: richMsg.id };
 			}
@@ -409,26 +552,8 @@ class CapabilityBroker extends EventEmitter {
 			case "discordSendDM": {
 				const dmUser = await this.client.users.fetch(p.userId);
 				if (!dmUser) throw new Error(`User not found: ${p.userId}`);
-				const { EmbedBuilder: DmEmbedBuilder, AttachmentBuilder: DmAttachmentBuilder } = require("discord.js");
-				const dmPayload = {};
-				if (p.content) dmPayload.content = p.content;
-				if (p.embeds && p.embeds.length > 0) {
-					dmPayload.embeds = p.embeds.map((e) => new DmEmbedBuilder(e));
-				}
-				if (p.files && p.files.length > 0) {
-					dmPayload.files = p.files.map((f) => {
-						if (f.data && f.data.type === "Buffer") {
-							return new DmAttachmentBuilder(Buffer.from(f.data.data), { name: f.name || "attachment.png" });
-						}
-						if (Buffer.isBuffer(f.data)) {
-							return new DmAttachmentBuilder(f.data, { name: f.name || "attachment.png" });
-						}
-						if (Array.isArray(f.data)) {
-							return new DmAttachmentBuilder(Buffer.from(f.data), { name: f.name || "attachment.png" });
-						}
-						return f;
-					});
-				}
+				const { userId, ...payload } = p;
+				const dmPayload = this._messagePayload(payload);
 				const dmMsg = await dmUser.send(dmPayload);
 				return { messageId: dmMsg.id };
 			}
@@ -492,7 +617,7 @@ class CapabilityBroker extends EventEmitter {
 				const key = `${pluginId}:${p.eventName}`;
 				if (!this._hookSubscriptions.has(key)) {
 					const unsub = this.hooks.on(p.eventName, async (payload) => {
-						this.emit("hook:forward", { pluginId, eventName: p.eventName, payload });
+						this.emit("hook:forward", { pluginId, eventName: p.eventName, payload: serializeValue(payload, DISCORD_PRIVATE_KEYS) });
 					});
 					this._hookSubscriptions.set(key, unsub);
 				}
@@ -533,10 +658,9 @@ class CapabilityBroker extends EventEmitter {
 
 			case "modelFindOneAndUpdate":
 				return this._serialize(
-					await this._getModel(pluginId, p.modelName).findOneAndUpdate(
-						p.query || {},
-						p.update || {},
-						p.options || {},
+					await this._applyQueryOptions(
+						this._getModel(pluginId, p.modelName).findOneAndUpdate(p.query || {}, p.update || {}, p.options || {}),
+						p.options,
 					),
 				);
 
@@ -559,8 +683,9 @@ class CapabilityBroker extends EventEmitter {
 				const Model = this._getModel(pluginId, p.modelName);
 				const doc = await Model.findOne({ _id: p.docId });
 				if (!doc) throw new Error(`Document not found: ${p.docId}`);
-				if (p.changes) Object.assign(doc, p.changes);
+				if (p.changes) doc.set(p.changes);
 				if (p.markModifiedField) doc.markModified(p.markModifiedField);
+				for (const field of p.markModifiedFields || []) doc.markModified(field);
 				await doc.save();
 				return this._serialize(doc);
 			}
@@ -645,19 +770,19 @@ class CapabilityBroker extends EventEmitter {
 			case "schedulerSchedule": {
 				if (!this._scheduledTasks) this._scheduledTasks = new Map();
 				const cron = require("node-cron");
-				const taskId = `${pluginId}_${p.name || Date.now()}`;
+				const taskId = `${pluginId}_${randomUUID()}`;
 				const task = cron.schedule(p.expression, async () => {
 					this.emit("cron:tick", { pluginId, taskId, name: p.name || taskId });
 				});
-				this._scheduledTasks.set(taskId, task);
+				this._scheduledTasks.set(taskId, { pluginId, task });
 				return { ok: true, taskId };
 			}
 
 			case "schedulerCancel": {
 				if (this._scheduledTasks) {
-					const task = this._scheduledTasks.get(p.taskId);
-					if (task) {
-						task.stop();
+					const entry = this._scheduledTasks.get(p.taskId);
+					if (entry && entry.pluginId === pluginId) {
+						entry.task.stop();
 						this._scheduledTasks.delete(p.taskId);
 					}
 				}
@@ -820,10 +945,7 @@ class CapabilityBroker extends EventEmitter {
 	 * Serialize a Mongoose document or plain object for IPC transfer.
 	 */
 	_serialize(value) {
-		if (value === null || value === undefined) return value;
-		if (typeof value.toObject === "function") return value.toObject();
-		if (Array.isArray(value)) return value.map((v) => this._serialize(v));
-		return value;
+		return serializeValue(value);
 	}
 
 	getStats() {
@@ -881,6 +1003,7 @@ class CapabilityBroker extends EventEmitter {
 	// ── Model Registry ──────────────────────────────────────────────────
 
 	registerModel(pluginId, modelName, schema) {
+		if (typeof modelName !== "string" || !modelName || !schema) throw new Error("Invalid model definition");
 		if (!this._modelRegistry) this._modelRegistry = new Map();
 		const mongoose = require("mongoose");
 		const { rehydrateSchema } = require("./schema-serialize");
@@ -893,6 +1016,8 @@ class CapabilityBroker extends EventEmitter {
 				schema && schema.__adbSchema
 					? rehydrateSchema(schema)
 					: schema;
+			// A worker cannot select a Core or another plugin's collection.
+			if (schema.__adbSchema) realSchema.set("collection", undefined);
 			mongoose.model(prefixedName, realSchema);
 		}
 		const key = `${pluginId}:${modelName}`;
@@ -913,6 +1038,7 @@ class CapabilityBroker extends EventEmitter {
 	 * @private
 	 */
 	async _applyQueryOptions(query, options = {}) {
+		if (options.select) query = query.select(options.select);
 		if (options.sort) query = query.sort(options.sort);
 		if (options.limit != null) query = query.limit(options.limit);
 		if (options.skip != null) query = query.skip(options.skip);

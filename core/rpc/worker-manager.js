@@ -11,7 +11,7 @@
 
 const { Worker } = require("worker_threads");
 const path = require("path");
-const { isRequest, isEvent } = require("./protocol");
+const { isRequest } = require("./protocol");
 const { createLogger } = require("../logger");
 const { metricsCollector } = require("./metrics");
 
@@ -44,11 +44,7 @@ class WorkerManager {
 
 		/** @type {Map<string, WorkerEntry>} pluginId → worker state */
 		this.workers = new Map();
-
-		// Listen for hook events and forward to all workers
-		this._hookUnsub = hooks.onAny(async (hookName, payload) => {
-			this.broadcastEvent(`hook:${hookName}`, payload);
-		});
+		this._shuttingDown = false;
 
 		// Handle resource limit events from workers
 		this._resourceEventHandlers = new Map();
@@ -66,7 +62,8 @@ class WorkerManager {
 		metricsCollector.on('call:recorded', this._metricsHandler);
 		this._metricsUnsub = () => metricsCollector.removeListener('call:recorded', this._metricsHandler);
 
-		// Forward broker EventEmitter events to workers
+		// Only broker subscriptions forward hooks. A global onAny broadcast
+		// bypasses subscription scoping and delivers each subscribed hook twice.
 		this._brokerHookForward = ({ pluginId, eventName, payload }) => {
 			this.sendEvent(pluginId, `hook:${eventName}`, payload);
 		};
@@ -81,108 +78,112 @@ class WorkerManager {
 
 	/**
 	 * Spawn a worker for a plugin.
+	 * Failure rejects this attempt even if a bounded retry is queued; callers
+	 * abandoning a load must cancel it with terminateWorker().
 	 *
 	 * @param {string} pluginId
 	 * @param {string} entryPath - Absolute path to the plugin's index.js
 	 * @param {object} capabilities - Plugin's declared capabilities
 	 * @param {string} [pluginName] - Human-readable name
+	 * @param {object} [options] - networkAllowlist, grantedEnv, and carried crashCount
 	 * @returns {Promise<void>} Resolves when the worker signals ready
 	 */
 	async spawnWorker(pluginId, entryPath, capabilities, pluginName, options = {}) {
-		if (this.workers.has(pluginId)) {
-			this.logger.warn(`Worker already exists for ${pluginId}, terminating first`);
-			await this.terminateWorker(pluginId);
-		}
-
-		// Register capabilities with the broker (incl. the network host allowlist,
-		// which the broker enforces per-request — the process --allow-net flag is
-		// only a coarse on/off gate).
-		this.broker.registerCapabilities(pluginId, capabilities, pluginName, {
-			networkAllowlist: options.networkAllowlist || [],
-		});
-
-		this.logger.info(`Spawning worker for ${pluginName || pluginId}...`);
-
-		const worker = new Worker(BOOTSTRAP_PATH, {
-			workerData: {
-				pluginId,
-				entryPath,
-				pluginName: pluginName || pluginId,
-				grantedEnv: options.grantedEnv || {},
-			},
-			resourceLimits: DEFAULT_RESOURCE_LIMITS,
-		});
+		if (this._shuttingDown) throw new Error("WorkerManager is shutting down");
 
 		const entry = {
-			worker,
+			worker: null,
 			pluginId,
 			pluginName: pluginName || pluginId,
 			entryPath,
 			capabilities,
-			networkAllowlist: options.networkAllowlist || [],
+			networkAllowlist: Array.isArray(options.networkAllowlist) ? [...options.networkAllowlist] : [],
+			grantedEnv: { ...options.grantedEnv },
 			// Carry the crash count across respawns — otherwise a plugin that throws
 			// in load() gets a fresh entry (crashCount 0) on every restart and the
 			// MAX_CRASH_COUNT circuit breaker never trips, crash-looping forever.
 			crashCount: options.crashCount || 0,
 			spawnedAt: Date.now(),
 			ready: false,
+			stopped: false,
+			_registered: false,
+			_termination: null,
+			_restartTimer: null,
 		};
 
+		const previous = this.workers.get(pluginId);
+		if (previous) {
+			this.logger.warn(`Worker already exists for ${pluginId}, terminating first`);
+			entry._termination = this._stopWorker(previous, new Error(`Worker ${pluginId} startup replaced`));
+		}
+		// Reserve the replacement before awaiting termination. Unload, shutdown,
+		// or a newer spawn can then cancel it without leaving a delayed respawn.
 		this.workers.set(pluginId, entry);
+		if (entry._termination) await entry._termination;
+		if (this._shuttingDown || entry.stopped || this.workers.get(pluginId) !== entry) {
+			throw new Error(`Worker ${pluginId} startup cancelled`);
+		}
+		entry._termination = null;
 
-		// Set up message routing
-		worker.on("message", (msg) => this._handleMessage(pluginId, msg));
+		try {
+			entry._registered = true;
+			this.broker.registerCapabilities(pluginId, capabilities, entry.pluginName, {
+				networkAllowlist: entry.networkAllowlist,
+			});
+			this.logger.info(`Spawning worker for ${entry.pluginName}...`);
+			entry.worker = new Worker(BOOTSTRAP_PATH, {
+				workerData: {
+					pluginId,
+					entryPath,
+					pluginName: entry.pluginName,
+					grantedEnv: entry.grantedEnv,
+				},
+				env: entry.grantedEnv,
+				resourceLimits: DEFAULT_RESOURCE_LIMITS,
+			});
+		} catch (error) {
+			await this._stopWorker(entry, error);
+			if (this.workers.get(pluginId) === entry) this.workers.delete(pluginId);
+			throw error;
+		}
 
-		// Handle worker errors
-		worker.on("error", (err) => {
-			this.logger.error(`Worker ${pluginId} error:`, err.message);
-			this._handleCrash(pluginId, err);
-		});
-
-		// Handle worker exit
-		worker.on("exit", (code) => {
-			const e = this.workers.get(pluginId);
-			if (e) {
-				e.ready = false;
-				if (code !== 0) {
-					this.logger.warn(`Worker ${pluginId} exited with code ${code}`);
-					this._handleCrash(pluginId, new Error(`Exit code ${code}`));
-				} else {
-					this.logger.info(`Worker ${pluginId} exited cleanly`);
-					this.workers.delete(pluginId);
-					this.broker.unregisterCapabilities(pluginId);
-				}
-			}
-		});
-
-		// Set up resource event handling
-		this._setupResourceEventHandling(pluginId);
-
-		// Wait for the worker to signal ready (or timeout)
 		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				reject(new Error(`Worker ${pluginId} startup timeout after ${STARTUP_TIMEOUT_MS}ms`));
+			const finishStartup = (error) => {
+				clearTimeout(entry._startupTimer);
+				entry._startupTimer = null;
+				entry._startupResolve = null;
+				entry._startupReject = null;
+				if (error) reject(error);
+				else resolve();
+			};
+			entry._startupResolve = () => finishStartup();
+			entry._startupReject = finishStartup;
+			entry._startupTimer = setTimeout(() => {
+				this._handleCrash(entry, new Error(`Worker ${pluginId} startup timeout after ${STARTUP_TIMEOUT_MS}ms`));
 			}, STARTUP_TIMEOUT_MS);
 
-			const checkReady = () => {
-				if (entry.ready) {
-					clearTimeout(timer);
-					resolve();
+			entry._onMessage = (msg) => {
+				this._handleMessage(entry, msg).catch((err) => {
+					this.logger.error(`Error handling worker message from ${pluginId}:`, err.message);
+				});
+			};
+			entry._onError = (err) => this._handleCrash(entry, err);
+			entry._onExit = (code) => {
+				entry.exited = true;
+				if (this.workers.get(pluginId) !== entry || entry.stopped) return;
+				if (code !== 0 || !entry.ready) {
+					this._handleCrash(entry, new Error(`Worker ${pluginId} exited with code ${code}`));
+				} else {
+					this.logger.info(`Worker ${pluginId} exited cleanly`);
+					this.terminateWorker(pluginId).catch((err) => {
+						this.logger.error(`Failed to clean up worker ${pluginId}:`, err.message);
+					});
 				}
 			};
-
-			// Check if already ready (race condition safe)
-			checkReady();
-
-			// Store resolve/reject for the message handler
-			entry._startupResolve = () => {
-				clearTimeout(timer);
-				resolve();
-			};
-			entry._startupReject = (err) => {
-				clearTimeout(timer);
-				reject(err);
-			};
+			entry.worker.on("message", entry._onMessage);
+			entry.worker.on("error", entry._onError);
+			entry.worker.on("exit", entry._onExit);
+			this._setupResourceEventHandling(pluginId);
 		});
 	}
 
@@ -197,24 +198,47 @@ class WorkerManager {
 		if (!entry) return;
 
 		this.logger.info(`Terminating worker for ${entry.pluginName}...`);
+		await this._stopWorker(entry, new Error(`Worker ${pluginId} terminated during startup`));
+		if (this.workers.get(pluginId) === entry) this.workers.delete(pluginId);
+	}
 
+	/** Stop one worker generation once, sharing termination with concurrent callers. */
+	_stopWorker(entry, error) {
+		clearTimeout(entry._restartTimer);
+		entry._restartTimer = null;
+		if (entry.stopped) return entry._termination;
+		entry.stopped = true;
 		entry.ready = false;
-		this.broker.unregisterCapabilities(pluginId);
+		if (entry._startupReject) entry._startupReject(error);
+		if (entry._registered) {
+			entry._registered = false;
+			this.broker.unregisterCapabilities(entry.pluginId);
+		}
 
-		// Clean up resource event handlers
-		const unsub = this._resourceEventHandlers.get(pluginId);
+		const unsub = this._resourceEventHandlers.get(entry.pluginId);
 		if (unsub) {
 			unsub();
-			this._resourceEventHandlers.delete(pluginId);
+			this._resourceEventHandlers.delete(entry.pluginId);
 		}
 
-		try {
-			await entry.worker.terminate();
-		} catch (err) {
-			this.logger.warn(`Error terminating worker ${pluginId}:`, err.message);
+		if (!entry.worker) {
+			entry._termination = entry._termination || Promise.resolve();
+			return entry._termination;
 		}
-
-		this.workers.delete(pluginId);
+		entry.worker.removeListener("message", entry._onMessage);
+		entry._termination = (async () => {
+			try {
+				if (!entry.exited) await entry.worker.terminate();
+			} catch (err) {
+				this.logger.warn(`Error terminating worker ${entry.pluginId}:`, err.message);
+			} finally {
+				// Keep the error listener until termination completes, so an error
+				// emitted while stopping cannot become an unhandled EventEmitter error.
+				entry.worker.removeListener("error", entry._onError);
+				entry.worker.removeListener("exit", entry._onExit);
+			}
+		})();
+		return entry._termination;
 	}
 
 	/**
@@ -224,12 +248,10 @@ class WorkerManager {
 		const entry = this.workers.get(pluginId);
 		if (!entry) return;
 
-		const { entryPath, capabilities, pluginName, networkAllowlist } = entry;
-		await this.terminateWorker(pluginId);
-		// Carry networkAllowlist across a manual reload — otherwise the plugin
-		// respawns with an empty allowlist and loses all outbound network access.
-		// crashCount is intentionally NOT carried: a human reload gets a fresh start.
-		await this.spawnWorker(pluginId, entryPath, capabilities, pluginName, { networkAllowlist });
+		const { entryPath, capabilities, pluginName, networkAllowlist, grantedEnv } = entry;
+		// Let spawnWorker reserve the replacement atomically. A manual reload
+		// preserves grants but intentionally starts with a fresh crash budget.
+		await this.spawnWorker(pluginId, entryPath, capabilities, pluginName, { networkAllowlist, grantedEnv });
 	}
 
 	// ── Message Handling ─────────────────────────────────────────────────
@@ -237,61 +259,60 @@ class WorkerManager {
 	/**
 	 * Handle a message from a worker.
 	 */
-	async _handleMessage(pluginId, msg) {
-		const entry = this.workers.get(pluginId);
-		if (!entry) return;
+	async _handleMessage(entry, msg) {
+		const { pluginId } = entry;
+		if (this.workers.get(pluginId) !== entry || entry.stopped || !msg || typeof msg !== "object") return;
 
 		// Worker signals ready
 		if (msg.type === "worker:ready") {
+			if (entry.ready) return;
 			entry.ready = true;
 			this.logger.info(`Worker ${pluginId} is ready`);
-			if (entry._startupResolve) {
-				entry._startupResolve();
-				entry._startupResolve = null;
-				entry._startupReject = null;
-			}
+			if (entry._startupResolve) entry._startupResolve();
 			return;
 		}
 
 		// Worker signals error during startup
 		if (msg.type === "worker:error") {
-			this.logger.error(`Worker ${pluginId} reported error: ${msg.error}`);
-			if (entry._startupReject) {
-				entry._startupReject(new Error(msg.error));
-				entry._startupResolve = null;
-				entry._startupReject = null;
-			}
+			this._handleCrash(entry, new Error(msg.error));
 			return;
 		}
 
 		// Resource limit events from worker
-		if (msg.type && msg.type.startsWith('resource.')) {
+		if (typeof msg.type === "string" && msg.type.startsWith("resource.")) {
 			this._handleResourceEvent(pluginId, msg);
 			return;
 		}
 
 		// RPC request from worker → route to broker
 		if (isRequest(msg)) {
+			let reply;
 			try {
 				const response = await this.broker.handleRequest(pluginId, msg);
 				// The broker returns a bare { id, ok, result|error }; the worker's
 				// RpcClient only recognizes a reply when it carries the
 				// "rpc:response" type, so stamp it here before posting back.
-				entry.worker.postMessage({
+				reply = {
 					type: "rpc:response",
 					id: response.id != null ? response.id : msg.id,
 					ok: !!response.ok,
 					result: response.result,
 					error: response.error,
-				});
+				};
 			} catch (err) {
 				this.logger.error(`Error handling RPC from ${pluginId}:`, err.message);
-				entry.worker.postMessage({
+				reply = {
 					type: "rpc:response",
 					id: msg.id,
 					ok: false,
 					error: `Internal broker error: ${err.message}`,
-				});
+				};
+			}
+			if (this.workers.get(pluginId) !== entry || entry.stopped) return;
+			try {
+				entry.worker.postMessage(reply);
+			} catch (err) {
+				this.logger.warn(`Failed to send RPC response to ${pluginId}:`, err.message);
 			}
 			return;
 		}
@@ -313,11 +334,15 @@ class WorkerManager {
 		// off from new work until an admin reinstates it.
 		if (this.broker.isSuspended(pluginId)) return;
 
-		entry.worker.postMessage({
-			type: "rpc:event",
-			event: eventName,
-			payload,
-		});
+		try {
+			entry.worker.postMessage({
+				type: "rpc:event",
+				event: eventName,
+				payload,
+			});
+		} catch (err) {
+			this.logger.warn(`Failed to send event to ${pluginId}:`, err.message);
+		}
 	}
 
 	/**
@@ -350,42 +375,45 @@ class WorkerManager {
 	/**
 	 * Handle a worker crash. Auto-restart if under the crash limit.
 	 */
-	async _handleCrash(pluginId, error) {
-		const entry = this.workers.get(pluginId);
-		if (!entry) return;
+	_handleCrash(entry, error) {
+		const { pluginId } = entry;
+		if (this._shuttingDown || this.workers.get(pluginId) !== entry || entry.stopped) return;
 
 		entry.crashCount++;
-		entry.ready = false;
+		const stopping = this._stopWorker(entry, error);
 
 		if (entry.crashCount >= MAX_CRASH_COUNT) {
 			this.logger.error(
-				`Worker ${pluginId} crashed ${entry.crashCount} times — giving up. ` +
+				`Worker ${pluginId} crashed ${entry.crashCount} times - giving up. ` +
 					`The plugin will not be loaded until manually reloaded.`,
+				error.message,
 			);
-			this.workers.delete(pluginId);
-			this.broker.unregisterCapabilities(pluginId);
+			stopping.then(() => {
+				if (this.workers.get(pluginId) === entry) this.workers.delete(pluginId);
+			});
 			return;
 		}
 
 		this.logger.warn(
 			`Worker ${pluginId} crashed (attempt ${entry.crashCount}/${MAX_CRASH_COUNT}). ` +
 				`Restarting in 2 seconds...`,
+			error.message,
 		);
 
-		// Wait before restarting
-		await new Promise((r) => setTimeout(r, 2000));
-
-		try {
-			await this.spawnWorker(
+		const timer = setTimeout(() => {
+			if (this._shuttingDown || this.workers.get(pluginId) !== entry || entry._restartTimer !== timer) return;
+			entry._restartTimer = null;
+			this.spawnWorker(
 				pluginId,
 				entry.entryPath,
 				entry.capabilities,
 				entry.pluginName,
-				{ networkAllowlist: entry.networkAllowlist, crashCount: entry.crashCount },
-			);
-		} catch (err) {
-			this.logger.error(`Failed to restart worker ${pluginId}:`, err.message);
-		}
+				{ networkAllowlist: entry.networkAllowlist, grantedEnv: entry.grantedEnv, crashCount: entry.crashCount },
+			).catch((err) => {
+				this.logger.error(`Failed to restart worker ${pluginId}:`, err.message);
+			});
+		}, 2000);
+		entry._restartTimer = timer;
 	}
 
 	// ── Introspection ────────────────────────────────────────────────────
@@ -424,10 +452,11 @@ class WorkerManager {
 	 * Shut down all workers.
 	 */
 	async shutdown() {
+		if (this._shutdownPromise) return this._shutdownPromise;
+		this._shuttingDown = true;
 		this.logger.info(`Shutting down ${this.workers.size} workers...`);
 
-		// Unsubscribe from hooks, metrics, and broker events
-		if (this._hookUnsub) this._hookUnsub();
+		// Unsubscribe from metrics and broker events
 		if (this._metricsUnsub) this._metricsUnsub();
 		if (this._brokerHookForward) this.broker.removeListener('hook:forward', this._brokerHookForward);
 		if (this._brokerCronTick) this.broker.removeListener('cron:tick', this._brokerCronTick);
@@ -436,9 +465,10 @@ class WorkerManager {
 		for (const [pluginId] of this.workers) {
 			promises.push(this.terminateWorker(pluginId));
 		}
-		await Promise.allSettled(promises);
-
-		this.logger.info("All workers terminated");
+		this._shutdownPromise = Promise.allSettled(promises).then(() => {
+			this.logger.info("All workers terminated");
+		});
+		return this._shutdownPromise;
 	}
 
 	// ── Resource Event Handling ──────────────────────────────────────────

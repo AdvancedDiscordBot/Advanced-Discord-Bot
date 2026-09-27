@@ -21,6 +21,8 @@ const path = require("path");
 const workerThreads = require("worker_threads");
 const { parentPort, workerData } = workerThreads;
 const { RpcClient } = require("./worker-client");
+const { INTERACTION_METHODS } = require("./methods");
+const { serializeSchema, serializeValue } = require("./schema-serialize");
 
 // ── Guard: only run inside a worker thread ───────────────────────────────
 // When required from the main process (e.g. for tests), parentPort and
@@ -45,7 +47,18 @@ const { entryPath, pluginId } = workerData || {};
 // method that touches real resources goes through RPC instead of
 // direct access.
 
-function createShimContext(rpc, grantedEnv = {}) {
+function createShimContext(rpc, grantedEnv = {}, registrations = { pending: new Set(), error: null }) {
+	const trackRegistration = (promise) => {
+		registrations.pending.add(promise);
+		promise.then(
+			() => registrations.pending.delete(promise),
+			(error) => {
+				registrations.pending.delete(promise);
+				registrations.error ||= error;
+			},
+		);
+		return promise;
+	};
 	// DB proxy: routes all db.* calls through RPC
 	// The broker accepts flexible params — we pass args as a positional array
 	// and the broker's handler destructures them.
@@ -88,7 +101,7 @@ function createShimContext(rpc, grantedEnv = {}) {
 	const hooksProxy = {
 		on: (hookName, handler, _priority) => {
 			// Tell Core to subscribe to this hook and forward events
-			rpc.call("hooks.on", { eventName: hookName }).catch((err) => {
+			trackRegistration(rpc.call("hooks.on", { eventName: hookName })).catch((err) => {
 				console.error(`[plugin:${pluginId}] Failed to subscribe to hook ${hookName}:`, err.message);
 			});
 			// Subscribe to forwarded events from Core — rpc.on returns an unsubscribe fn
@@ -117,8 +130,8 @@ function createShimContext(rpc, grantedEnv = {}) {
 	};
 
 	// Command registration: sends to Core via RPC
-	const registerCommand = async (command) => {
-		if (!command || !command.data || !command.execute) {
+	const registerCommand = (command) => {
+		if (!command?.data || typeof command.execute !== "function") {
 			throw new Error(`Invalid command for plugin ${pluginId}`);
 		}
 		// Serialize the command for IPC (strip functions, keep data + metadata).
@@ -131,31 +144,34 @@ function createShimContext(rpc, grantedEnv = {}) {
 			// We can't send execute functions over IPC — Core will need to
 			// register a proxy handler that calls back to the worker
 			hasExecute: true,
+			hasAutocomplete: typeof command.autocomplete === "function",
 			cooldown: command.cooldown,
+			guildIds: serializeValue(command.guildIds),
+			guildData: serializeValue(command.guildData),
+			permissions: serializeValue(command.permissions),
 		};
-		await rpc.call("plugin.registerCommand", { command: serialized });
+		return trackRegistration(rpc.call("plugin.registerCommand", { command: serialized }));
 	};
 
 	// Event registration: sends to Core, subscribes to forwarded events
 	const registerEvent = (name, handler, options = {}) => {
+		if (typeof handler !== "function") throw new Error(`Invalid event handler for ${name}`);
 		// Tell Core to listen for this Discord event
-		rpc.call("plugin.registerEvent", { name, options }).catch((err) => {
-			console.error(`[plugin:${pluginId}] Failed to register event ${name}:`, err.message);
-		});
+		trackRegistration(rpc.call("plugin.registerEvent", { name }));
 
 		// Subscribe to forwarded events from Core
 		// Returns unsubscribe function (rpc.on already returns one)
-		return rpc.on(`event:${name}`, (payload) => {
-			try {
-				handler(payload, null); // client is null in worker — use RPC for any client ops
-			} catch (err) {
-				console.error(`[plugin:${pluginId}] Error in event handler ${name}:`, err);
-			}
+		const unsubscribe = rpc.on(`event:${name}`, (payload) => {
+			if (options.once) unsubscribe();
+			const args = name === "interactionCreate"
+				? payload.args.map((arg) => buildInteractionProxy(arg, rpc))
+				: payload.args;
+			return handler(...args, null); // RpcClient observes asynchronous failures too.
 		});
+		return unsubscribe;
 	};
 
 	// Model definition: registers schema in Core, returns a proxy that routes CRUD through RPC
-	const { serializeSchema } = require("./schema-serialize");
 	// modelName -> Promise that resolves once Core has registered the model.
 	// Without this guard, a query fired immediately after defineModel can
 	// reach the broker before the registration RPC does ("Model not
@@ -165,32 +181,46 @@ function createShimContext(rpc, grantedEnv = {}) {
 		// A compiled mongoose Schema can't cross the IPC boundary (its field
 		// types are the String/Number/Date constructors, which structured-clone
 		// rejects). Flatten it to a plain descriptor first; Core rehydrates it.
-		let ready;
-		try {
-			const descriptor = serializeSchema(schema);
-			ready = rpc.call("plugin.defineModel", { modelName, schema: descriptor });
-		} catch (err) {
-			console.warn(`[plugin:${pluginId}] Could not serialize model ${modelName}:`, err.message);
-			ready = Promise.reject(err);
-		}
+		const descriptor = serializeSchema(schema);
+		const ready = trackRegistration(rpc.call("plugin.defineModel", { modelName, schema: descriptor }));
 		modelReady.set(modelName, ready);
 
 		const call = (method, params) =>
 			(modelReady.get(modelName) || Promise.resolve()).then(() =>
-				rpc.call(method, params),
+				rpc.call(method, serializeValue(params)),
 			);
+		const hydrate = (value) => {
+			if (Array.isArray(value)) return value.map(hydrate);
+			if (!value || typeof value !== "object" || !value._id) return value;
+			const modified = new Set();
+			Object.defineProperties(value, {
+				markModified: { value: (field) => modified.add(field) },
+				save: { value: async () => {
+					const saved = await call("model.save", {
+						modelName, docId: value._id, changes: serializeValue(value), markModifiedFields: [...modified],
+					});
+					Object.assign(value, saved);
+					modified.clear();
+					return value;
+				} },
+			});
+			return value;
+		};
 
 		// Chainable query for find/findOne — plugins use the mongoose query
 		// API (await Model.find(q).sort({x:1}).limit(10).lean()), so a bare
 		// Promise return breaks .limit()/.sort() calls.
-		const makeQuery = (method, base) => {
-			const opts = {};
-			const exec = () => call(method, { ...base, options: opts });
+		const makeQuery = (method, base, options = {}) => {
+			const opts = { ...options };
+			let execution;
+			const exec = () => execution ||= call(method, { ...base, options: opts }).then((result) => opts.lean ? result : hydrate(result));
 			const query = {
 				limit(n) { opts.limit = n; return query; },
 				sort(s) { opts.sort = s; return query; },
 				skip(n) { opts.skip = n; return query; },
-				lean() { opts.lean = true; return query; },
+				select(fields) { opts.select = fields; return query; },
+				lean(enabled = true) { opts.lean = enabled; return query; },
+				exec,
 				then: (onFulfilled, onRejected) => exec().then(onFulfilled, onRejected),
 				catch: (fn) => exec().catch(fn),
 				finally: (fn) => exec().finally(fn),
@@ -203,13 +233,13 @@ function createShimContext(rpc, grantedEnv = {}) {
 			find: (query = {}) => makeQuery("model.find", { modelName, query }),
 			findOne: (query = {}) => makeQuery("model.findOne", { modelName, query }),
 			findById: (id) => makeQuery("model.findOne", { modelName, query: { _id: id } }),
-			create: (data) => call("model.create", { modelName, data }),
+			create: (data) => call("model.create", { modelName, data }).then(hydrate),
 			updateOne: (query = {}, update = {}) =>
 				call("model.updateOne", { modelName, query, update }),
 			updateMany: (query = {}, update = {}) =>
 				call("model.updateMany", { modelName, query, update }),
 			findOneAndUpdate: (query = {}, update = {}, options = {}) =>
-				call("model.findOneAndUpdate", { modelName, query, update, options }),
+				makeQuery("model.findOneAndUpdate", { modelName, query, update }, options),
 			deleteOne: (query = {}) =>
 				call("model.deleteOne", { modelName, query }),
 			deleteMany: (query = {}) =>
@@ -217,35 +247,28 @@ function createShimContext(rpc, grantedEnv = {}) {
 			countDocuments: (query = {}) =>
 				call("model.countDocuments", { modelName, query }),
 			// Save a previously-fetched document (apply mutations + save in Core)
-			save: async (doc, changes, markModifiedField) => {
-				return call("model.save", { modelName, docId: doc._id, changes, markModifiedField });
+			save: async (doc, changes = doc, markModifiedField) => {
+				return hydrate(await call("model.save", { modelName, docId: doc._id, changes, markModifiedField }));
 			},
 		};
 	};
 
 	// Scheduler proxy: routes cron scheduling through RPC
 	const scheduledTasks = new Map();
-	const schedulerCallbacks = new Map();
 	const schedulerProxy = {
-		schedule: async (expression, callback, name) => {
-			const taskId = name || `task_${Date.now()}`;
-			// Store callback keyed by taskId
-			schedulerCallbacks.set(taskId, callback);
-			// Subscribe to cron tick events from Core — broker emits 'cron:tick' with { pluginId, taskId }
-			rpc.on('cron:tick', (payload) => {
-				if (payload.pluginId === pluginId && payload.taskId === taskId) {
-					const cb = schedulerCallbacks.get(taskId);
-					if (cb) cb();
-				}
-			});
-			await rpc.call("scheduler.schedule", { expression, name: taskId });
-			scheduledTasks.set(taskId, true);
-			return taskId;
+		schedule: (expression, callback, name) => {
+			return trackRegistration(rpc.call("scheduler.schedule", { expression, name }).then(({ taskId }) => {
+				const unsubscribe = rpc.on("cron:tick", (payload) => {
+					if (payload.taskId === taskId) return callback();
+				});
+				scheduledTasks.set(taskId, unsubscribe);
+				return taskId;
+			}));
 		},
 		cancel: async (taskId) => {
 			await rpc.call("scheduler.cancel", { taskId });
+			scheduledTasks.get(taskId)?.();
 			scheduledTasks.delete(taskId);
-			schedulerCallbacks.delete(taskId);
 		},
 	};
 
@@ -254,19 +277,15 @@ function createShimContext(rpc, grantedEnv = {}) {
 		// Send a rich message (content + embeds + files) to a channel
 		sendToChannel: async (channelId, payload) => {
 			return rpc.call("discord.sendRichMessage", {
+				...(typeof payload === "string" ? { content: payload } : payload),
 				channelId,
-				content: payload.content,
-				embeds: payload.embeds || [],
-				files: payload.files || [],
 			});
 		},
 		// Send a DM (content + embeds + files) to a user
 		sendDM: async (userId, payload) => {
 			return rpc.call("discord.sendDM", {
+				...(typeof payload === "string" ? { content: payload } : payload),
 				userId,
-				content: payload.content,
-				embeds: payload.embeds || [],
-				files: payload.files || [],
 			});
 		},
 		// Fetch guild info (returns object with iconURL)
@@ -315,9 +334,9 @@ if (IS_WORKER) {
 	// Listen for command execution requests from Core
 	parentPort.on("message", (msg) => {
 		if (msg.type === "rpc:event" && msg.event === "command:execute") {
-			const { callId, commandName, interaction } = msg.payload;
+			const { callId, commandName, interaction, action } = msg.payload;
 			const cmd = registeredCommands.get(commandName);
-			if (!cmd) {
+			if (!cmd || !["execute", "autocomplete"].includes(action) || typeof cmd[action] !== "function") {
 				parentPort.postMessage({
 					type: "rpc:response",
 					id: callId,
@@ -330,7 +349,7 @@ if (IS_WORKER) {
 			const interactionProxy = buildInteractionProxy(interaction, rpc);
 
 			Promise.resolve()
-				.then(() => cmd.execute(interactionProxy))
+				.then(() => cmd[action](interactionProxy, null))
 				.then(() => {
 					parentPort.postMessage({
 						type: "rpc:response",
@@ -361,9 +380,10 @@ if (IS_WORKER) {
 			}
 
 			// Override registerCommand to also track locally for command:execute routing
-			const shimCtx = createShimContext(rpc, workerData.grantedEnv);
+			const registrations = { pending: new Set(), error: null };
+			const shimCtx = createShimContext(rpc, workerData.grantedEnv, registrations);
 			const origRegisterCommand = shimCtx.registerCommand;
-			shimCtx.registerCommand = async (command) => {
+			shimCtx.registerCommand = (command) => {
 				if (command && command.data && command.execute) {
 					registeredCommands.set(command.data.name, command);
 				}
@@ -371,6 +391,8 @@ if (IS_WORKER) {
 			};
 
 			await loadFn(shimCtx);
+			while (registrations.pending.size) await Promise.allSettled([...registrations.pending]);
+			if (registrations.error) throw registrations.error;
 			rpc.ready();
 		} catch (error) {
 			console.error(`[worker-bootstrap] Failed to load plugin ${pluginId}:`, error);
@@ -388,76 +410,66 @@ if (IS_WORKER) {
 
 function buildInteractionProxy(data, rpc) {
 	if (!data) return {};
-
+	const leaves = new Map();
+	let subcommand = null;
+	let group = null;
+	const visit = (options) => {
+		for (const option of options || []) {
+			if (option.type === 1) subcommand = option.name;
+			else if (option.type === 2) group = option.name;
+			else leaves.set(option.name, option);
+			if (option.options) visit(option.options);
+		}
+	};
+	visit(data.options);
+	const requiredValue = (value, name, required) => {
+		if (value == null && required) throw new Error(`Required interaction option missing: ${name}`);
+		return value ?? null;
+	};
 	const proxy = {
-		id: data.id,
-		type: data.type,
-		commandName: data.commandName,
-		guildId: data.guildId,
-		channelId: data.channelId,
+		...data,
 		user: data.user || null,
 		member: data.member || null,
-
+		inGuild: () => !!data.guildId,
+		isCommand: () => data.type === 2,
+		isChatInputCommand: () => data.type === 2 && (data.commandType == null || data.commandType === 1),
+		isAutocomplete: () => data.type === 4,
+		isModalSubmit: () => data.type === 5,
+		isMessageComponent: () => data.type === 3,
+		isButton: () => data.type === 3 && data.componentType === 2,
+		isStringSelectMenu: () => data.type === 3 && data.componentType === 3,
 		options: {
 			data: data.options || [],
-			getString: (name) => {
-				const opt = (data.options || []).find((o) => o.name === name);
-				return opt?.value ?? null;
-			},
-			getInteger: (name) => {
-				const opt = (data.options || []).find((o) => o.name === name);
-				return opt?.value ?? null;
-			},
-			getBoolean: (name) => {
-				const opt = (data.options || []).find((o) => o.name === name);
-				return opt?.value ?? null;
-			},
-			getUser: (name) => {
-				const opt = (data.options || []).find((o) => o.name === name);
-				return opt?.user || opt?.value || null;
-			},
-			getChannel: (name) => {
-				const opt = (data.options || []).find((o) => o.name === name);
-				return opt?.channel || opt?.value || null;
-			},
-			getSubcommand: () => {
-				const sub = (data.options || []).find((o) => o.type === 1);
-				return sub?.name || null;
+			get: (name, required = false) => requiredValue(leaves.get(name), name, required),
+			getSubcommand: (required = true) => requiredValue(subcommand, "subcommand", required),
+			getSubcommandGroup: (required = false) => requiredValue(group, "subcommand group", required),
+			getFocused: (full = false) => {
+				const focused = requiredValue([...leaves.values()].find((option) => option.focused), "focused", true);
+				return full ? focused : focused.value;
 			},
 		},
-
-		// reply / followUp / editReply / deferReply — route through RPC
-		reply: async (payload) => {
-			const p = typeof payload === "string" ? { content: payload } : payload;
-			return rpc.call("discord.sendRichMessage", {
-				channelId: data.channelId,
-				content: p.content,
-				embeds: p.embeds || [],
-				files: p.files || [],
-			});
+		fields: {
+			getTextInputValue: (customId) => requiredValue((data.fields || []).find((field) => field.customId === customId)?.value, customId, true),
 		},
-		followUp: async (payload) => {
-			const p = typeof payload === "string" ? { content: payload } : payload;
-			return rpc.call("discord.sendRichMessage", {
-				channelId: data.channelId,
-				content: p.content,
-				embeds: p.embeds || [],
-				files: p.files || [],
-			});
-		},
-		editReply: async (payload) => {
-			const p = typeof payload === "string" ? { content: payload } : payload;
-			// editReply requires the original message — for now send as new message
-			return rpc.call("discord.sendRichMessage", {
-				channelId: data.channelId,
-				content: p.content,
-				embeds: p.embeds || [],
-				files: p.files || [],
-			});
-		},
-		deferReply: async () => ({ ok: true }),
 	};
-
+	for (const [method, field] of Object.entries({
+		getString: "value", getInteger: "value", getNumber: "value", getBoolean: "value",
+		getUser: "user", getMember: "member", getRole: "role", getChannel: "channel", getAttachment: "attachment",
+	})) {
+		proxy.options[method] = (name, required = false) => requiredValue(leaves.get(name)?.[field], name, required);
+	}
+	proxy.options.getMentionable = (name, required = false) => {
+		const option = leaves.get(name);
+		return requiredValue(option?.member || option?.user || option?.role, name, required);
+	};
+	for (const method of Object.keys(INTERACTION_METHODS)) {
+		proxy[method] = async (payload) => {
+			if (!data._handle) throw new Error("Interaction is not authorized for this plugin");
+			const response = await rpc.call(`interaction.${method}`, { handle: data._handle, payload });
+			Object.assign(proxy, response.state);
+			return response.result;
+		};
+	}
 	return proxy;
 }
 

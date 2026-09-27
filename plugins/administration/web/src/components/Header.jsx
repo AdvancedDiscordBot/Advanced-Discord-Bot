@@ -26,7 +26,7 @@ export function Header({ onOpenPalette, guild = null, plugins = [] }) {
   const pluginDashboards = plugins.filter((p) => p.enabledForGuild && p.webUi);
 
   return (
-    <header style={styles.header}>
+    <header className="adb-dashboard-header" style={styles.header}>
       <div style={styles.left}>
         <div style={styles.brand}>
           <span style={styles.seal} />

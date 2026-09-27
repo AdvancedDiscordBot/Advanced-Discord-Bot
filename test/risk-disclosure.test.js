@@ -60,7 +60,7 @@ test("empty permissions produce an empty (but valid) card", () => {
 test("v1 manifest still generates a card via migration", () => {
 	const statements = generateRiskCard({ capabilities: { discord: ["SendMessages"], storage: ["own-collection"] } });
 	assert.ok(statements.includes("send messages in your server's channels"));
-	assert.ok(statements.includes("store and retrieve its own data (isolated from other plugins)"));
+	assert.ok(statements.includes("store and retrieve its own data"));
 });
 
 test("childProcess / nativeAddons have explicit worst-case wording", () => {
@@ -179,7 +179,7 @@ test("riskCardManifest adapts flat permission lists to v2 facets", () => {
 			permissions: ["db.read", "db.write", "commands.register", "manageWebhooks"],
 		}),
 	);
-	assert.ok(statements.includes("store and retrieve its own data (isolated from other plugins)"));
+	assert.ok(statements.includes("store and retrieve its own data"));
 	assert.ok(statements.includes("register slash commands in your server"));
 	assert.ok(statements.includes("create and use webhooks in your server"));
 	// db.read + db.write collapse into one statement, not two

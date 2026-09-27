@@ -3,7 +3,7 @@
 <div align="center">
 
 ![Discord Bot](https://img.shields.io/badge/Discord-Bot-7289DA?style=for-the-badge&logo=discord&logoColor=white)
-![Node.js](https://img.shields.io/badge/Node.js-18+-43853D?style=for-the-badge&logo=node.js&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-20+-43853D?style=for-the-badge&logo=node.js&logoColor=white)
 ![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-4EA94B?style=for-the-badge&logo=mongodb&logoColor=white)
 ![Gemini AI](https://img.shields.io/badge/Gemini-AI-4285F4?style=for-the-badge&logo=google&logoColor=white)
 ![Plugin Ready](https://img.shields.io/badge/Plugins-Ready-6A5ACD?style=for-the-badge)
@@ -187,12 +187,17 @@ server-logs, temp voice, welcome, custom commands, to-do, and more.
 ## Commands
 
 ADB has **no built-in slash commands** — commands come from the plugins you
-install. Each plugin registers its own; enable a plugin from the dashboard and
-run `npm run deploy` to publish its commands to Discord.
+install. Commands sync per guild at startup and after supported plugin changes.
+For an explicit deployment, set `CLIENT_ID` and `GUILD_ID`, inspect
+`node deploy-commands.js --dry-run`, then run `npm run deploy`.
+The deploy command never overwrites global commands and refuses an empty command
+set unless `--allow-empty` is explicitly supplied.
 
 For example, installing `adb-plugin-moderation` adds `/ban`, `/kick`,
 `/timeout`, `/warn`, `/purge`, and ticket commands; `adb-plugin-levels` adds
-`/rank` and `/leaderboard`. See each plugin's own README for its command
+`/level` and `/leaderboard`. Temporary voice controls use `/voice <subcommand>`
+so they do not collide with moderation's `/lock` and `/unlock`.
+See each plugin's own README for its command
 reference, and [CREATE-PLUGIN.md](./CREATE-PLUGIN.md) to build your own.
 
 ---
@@ -201,7 +206,7 @@ reference, and [CREATE-PLUGIN.md](./CREATE-PLUGIN.md) to build your own.
 
 ### Prerequisites
 
-- **Node.js** v18.0.0 or higher
+- **Node.js** v20.0.0 or higher (Node 22 or 24 recommended)
 - **MongoDB** database, local or cloud
 - **Discord Bot Token** from the [Discord Developer Portal](https://discord.com/developers/applications)
 - **Google Gemini API Key** from [Google AI Studio](https://makersuite.google.com/app/apikey), optional unless AI features are enabled
@@ -229,7 +234,7 @@ reference, and [CREATE-PLUGIN.md](./CREATE-PLUGIN.md) to build your own.
    ```env
    DISCORD_TOKEN=your_discord_bot_token_here
    CLIENT_ID=your_bot_client_id_here
-   GUILD_ID=your_test_guild_id_here          # optional: instant commands in one test guild
+    GUILD_ID=your_test_guild_id_here          # required for the manual deploy command
    MONGODB_URI=your_mongodb_connection_string
    GEMINI_API_KEY=your_gemini_api_key_here   # optional: only for AI features
 
@@ -248,7 +253,11 @@ reference, and [CREATE-PLUGIN.md](./CREATE-PLUGIN.md) to build your own.
    PLUGIN_REGISTRY_URL=
    ```
 
-   See `.env.example` for the full list of options.
+    See `.env.example` for the full list of options.
+
+    Enable **Server Members**, **Message Content**, and **Presence** gateway
+    intents in the Discord Developer Portal to match the client's requested
+    intents. Invite the bot with the `bot` and `applications.commands` scopes.
 
 4. **Deploy slash commands**
 
@@ -259,8 +268,20 @@ reference, and [CREATE-PLUGIN.md](./CREATE-PLUGIN.md) to build your own.
 5. **Start the bot**
 
    ```bash
-   npm start
-   ```
+    npm start
+    ```
+
+    An incomplete optional dashboard configuration disables the API without
+    preventing bot startup. `SIGINT` and `SIGTERM` stop tasks, plugins, workers,
+    Discord and database connections. Core schedules use UTC. Welcome messages
+    come from the configured welcome plugin, not an unsolicited core fallback.
+
+### Verification
+
+See [verification and local plugin setup](docs/VERIFICATION.md) for test commands,
+the disposable-MongoDB integration check, and using edited sibling plugins rather
+than older npm releases. Music requires an external Lavalink v4 server; a successful
+offline test is not proof of live voice playback.
 
 ### Option 2: Docker Setup
 
@@ -384,7 +405,7 @@ Start here:
 ### **Modern Tech Stack**
 
 - **Discord.js v14** - Discord API wrapper
-- **Node.js 18+** - JavaScript runtime
+- **Node.js 20+** - JavaScript runtime
 - **MongoDB + Mongoose** - Persistent data and schemas
 - **Google Gemini AI** - AI assistant features
 - **Fastify/Express** - Dashboard and internal API surfaces

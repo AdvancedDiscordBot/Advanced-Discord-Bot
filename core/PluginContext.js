@@ -50,6 +50,19 @@ class PluginContext {
 			config: this.config,
 			logger: this.logger,
 		};
+		if (this.config?.commandCollection) {
+			// Collection runs load(ctx) to discover factory/dynamic commands,
+			// but it must not start the bot's background scheduler.
+			ctx.scheduler = Object.freeze({
+				schedule(name, expression, handler) {
+					if (typeof handler !== "function" || !require("node-cron").validate(expression)) {
+						throw new Error(`Invalid scheduled task: ${name}`);
+					}
+					return { stop() {} };
+				},
+				unschedule: () => false,
+			});
+		}
 
 		// ── Deprecation proxies for ctx.client and ctx.db ──────────────
 		// These warn when plugins access the raw client/db directly.
@@ -124,9 +137,14 @@ class PluginContext {
 		const pluginName = this.pluginName;
 		const pluginManager = this.pluginManager;
 		if (!hooks || !pluginManager) return hooks;
+		const state = pluginManager.plugins.get(pluginName);
+		const subscriptions = new Set();
 
-		const gate = (handler) => {
+		const gate = (hookName, handler) => {
 			return async (payload, ...rest) => {
+				if (this.config?.commandCollection && hookName !== "onPluginUnload") return;
+				const ownUnload = hookName === "onPluginUnload" && payload?.pluginName === pluginName;
+				if (!ownUnload && (state?.enabled === false || pluginManager._shuttingDown)) return;
 				if (pluginManager.isGuildGateable(pluginName)) {
 					const guildId =
 						payload && typeof payload === "object"
@@ -142,14 +160,37 @@ class PluginContext {
 				return handler(payload, ...rest);
 			};
 		};
+		const subscribe = (hookName, handler, priority, any = false) => {
+			if (typeof handler !== "function") throw new TypeError("Hook handler must be a function");
+			if (!state?.enabled || pluginManager._shuttingDown || pluginManager.plugins.get(pluginName) !== state) {
+				throw new Error(`Plugin not loaded: ${pluginName}`);
+			}
+			const remove = any
+				? hooks.onAny((name, payload) => gate(name, (value) => handler(name, value))(payload))
+				: hooks.on(hookName, gate(hookName, handler), priority);
+			const subscription = { hookName, handler, any, unsubscribe: () => {
+				if (!subscriptions.delete(subscription)) return;
+				state.hookUnsubscribers.delete(subscription.unsubscribe);
+				remove();
+			} };
+			subscriptions.add(subscription);
+			state.hookUnsubscribers.add(subscription.unsubscribe);
+			return subscription.unsubscribe;
+		};
 
 		return {
-			on: (hookName, handler, priority = 0) =>
-				hooks.on(hookName, gate(handler), priority),
-			onAny: (handler) =>
-				hooks.onAny((hookName, payload) => gate(() => handler(hookName, payload))(payload)),
-			off: (hookName, handler) => hooks.off(hookName, handler),
-			offAny: (handler) => hooks.offAny(handler),
+			on: (hookName, handler, priority = 0) => subscribe(hookName, handler, priority),
+			onAny: (handler) => subscribe(null, handler, 0, true),
+			off: (hookName, handler) => {
+				for (const entry of subscriptions) {
+					if (!entry.any && entry.hookName === hookName && entry.handler === handler) entry.unsubscribe();
+				}
+			},
+			offAny: (handler) => {
+				for (const entry of subscriptions) {
+					if (entry.any && entry.handler === handler) entry.unsubscribe();
+				}
+			},
 			emitHook: (hookName, payload) => hooks.emitHook(hookName, payload),
 		};
 	}

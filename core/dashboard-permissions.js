@@ -9,8 +9,8 @@
  * Two sources:
  *   - CORE_PERMISSIONS — fixed, platform-level dashboard areas.
  *   - Per-plugin — derived as `plugin.<name>.view` / `plugin.<name>.configure`
- *     for every loaded plugin, unless the plugin's manifest declares
- *     `dashboard.permissions[]`, in which case those keys are used instead.
+ *     for every loaded plugin, plus any keys declared in the plugin's manifest
+ *     `dashboard.permissions[]`. Custom grants do not imply view/configure.
  *
  * Manifest-declared keys are always re-namespaced under `plugin.<name>.` so a
  * plugin cannot mint a permission outside its own namespace (e.g. claim
@@ -44,7 +44,7 @@ const CORE_PERMISSIONS = [
 	},
 ];
 
-// Default per-plugin permissions when the manifest doesn't declare its own.
+// Platform settings permissions exist even when a plugin declares custom pages.
 const DEFAULT_PLUGIN_ACTIONS = [
 	{ action: "view", label: "View", description: "See this plugin's pages." },
 	{
@@ -68,10 +68,15 @@ function permissionKey(pluginName, action) {
 function pluginPermissions(pluginName, manifest) {
 	const displayName = manifest?.displayName || pluginName;
 	const declared = manifest?.dashboard?.permissions;
+	const out = DEFAULT_PLUGIN_ACTIONS.map(({ action, label, description }) => ({
+		key: permissionKey(pluginName, action),
+		label: `${displayName}: ${label}`,
+		description,
+		plugin: pluginName,
+	}));
 
 	if (Array.isArray(declared) && declared.length > 0) {
-		const seen = new Set();
-		const out = [];
+		const seen = new Set(out.map((permission) => permission.key));
 		for (const entry of declared) {
 			// Accept both "reports.read" and { key, label, description }.
 			const raw = typeof entry === "string" ? { key: entry } : entry;
@@ -92,15 +97,9 @@ function pluginPermissions(pluginName, manifest) {
 				plugin: pluginName,
 			});
 		}
-		if (out.length > 0) return out;
 	}
 
-	return DEFAULT_PLUGIN_ACTIONS.map(({ action, label, description }) => ({
-		key: permissionKey(pluginName, action),
-		label: `${displayName}: ${label}`,
-		description,
-		plugin: pluginName,
-	}));
+	return out;
 }
 
 /**

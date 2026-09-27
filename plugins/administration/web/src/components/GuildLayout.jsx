@@ -90,9 +90,9 @@ export function GuildLayout() {
     <div style={styles.layout}>
       <Header onOpenPalette={() => setPaletteOpen(true)} guild={guildData?.guild} plugins={plugins} />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} guild={guildData?.guild} />
-      <div style={styles.container}>
+      <div className="adb-guild-container" style={styles.container}>
         <Sidebar guild={guildData?.guild} plugins={plugins} access={guildData?.access} />
-        <main style={styles.main}>
+        <main className="adb-guild-content" style={styles.main}>
           <Outlet context={{ guildData, refreshGuild: () => setLoading(true) }} />
         </main>
       </div>

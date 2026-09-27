@@ -130,20 +130,18 @@ class PermissionResolver {
 	watch(client = this.client) {
 		if (!client || typeof client.on !== "function") return;
 
-		client.on("guildMemberUpdate", (_old, member) => {
-			this.invalidate(member?.id, member?.guild?.id);
-		});
-		client.on("guildMemberRemove", (member) => {
-			this.invalidate(member?.id, member?.guild?.id);
-		});
-		// A role's permissions or a role deletion can change every member's
-		// effective access, so blow away the whole guild.
-		client.on("roleUpdate", (_old, role) => {
-			this.invalidateGuild(role?.guild?.id);
-		});
-		client.on("roleDelete", (role) => {
-			this.invalidateGuild(role?.guild?.id);
-		});
+		const listeners = {
+			guildMemberUpdate: (_old, member) => this.invalidate(member?.id, member?.guild?.id),
+			guildMemberRemove: (member) => this.invalidate(member?.id, member?.guild?.id),
+			roleUpdate: (_old, role) => this.invalidateGuild(role?.guild?.id),
+			roleDelete: (role) => this.invalidateGuild(role?.guild?.id),
+			guildUpdate: (_old, guild) => this.invalidateGuild(guild?.id),
+			guildDelete: (guild) => this.invalidateGuild(guild?.id),
+		};
+		for (const [event, handler] of Object.entries(listeners)) client.on(event, handler);
+		return () => {
+			for (const [event, handler] of Object.entries(listeners)) client.off(event, handler);
+		};
 	}
 
 	// ── resolution ───────────────────────────────────────────────────────────

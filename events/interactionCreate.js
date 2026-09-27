@@ -8,206 +8,149 @@ const {
 	TextInputBuilder,
 	TextInputStyle,
 	StringSelectMenuBuilder,
+	PermissionsBitField,
+	PermissionFlagsBits,
 } = require("discord.js");
 
 const Database = require("../utils/database");
+const { isModeratorOrOwner } = require("../utils/moderation");
+
+async function replyError(interaction, content) {
+	try {
+		if (interaction.isAutocomplete?.()) {
+			if (!interaction.responded) await interaction.respond([]);
+		} else if (interaction.deferred && !interaction.replied) {
+			await interaction.editReply({ content, embeds: [], components: [] });
+		} else if (interaction.replied) {
+			await interaction.followUp({ content, flags: 64 });
+		} else {
+			await interaction.reply({ content, flags: 64 });
+		}
+	} catch (error) {
+		console.error("Failed to send interaction error:", error);
+	}
+}
+
+// Modal-capable commands cannot be deferred preemptively. Stop slow permission
+// reads before the initial response deadline instead of letting them authorize.
+async function permissionLookup(interaction, read) {
+	const age = Math.max(0, Date.now() - (interaction.createdTimestamp ?? Date.now()));
+	const timeout = interaction.deferred || interaction.replied ? 2000 : Math.min(2000, 2500 - age);
+	if (timeout <= 0) throw new Error("Permission lookup deadline exceeded");
+	let timer;
+	try {
+		return await Promise.race([
+			Promise.resolve().then(read),
+			new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Permission lookup timed out")), timeout); }),
+		]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
 
 module.exports = {
 	name: Events.InteractionCreate,
 	async execute(interaction, client) {
-		// 🎯 Handle slash commands
-		if (interaction.isChatInputCommand()) {
-			let command = interaction.client.commands.get(interaction.commandName);
+		client = client || interaction.client;
+		try {
+			const autocomplete = interaction.isAutocomplete?.() === true;
+			const contextMenu = interaction.isContextMenuCommand?.() || interaction.isUserContextMenuCommand?.() || interaction.isMessageContextMenuCommand?.();
+			if (autocomplete || interaction.isChatInputCommand?.() || contextMenu) {
+				const command = client.commands.get(interaction.commandName);
+				const manager = client.pluginManager;
+				const type = autocomplete ? 1 : interaction.commandType ?? (interaction.isUserContextMenuCommand?.() ? 2 : interaction.isMessageContextMenuCommand?.() ? 3 : 1);
+				const registration = () => {
+					if (!command || client.commands.get(interaction.commandName) !== command || command.enabled === false) return null;
+					const definition = command.guildData === undefined ? command.data :
+						Object.prototype.hasOwnProperty.call(command.guildData || {}, interaction.guildId) && command.guildData[interaction.guildId];
+					const data = definition?.toJSON ? definition.toJSON() : definition;
+					if (!data || data.name !== interaction.commandName || (data.type ?? 1) !== type) return null;
+					if (command.guildIds !== undefined && (!Array.isArray(command.guildIds) || !command.guildIds.includes(interaction.guildId))) return null;
+					const pluginName = manager?.getCommandOwner?.(command);
+					const pluginState = manager?.plugins.get(pluginName);
+					if (manager && (!pluginState?.enabled || pluginState.loaded === false || manager.broker?.isSuspended(pluginName) || pluginState.suspended)) return null;
+					if (manager && interaction.guildId && manager.isGuildGateable(pluginName) && manager.isEnabledForGuild(interaction.guildId, pluginName) !== true) return null;
+					const source = interaction.memberPermissions ?? interaction.member?.permissions;
+					const available = new PermissionsBitField(interaction.guild?.ownerId === interaction.user.id ? PermissionFlagsBits.Administrator : source?.bitfield ?? source ?? 0n);
+					for (const [required, isDefault] of [[command.permissions, false], [data.default_member_permissions ?? data.defaultMemberPermissions, true]]) {
+						if (required === undefined || required === null) continue;
+						const bits = PermissionsBitField.resolve(required);
+						if (!available.has(isDefault && bits === 0n ? PermissionFlagsBits.Administrator : bits)) return null;
+					}
+					return { pluginName, pluginState };
+				};
+				const owner = registration();
+				if (!owner) return await replyError(interaction, "This command is unavailable or you do not have permission to use it here.");
 
-			if (!command) {
-				console.error(
-					`❌ No command matching ${interaction.commandName} was found.`,
-				);
-				return;
-			}
-
-			// 🔄 Cooldown system
-			const { cooldowns } = interaction.client;
-
-			if (!cooldowns.has(command.data.name)) {
-				cooldowns.set(command.data.name, new Map());
-			}
-
-			const now = Date.now();
-			const timestamps = cooldowns.get(command.data.name);
-			const defaultCooldownDuration = 3;
-			const cooldownAmount =
-				(command.cooldown ?? defaultCooldownDuration) * 1000;
-
-			if (timestamps.has(interaction.user.id)) {
-				const expirationTime =
-					timestamps.get(interaction.user.id) + cooldownAmount;
-
-				if (now < expirationTime) {
-					const expiredTimestamp = Math.round(expirationTime / 1000);
-
-					const cooldownEmbed = new EmbedBuilder()
-						.setColor("#FFA500")
-						.setTitle("⏱️ Slow down there!")
-						.setDescription(
-							`Please wait <t:${expiredTimestamp}:R> before using \`/${command.data.name}\` again.`,
-						)
-						.setTimestamp();
-
-					return interaction.reply({
-						embeds: [cooldownEmbed],
-						flags: 64, // MessageFlags.Ephemeral
+				if (interaction.guildId && owner.pluginState?.manifest?.settings?.commandPermissions) {
+					const cfg = await permissionLookup(interaction, async () => {
+						const db = manager.db || await Database.getInstance();
+						return db.getPluginConfig(interaction.guildId, owner.pluginName);
 					});
-				}
-			}
-
-			timestamps.set(interaction.user.id, now);
-			setTimeout(() => timestamps.delete(interaction.user.id), cooldownAmount);
-
-			// 🛡️ Plugin command permission gate
-			// Check if the owning plugin has disabled this command or restricted it
-			// to specific roles for this guild. Config stored in PluginConfig.data._commands.
-			if (interaction.guildId && client.pluginManager) {
-				const owningPlugin = [...client.pluginManager.plugins.entries()]
-					.find(([, state]) => state.commandNames.has(command.data.name));
-				if (owningPlugin) {
-					const [pluginName, pluginState] = owningPlugin;
-
-					// Per-guild plugin enable gate. An installed plugin the guild
-					// hasn't enabled contributes no usable commands there. Core/
-					// builtin/in-repo and raw-client plugins are never gated.
-					if (
-						client.pluginManager.isGuildGateable(pluginName) &&
-						!client.pluginManager.isEnabledForGuild(interaction.guildId, pluginName)
-					) {
-						return interaction.reply({
-							content: `❌ The \`/${command.data.name}\` command isn't enabled on this server.`,
-							flags: 64,
-						});
-					}
-
-					if (pluginState.manifest?.settings?.commandPermissions) {
-						try {
-							const Database = require("../utils/database");
-							const db = await Database.getInstance();
-							const cfg = await db.getPluginConfig(interaction.guildId, pluginName);
-							const cmdCfg = cfg?.data?._commands?.[command.data.name];
-							if (cmdCfg) {
-								if (cmdCfg.enabled === false) {
-									return interaction.reply({
-										content: `❌ The \`/${command.data.name}\` command is disabled on this server.`,
-										flags: 64,
-									});
-								}
-								if (Array.isArray(cmdCfg.allowedRoles) && cmdCfg.allowedRoles.length > 0) {
-									const member = interaction.member;
-									const hasRole = member?.roles?.cache?.some((r) => cmdCfg.allowedRoles.includes(r.id));
-									if (!hasRole) {
-										return interaction.reply({
-											content: `❌ You don't have the required role to use \`/${command.data.name}\`.`,
-											flags: 64,
-										});
-									}
-								}
-							}
-						} catch (e) {
-							// Non-fatal: if DB lookup fails, allow the command through
-							console.error(`[PermGate] Failed to check command permissions:`, e.message);
-						}
+					const cmdCfg = cfg?.data?._commands?.[interaction.commandName];
+					if (cmdCfg?.enabled !== undefined && typeof cmdCfg.enabled !== "boolean") throw new Error("Invalid command enable flag");
+					if (cmdCfg?.enabled === false) return await replyError(interaction, "This command is disabled on this server.");
+					const allowedRoles = cmdCfg?.allowedRoles;
+					if (allowedRoles !== undefined) {
+						if (!Array.isArray(allowedRoles) || !allowedRoles.every((role) => typeof role === "string")) throw new Error("Invalid command role restrictions");
+						const roles = interaction.member?.roles;
+						const roleIds = new Set(Array.isArray(roles) ? roles : roles?.cache?.keys() || []);
+						if (allowedRoles.length && !allowedRoles.some((role) => roleIds.has(role))) return await replyError(interaction, "You do not have the required role to use this command.");
 					}
 				}
-			}
 
-			// 🧩 Run hook pipeline before command
-			if (client.hooks) {
-				const hookResult = await client.hooks.emitHook("beforeCommand", {
-					interaction,
-					command,
-				});
-
-				if (hookResult.cancelled) {
+				if (autocomplete) {
+					if (registration() && typeof command.autocomplete === "function") await command.autocomplete(interaction, client);
+					if (!interaction.responded) await interaction.respond([]);
 					return;
 				}
-
-				interaction = hookResult.payload.interaction || interaction;
-				command = hookResult.payload.command || command;
-			}
-
-			// 🛡️ Execute command with error handling
-			try {
-				const result = await command.execute(interaction, client);
-
 				if (client.hooks) {
-					await client.hooks.emitHook("afterCommand", {
-						interaction,
-						command,
-						result,
-					});
-				}
-			} catch (error) {
-				console.error(`❌ Error executing ${interaction.commandName}:`, error);
-
-				const errorEmbed = new EmbedBuilder()
-					.setColor("#FF0000")
-					.setTitle("⚠️ Something went wrong!")
-					.setDescription(
-						"There was an error while executing this command. Please try again later.",
-					)
-					.setTimestamp();
-
-				try {
-					if (interaction.replied || interaction.deferred) {
-						await interaction.followUp({
-							embeds: [errorEmbed],
-							flags: 64, // MessageFlags.Ephemeral
-						});
-					} else {
-						await interaction.reply({
-							embeds: [errorEmbed],
-							flags: 64, // MessageFlags.Ephemeral
-						});
+					const hookResult = await client.hooks.emitHook("beforeCommand", { interaction, command });
+					if (hookResult?.cancelled) {
+						if (!interaction.replied) await replyError(interaction, "Command cancelled.");
+						return;
 					}
-				} catch (replyError) {
-					console.error("Failed to send error message:", replyError);
+					// Hooks may modify the registered command, but cannot substitute an
+					// unchecked command or a different authenticated interaction.
+					if ((hookResult?.payload?.command && hookResult.payload.command !== command) || (hookResult?.payload?.interaction && hookResult.payload.interaction !== interaction)) throw new Error("Hook replaced command routing identity");
 				}
-			}
-		}
+				if (!registration()) return await replyError(interaction, "This command is no longer available here.");
 
-		// 🎮 Handle button interactions
-		if (interaction.isButton()) {
-			// Handle feedback interactions
-			if (interaction.customId.startsWith("feedback_")) {
-				await handleFeedbackInteraction(interaction, client);
+				const cooldown = command.cooldown ?? 3;
+				if (typeof cooldown !== "number" || !Number.isFinite(cooldown) || cooldown < 0 || cooldown * 1000 > 2147483647) throw new Error("Invalid command cooldown");
+				if (cooldown > 0) {
+					const cooldowns = client.cooldowns || (client.cooldowns = new Map());
+					const key = `${interaction.guildId || "dm"}:${interaction.user.id}`;
+					const timestamps = cooldowns.get(command.data.name) || new Map();
+					const now = Date.now();
+					const expiration = (timestamps.get(key) ?? -Infinity) + cooldown * 1000;
+					if (now < expiration) return await replyError(interaction, `Please wait <t:${Math.ceil(expiration / 1000)}:R> before using this command again.`);
+					cooldowns.set(command.data.name, timestamps);
+					timestamps.set(key, now);
+					const timer = setTimeout(() => { if (timestamps.get(key) === now) timestamps.delete(key); }, cooldown * 1000);
+					timer.unref?.();
+				}
+				const result = await command.execute(interaction, client);
+				if (client.hooks) await client.hooks.emitHook("afterCommand", { interaction, command, result });
+				return;
 			}
-
-			// Handle ticket system buttons
-			if (interaction.customId.startsWith("ticket_")) {
-				await handleTicketButtons(interaction, client);
+			if (typeof interaction.customId !== "string") return;
+			if (interaction.isButton()) {
+				if (interaction.customId.startsWith("feedback_")) return await handleFeedbackInteraction(interaction, client);
+				if (interaction.customId.startsWith("ticket_")) return await handleTicketButtons(interaction, client);
+				if (interaction.customId.startsWith("reminder_")) return await handleReminderButtons(interaction, client);
 			}
-
-			// Handle reminder buttons
-			if (interaction.customId.startsWith("reminder_")) {
-				await handleReminderButtons(interaction, client);
+			if (interaction.isStringSelectMenu()) {
+				if (interaction.customId === "feedback_select") return await handleFeedbackSelection(interaction, client);
+				if (interaction.customId.startsWith("priority_select_")) return await handleTicketPrioritySelection(interaction);
 			}
-		}
-
-		// 📋 Handle select menu interactions
-		if (interaction.isStringSelectMenu()) {
-			if (interaction.customId === "feedback_select") {
-				await handleFeedbackSelection(interaction, client);
+			if (interaction.isModalSubmit()) {
+				if (interaction.customId === "feedback_submit") return await handleFeedbackSubmission(interaction, client);
+				if (interaction.customId.startsWith("close_ticket_modal_")) return await handleCloseTicketModal(interaction, client);
 			}
-		}
-
-		// 📝 Handle modal submissions
-		if (interaction.isModalSubmit()) {
-			if (interaction.customId === "feedback_submit") {
-				await handleFeedbackSubmission(interaction, client);
-			}
-
-			// Handle ticket closing modal
-			if (interaction.customId.startsWith("close_ticket_modal_")) {
-				await handleCloseTicketModal(interaction, client);
-			}
+		} catch (error) {
+			console.error(`Error handling interaction ${interaction.commandName || interaction.customId}:`, error);
+			await replyError(interaction, "An error occurred while processing your request. Please try again later.");
 		}
 	},
 };
@@ -482,225 +425,121 @@ async function handleReminderButtons(interaction, client) {
 	}
 }
 
-// 🎫 Handle ticket system button interactions
-async function handleTicketButtons(interaction, client) {
-	const Database = require("../utils/database");
-	const { isModeratorOrOwner } = require("../utils/moderation");
-
-	const db = await Database.getInstance();
-	const customId = interaction.customId;
-
-	try {
-		if (customId.startsWith("ticket_claim_")) {
-			const ticketId = customId.split("_")[2];
-
-			// Check if user is a moderator
-			if (!isModeratorOrOwner(interaction.member, interaction.guild)) {
-				return await interaction.reply({
-					content: "❌ Only moderators can claim tickets.",
-					ephemeral: true,
-				});
-			}
-
-			// Update ticket in database
-			await db.updateTicket(ticketId, {
-				moderatorId: interaction.user.id,
-				status: "in_progress",
-			});
-
-			// Update embed
-			const ticket = await db.getTicketById(ticketId);
-			const embed = EmbedBuilder.from(interaction.message.embeds[0])
-				.addFields({
-					name: "👨‍💼 Claimed by",
-					value: `${interaction.user}`,
-					inline: true,
-				})
-				.setColor("#FFA500");
-
-			// Update buttons
-			const newButtons = new ActionRowBuilder().addComponents(
-				new ButtonBuilder()
-					.setCustomId(`ticket_unclaim_${ticketId}`)
-					.setLabel("❌ Unclaim")
-					.setStyle(ButtonStyle.Secondary),
-				new ButtonBuilder()
-					.setCustomId(`ticket_close_${ticketId}`)
-					.setLabel("🔒 Close Ticket")
-					.setStyle(ButtonStyle.Danger),
-				new ButtonBuilder()
-					.setCustomId(`ticket_priority_${ticketId}`)
-					.setLabel("📊 Change Priority")
-					.setStyle(ButtonStyle.Secondary),
-			);
-
-			await interaction.update({
-				embeds: [embed],
-				components: [newButtons],
-			});
-
-			await interaction.followUp({
-				content: `✅ ${interaction.user} has claimed this ticket and will assist you.`,
-				ephemeral: false,
-			});
-		} else if (customId.startsWith("ticket_close_")) {
-			const ticketId = customId.split("_")[2];
-
-			// Check if user is a moderator or ticket creator
-			const ticket = await db.getTicketById(ticketId);
-			const isMod = isModeratorOrOwner(interaction.member, interaction.guild);
-			const isCreator = ticket.userId === interaction.user.id;
-
-			if (!isMod && !isCreator) {
-				return await interaction.reply({
-					content:
-						"❌ Only moderators or the ticket creator can close tickets.",
-					ephemeral: true,
-				});
-			}
-
-			// Show confirmation modal
-			const modal = new ModalBuilder()
-				.setCustomId(`close_ticket_modal_${ticketId}`)
-				.setTitle("Close Ticket");
-
-			const reasonInput = new TextInputBuilder()
-				.setCustomId("close_reason")
-				.setLabel("Reason for closing (optional)")
-				.setStyle(TextInputStyle.Paragraph)
-				.setRequired(false)
-				.setMaxLength(500);
-
-			modal.addComponents(new ActionRowBuilder().addComponents(reasonInput));
-
-			await interaction.showModal(modal);
-		} else if (customId.startsWith("ticket_priority_")) {
-			const ticketId = customId.split("_")[2];
-
-			// Check if user is a moderator
-			if (!isModeratorOrOwner(interaction.member, interaction.guild)) {
-				return await interaction.reply({
-					content: "❌ Only moderators can change ticket priority.",
-					ephemeral: true,
-				});
-			}
-
-			// Show priority selection
-			const priorityRow = new ActionRowBuilder().addComponents(
-				new StringSelectMenuBuilder()
-					.setCustomId(`priority_select_${ticketId}`)
-					.setPlaceholder("Select new priority level")
-					.addOptions([
-						{
-							label: "🔴 High Priority",
-							value: "high",
-							description: "Urgent issues requiring immediate attention",
-						},
-						{
-							label: "🟡 Medium Priority",
-							value: "medium",
-							description: "Standard issues with normal response time",
-						},
-						{
-							label: "🟢 Low Priority",
-							value: "low",
-							description: "Minor issues with flexible response time",
-						},
-					]),
-			);
-
-			await interaction.reply({
-				content: "Select the new priority level:",
-				components: [priorityRow],
-				ephemeral: true,
-			});
-		}
-	} catch (error) {
-		console.error("Error handling ticket button:", error);
-		await interaction.reply({
-			content: "❌ An error occurred while processing your request.",
-			ephemeral: true,
-		});
+async function authorizedTicket(interaction, ticketId, allowCreator = false) {
+	const result = await permissionLookup(interaction, async () => {
+		const db = await Database.getInstance();
+		return { db, ticket: await db.getTicketById(ticketId) };
+	});
+	const { ticket } = result;
+	if (!ticket || !interaction.guildId || ticket.guildId !== interaction.guildId ||
+		interaction.guild?.id !== ticket.guildId || ticket.channelId !== interaction.channelId ||
+		interaction.channel?.id !== ticket.channelId ||
+		(interaction.channel.guildId && interaction.channel.guildId !== ticket.guildId)) {
+		await replyError(interaction, "Ticket not found in this channel.");
+		return null;
 	}
+	if (!interaction.member || (!isModeratorOrOwner(interaction.member, interaction.guild) && !(allowCreator && ticket.userId === interaction.user.id))) {
+		await replyError(interaction, allowCreator ? "Only moderators or the ticket creator can close tickets." : "Only moderators can manage tickets.");
+		return null;
+	}
+	if (["closed", "resolved"].includes(ticket.status)) {
+		await replyError(interaction, "This ticket is already closed.");
+		return null;
+	}
+	return result;
 }
 
-// 🔒 Handle close ticket modal submission
-async function handleCloseTicketModal(interaction, client) {
-	const Database = require("../utils/database");
-	const db = await Database.getInstance();
+async function handleTicketButtons(interaction) {
+	const match = /^ticket_(claim|unclaim|close|priority)_(.+)$/.exec(interaction.customId);
+	if (!match) return;
+	const [, action, ticketId] = match;
+	if (action !== "close") await interaction.deferReply({ flags: 64 });
+	const authorized = await authorizedTicket(interaction, ticketId, action === "close");
+	if (!authorized) return;
+	const { db, ticket } = authorized;
 
-	const ticketId = interaction.customId.split("_")[3];
-	const closeReason =
-		interaction.fields.getTextInputValue("close_reason") ||
-		"No reason provided";
-
-	try {
-		// Get ticket data
-		const ticket = await db.getTicketById(ticketId);
-		if (!ticket) {
-			return await interaction.reply({
-				content: "❌ Ticket not found.",
-				ephemeral: true,
-			});
-		}
-
-		// Update ticket status to closed
-		await db.updateTicket(ticketId, {
-			status: "closed",
-			closedAt: new Date(),
-			closedBy: interaction.user.id,
-			closeReason: closeReason,
-		});
-
-		// Create closing embed
-		const closeEmbed = new EmbedBuilder()
-			.setColor("#FF0000")
-			.setTitle("🔒 Ticket Closed")
-			.setDescription("This ticket has been closed.")
-			.addFields(
-				{
-					name: "👤 Closed by",
-					value: `${interaction.user}`,
-					inline: true,
-				},
-				{
-					name: "📅 Closed at",
-					value: `<t:${Math.floor(Date.now() / 1000)}:F>`,
-					inline: true,
-				},
-				{
-					name: "📝 Reason",
-					value: closeReason,
-					inline: false,
-				},
-			)
-			.setFooter({ text: "This channel will be deleted in 30 seconds." })
-			.setTimestamp();
-
-		// Send closing message
-		await interaction.reply({
-			embeds: [closeEmbed],
-		});
-
-		// Delete the channel after 30 seconds
-		setTimeout(async () => {
-			try {
-				if (interaction.channel && interaction.channel.deletable) {
-					await interaction.channel.delete();
-				}
-			} catch (error) {
-				console.error("Error deleting ticket channel:", error);
-			}
-		}, 30000);
-
-		console.log(
-			`🔒 Ticket #${ticket.ticketId || ticketId} closed by ${interaction.user.tag}`,
-		);
-	} catch (error) {
-		console.error("Error closing ticket:", error);
-		await interaction.reply({
-			content: "❌ An error occurred while closing the ticket.",
-			ephemeral: true,
-		});
+	if (action === "close") {
+		const modal = new ModalBuilder().setCustomId(`close_ticket_modal_${ticketId}`).setTitle("Close Ticket");
+		const reasonInput = new TextInputBuilder()
+			.setCustomId("close_reason").setLabel("Reason for closing (optional)")
+			.setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(500);
+		modal.addComponents(new ActionRowBuilder().addComponents(reasonInput));
+		return interaction.showModal(modal);
 	}
+	if (action === "priority") {
+		const priorityRow = new ActionRowBuilder().addComponents(
+			new StringSelectMenuBuilder().setCustomId(`priority_select_${ticketId}`)
+				.setPlaceholder("Select new priority level")
+				.addOptions([
+					{ label: "High Priority", value: "high" },
+					{ label: "Medium Priority", value: "medium" },
+					{ label: "Low Priority", value: "low" },
+				]),
+		);
+		return interaction.editReply({ content: "Select the new priority level:", components: [priorityRow] });
+	}
+
+	const claimed = action === "claim";
+	const updated = await db.updateTicket(ticketId, { moderatorId: claimed ? interaction.user.id : null, status: claimed ? "in_progress" : "open" });
+	if (!updated) return replyError(interaction, "Ticket not found.");
+	const embed = interaction.message.embeds?.[0]
+		? EmbedBuilder.from(interaction.message.embeds[0])
+		: new EmbedBuilder().setTitle(ticket.title || "Support ticket");
+	embed.setFields((embed.data.fields || []).filter((field) => field.name !== "👨‍💼 Claimed by"));
+	if (claimed) embed.addFields({ name: "👨‍💼 Claimed by", value: `${interaction.user}`, inline: true });
+	embed.setColor(claimed ? "#FFA500" : "#5865F2");
+	const buttons = new ActionRowBuilder().addComponents(
+		new ButtonBuilder().setCustomId(`ticket_${claimed ? "unclaim" : "claim"}_${ticketId}`).setLabel(claimed ? "Unclaim" : "Claim").setStyle(ButtonStyle.Secondary),
+		new ButtonBuilder().setCustomId(`ticket_close_${ticketId}`).setLabel("Close Ticket").setStyle(ButtonStyle.Danger),
+		new ButtonBuilder().setCustomId(`ticket_priority_${ticketId}`).setLabel("Change Priority").setStyle(ButtonStyle.Secondary),
+	);
+	await interaction.message.edit({ embeds: [embed], components: [buttons] });
+	await interaction.editReply({ content: claimed ? "You have claimed this ticket." : "This ticket is now unclaimed." });
+}
+
+async function handleTicketPrioritySelection(interaction) {
+	await interaction.deferReply({ flags: 64 });
+	const ticketId = interaction.customId.slice("priority_select_".length);
+	const authorized = await authorizedTicket(interaction, ticketId);
+	if (!authorized) return;
+	const priority = interaction.values?.[0];
+	if (interaction.values?.length !== 1 || !["low", "medium", "high"].includes(priority)) return replyError(interaction, "Invalid ticket priority.");
+	const updated = await authorized.db.updateTicket(ticketId, { priority });
+	if (!updated) return replyError(interaction, "Ticket not found.");
+	await interaction.editReply({ content: `Ticket priority changed to ${priority}.`, components: [] });
+}
+
+async function handleCloseTicketModal(interaction) {
+	const ticketId = interaction.customId.slice("close_ticket_modal_".length);
+	const authorized = await authorizedTicket(interaction, ticketId, true);
+	if (!authorized) return;
+	const { db, ticket } = authorized;
+	const closeReason = interaction.fields.getTextInputValue("close_reason") || "No reason provided";
+	if (typeof closeReason !== "string" || closeReason.length > 500) return replyError(interaction, "Invalid closing reason.");
+	await interaction.deferReply();
+	const updated = await db.updateTicket(ticketId, { status: "closed", closedAt: new Date(), closedBy: interaction.user.id, closeReason });
+	if (!updated) return replyError(interaction, "Ticket not found.");
+	const closeEmbed = new EmbedBuilder()
+		.setColor("#FF0000").setTitle("🔒 Ticket Closed").setDescription("This ticket has been closed.")
+		.addFields(
+			{ name: "👤 Closed by", value: `${interaction.user}`, inline: true },
+			{ name: "📅 Closed at", value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true },
+			{ name: "📝 Reason", value: closeReason, inline: false },
+		)
+		.setFooter({ text: "This channel will be deleted in 30 seconds." }).setTimestamp();
+	await interaction.editReply({ embeds: [closeEmbed] });
+	const channel = interaction.channel;
+	const timer = setTimeout(async () => {
+		try {
+			// A reopened, moved or deleted record must not lose its channel to an
+			// old timer. Never use a different interaction channel as a fallback.
+			const current = await db.getTicketById(ticketId);
+			if (current?.status === "closed" && current.guildId === ticket.guildId &&
+				current.channelId === channel.id && channel.deletable &&
+				new Date(current.closedAt).getTime() === new Date(updated.closedAt).getTime()) await channel.delete();
+		} catch (error) {
+			console.error("Error deleting ticket channel:", error);
+		}
+	}, 30000);
+	timer.unref?.();
 }

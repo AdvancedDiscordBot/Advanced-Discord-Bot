@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ChevronLeft } from 'lucide-react';
 
@@ -24,31 +24,34 @@ export default function MemberPluginPage() {
 
 	const [state, setState] = useState({ loading: true, view: null, rows: [], error: null });
 	const [busyRow, setBusyRow] = useState(null);
+	const [actionError, setActionError] = useState(null);
+	const controller = useRef(null);
 
-	const load = useCallback(async () => {
+	const load = useCallback(async (signal) => {
 		try {
 			const url = `/api/me/guild/${guildId}/plugins/${encodeURIComponent(pluginName)}/data?path=${encodeURIComponent(path)}`;
-			const res = await fetch(url);
+			const res = await fetch(url, { signal });
+			if (signal.aborted) return;
 			if (!res.ok) {
 				setState({ loading: false, view: null, rows: [], error: res.status });
 				return;
 			}
 			const data = await res.json();
+			if (signal.aborted) return;
 			setState({ loading: false, view: data.view || null, rows: data.rows || [], error: null });
 		} catch {
-			setState({ loading: false, view: null, rows: [], error: 'network' });
+			if (!signal.aborted) setState({ loading: false, view: null, rows: [], error: 'network' });
 		}
 	}, [guildId, pluginName, path]);
 
 	useEffect(() => {
-		let alive = true;
-		(async () => {
-			await load();
-			if (!alive) return;
-		})();
-		return () => {
-			alive = false;
-		};
+		const current = new AbortController();
+		controller.current = current;
+		setState({ loading: true, view: null, rows: [], error: null });
+		setBusyRow(null);
+		setActionError(null);
+		load(current.signal);
+		return () => current.abort();
 	}, [load]);
 
 	// Run a declared action against one of the caller's own rows. The client
@@ -56,16 +59,24 @@ export default function MemberPluginPage() {
 	// {guildId, userId} scope. On success we reload so the view reflects reality.
 	const onAction = useCallback(
 		async (actionId, rowId) => {
+			const signal = controller.current.signal;
 			setBusyRow(`${rowId}:${actionId}`);
+			setActionError(null);
 			try {
 				const res = await fetch(`/api/me/guild/${guildId}/plugins/${encodeURIComponent(pluginName)}/action`, {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({ path, actionId, rowId }),
+					signal,
 				});
-				if (res.ok) await load();
+				const result = await res.json();
+				if (!res.ok) throw new Error(result.error || 'Action failed');
+				if (!result.ok) throw new Error('This item is no longer available.');
+				if (!signal.aborted) await load(signal);
+			} catch (err) {
+				if (!signal.aborted) setActionError(err.message);
 			} finally {
-				setBusyRow(null);
+				if (!signal.aborted) setBusyRow(null);
 			}
 		},
 		[guildId, pluginName, path, load],
@@ -79,6 +90,7 @@ export default function MemberPluginPage() {
 				<ChevronLeft size={16} />
 				<span>Back to pages</span>
 			</button>
+			{actionError && <p role="alert" style={{ color: colors.dangerText }}>{actionError}</p>}
 
 			{state.loading ? (
 				<div style={s.loading}>Loading…</div>

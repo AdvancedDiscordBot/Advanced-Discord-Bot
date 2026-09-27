@@ -15,7 +15,7 @@ const NAV = [
 export function Sidebar({ guild, plugins = [], access = null }) {
   if (!guild) {
     return (
-      <aside style={styles.sidebar}>
+      <aside className="adb-guild-sidebar" style={styles.sidebar}>
         <div style={styles.selectPrompt}>Select a server to manage</div>
       </aside>
     );
@@ -35,7 +35,7 @@ export function Sidebar({ guild, plugins = [], access = null }) {
   );
 
   return (
-    <aside style={styles.sidebar}>
+    <aside className="adb-guild-sidebar" style={styles.sidebar}>
       <div style={styles.guildInfo}>
         <div style={styles.guildName}>{guild.name}</div>
         <div style={styles.guildId}>{guild.id}</div>

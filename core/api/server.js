@@ -6,6 +6,7 @@ const MongoStore = require("connect-mongo");
 const axios = require("axios");
 const crypto = require("crypto");
 const path = require("path");
+const semver = require("semver");
 
 const { spawn, fork } = require("child_process");
 const { createLogger } = require("../logger");
@@ -35,6 +36,101 @@ function parseOwnerIds() {
 const PLUGIN_PACKAGE_RE = /^(@[\w.-]+\/)?adb-plugin-[\w.-]+(@[\w.~+-]+)?$/;
 function isValidPluginPackage(name) {
 	return typeof name === "string" && PLUGIN_PACKAGE_RE.test(name);
+}
+
+function isObject(value) {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isLocalReturnUrl(value) {
+	return typeof value === "string" && value.startsWith("/") &&
+		!value.startsWith("//") && !/[\\\x00-\x20\x7f]/.test(value);
+}
+
+const SNOWFLAKE = /^\d{17,20}$/;
+
+// Secrets remain available to the plugin, but are write-only on HTTP surfaces.
+// Presence markers are separate from config so round-tripping a form cannot
+// replace a stored password with a mask, boolean, default, or empty placeholder.
+function publicPluginSettings(manifest, data = {}) {
+	const schema = manifest?.settings?.schema || [];
+	const secret = (field) => field?.secret === true || field?.writeOnly === true || field?.format === "password";
+	const keys = new Set([
+		...schema.filter(secret).map((field) => field.key),
+		...Object.entries(manifest?.configSchema?.properties || {}).filter(([, field]) => secret(field)).map(([key]) => key),
+	]);
+	const config = { ...data };
+	const configuredSecrets = {};
+	for (const key of keys) {
+		configuredSecrets[key] = data?.[key] !== undefined && data[key] !== null && data[key] !== "";
+		delete config[key];
+	}
+	return {
+		config,
+		configuredSecrets,
+		settingsSchema: schema.map((field) => {
+			if (!keys.has(field.key)) return field;
+			const { default: _default, ...safe } = field;
+			return { ...safe, secret: true };
+		}),
+	};
+}
+
+// Dashboard settings are a patch of declared fields, never an arbitrary write
+// to the plugin's private data or its separately managed command restrictions.
+function validateSettings(plugin, data, guild) {
+	if (!isObject(data)) return "Settings must be an object";
+	const fields = new Map((plugin.manifest?.settings?.schema || []).map((field) => [field.key, field]));
+	for (const [key, value] of Object.entries(data)) {
+		const field = fields.get(key);
+		if (!field || key.startsWith("_") || key.includes(".") || key.includes("$") || key === "constructor" || key === "prototype") {
+			return `Unknown setting: ${key}`;
+		}
+		const constraints = plugin.manifest?.configSchema?.properties?.[key] || {};
+		let valid = false;
+		switch (field.type) {
+			case "string":
+				valid = typeof value === "string";
+				break;
+			case "boolean":
+				valid = typeof value === "boolean";
+				break;
+			case "number": {
+				const min = Math.max(field.min ?? -Infinity, constraints.minimum ?? -Infinity);
+				const max = Math.min(field.max ?? Infinity, constraints.maximum ?? Infinity);
+				valid = typeof value === "number" && Number.isFinite(value) &&
+					value >= min && value <= max &&
+					(constraints.type !== "integer" || Number.isInteger(value));
+				break;
+			}
+			case "select":
+				valid = (field.options || []).some((option) => (isObject(option) ? option.value : option) === value);
+				break;
+			case "channel":
+			case "role":
+				valid = value === "" || value === null || (typeof value === "string" && SNOWFLAKE.test(value) &&
+					!!(field.type === "role" ? guild?.roles : guild?.channels)?.cache?.has(value));
+				break;
+		}
+		if (!valid || (field.required && (value === "" || value === null))) return `Invalid value for setting: ${key}`;
+		if (Array.isArray(constraints.enum) && !constraints.enum.includes(value)) return `Invalid value for setting: ${key}`;
+	}
+	return null;
+}
+
+function isConfigPatch(data) {
+	return isObject(data) && Object.keys(data).every((key) =>
+		!key.startsWith("_") && !key.includes(".") && !key.includes("$") &&
+		!["guildId", "createdAt", "updatedAt", "constructor", "prototype"].includes(key));
+}
+
+async function syncAllCommands(pluginManager) {
+	const { syncAllGuilds } = require("../command-sync");
+	const results = await syncAllGuilds(pluginManager, pluginManager.client);
+	const failures = results.filter((result) => !result.ok);
+	if (failures.length) {
+		throw new Error(`Guild command sync failed: ${failures.map((result) => result.error).join("; ")}`);
+	}
 }
 
 function hasGuildPermission(guild) {
@@ -67,8 +163,8 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		return null;
 	}
 
-	if (!port) {
-		logger.error("BOT_API_PORT not set in .env");
+	if (!Number.isInteger(port) || port < 1 || port > 65535) {
+		logger.error("BOT_API_PORT must be an integer from 1 to 65535");
 		return null;
 	}
 
@@ -80,7 +176,13 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		pluginManager,
 		logger,
 	});
-	permissions.watch(client);
+	const stopWatching = permissions.watch(client);
+	const publicPluginConfig = (row) => {
+		const document = row.toObject ? row.toObject() : row;
+		const manifest = pluginManager.plugins.get(document.pluginName)?.manifest;
+		const { config, configuredSecrets } = publicPluginSettings(manifest, manifest ? document.data : {});
+		return { ...document, data: config, configuredSecrets };
+	};
 
 	const fastify = fastifyFactory({
 		// warn-level logging: fastify's own diagnostics (e.g. the
@@ -110,6 +212,11 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 	const sessionStore = MongoStore.create({
 		mongoUrl: process.env.MONGODB_URI,
 		collectionName: "adb_sessions",
+	});
+	fastify.addHook("onClose", async () => {
+		stopWatching?.();
+		permissions.invalidateAll();
+		await sessionStore.close();
 	});
 
 	await fastify.register(cors, {
@@ -323,7 +430,7 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 			totalServers,
 			totalUsers,
 			pluginCount,
-			commandsCount: client.commands.size || 27,
+			commandsCount: client.commands.size,
 		};
 	});
 
@@ -338,12 +445,14 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 	});
 
 	fastify.get("/auth/discord", async (request, reply) => {
+		const returnTo = request.query.redirect;
+		if (returnTo !== undefined && !isLocalReturnUrl(returnTo)) {
+			return reply.code(400).send({ error: "redirect must be a local path" });
+		}
 		const state = crypto.randomBytes(16).toString("hex");
 		request.session.oauthState = state;
-		
-		if (request.query.redirect) {
-			request.session.returnTo = request.query.redirect;
-		}
+		delete request.session.returnTo;
+		if (returnTo) request.session.returnTo = returnTo;
 
 		const params = new URLSearchParams({
 			client_id: discordClientId,
@@ -395,6 +504,7 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 			return reply.code(400).send({ error: "Invalid OAuth state" });
 		}
 
+		delete request.session.oauthState;
 		const tokenResponse = await axios.post(
 			"https://discord.com/api/oauth2/token",
 			new URLSearchParams({
@@ -435,14 +545,15 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		if (request.session.returnTo) {
 			const returnUrl = request.session.returnTo;
 			delete request.session.returnTo;
-			return reply.redirect(returnUrl);
+			if (isLocalReturnUrl(returnUrl)) return reply.redirect(returnUrl);
 		}
 
 		return reply.redirect(dashboardRedirect || "/dashboard");
 	});
 
-	fastify.post("/auth/logout", async (request) => {
-		request.session.destroy();
+	fastify.post("/auth/logout", async (request, reply) => {
+		await request.session.destroy();
+		reply.clearCookie("adb.sid", { path: "/" });
 		return { ok: true };
 	});
 
@@ -562,7 +673,7 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 			if (!access) return;
 			const { guildId, name } = request.params;
 			const pagePath = (request.query || {}).path;
-			if (!pagePath) return reply.code(400).send({ error: "path required" });
+			if (typeof pagePath !== "string" || !pagePath) return reply.code(400).send({ error: "path required" });
 
 			const page = resolveRenderedPage(guildId, name, pagePath);
 			if (!page) return reply.code(404).send({ error: "page not found" });
@@ -581,7 +692,7 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 			// Serialize _id → string id; drop mongoose internals.
 			const rows = docs.map((d) => {
 				const { _id, __v, ...rest } = d;
-				return { id: String(_id), ...rest };
+				return { ...publicPluginSettings(pluginManager.plugins.get(name)?.manifest, rest).config, id: String(_id) };
 			});
 			return { view: page.view, rows };
 		},
@@ -594,7 +705,7 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 			if (!access) return;
 			const { guildId, name } = request.params;
 			const { path: pagePath, actionId, rowId } = request.body || {};
-			if (!pagePath || !actionId || !rowId) {
+			if (![pagePath, actionId, rowId].every((value) => typeof value === "string" && value.length > 0)) {
 				return reply.code(400).send({ error: "path, actionId, rowId required" });
 			}
 
@@ -613,15 +724,22 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 			await db.ensureConnection();
 			// Always scoped to the caller's own row: {_id, guildId, userId}.
 			const scope = { _id: rowId, guildId, userId: request.session.user.id };
-			if (action.op === "delete") {
-				const res = await Model.deleteOne(scope);
-				return { ok: res.deletedCount > 0 };
-			}
-			if (action.op === "set") {
-				const res = await Model.updateOne(scope, {
-					$set: { [action.field]: action.value },
-				});
-				return { ok: res.matchedCount > 0 || res.n > 0 };
+			try {
+				if (action.op === "delete") {
+					const res = await Model.deleteOne(scope);
+					return { ok: res.deletedCount > 0 };
+				}
+				if (action.op === "set") {
+					const res = await Model.updateOne(scope, {
+						$set: { [action.field]: action.value },
+					});
+					return { ok: res.matchedCount > 0 || res.n > 0 };
+				}
+			} catch (error) {
+				if (error.name === "CastError" && error.path === "_id") {
+					return reply.code(400).send({ error: "Invalid rowId" });
+				}
+				throw error;
 			}
 			return reply.code(400).send({ error: "unsupported op" });
 		},
@@ -742,7 +860,10 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 	let runJob = async (_meta, fn) => fn(() => {});
 
 	fastify.get("/api/plugins", async () => ({
-		plugins: pluginManager.getPluginList(),
+		plugins: pluginManager.getPluginList().map((plugin) => ({
+			...plugin,
+			settingsSchema: publicPluginSettings(pluginManager.plugins.get(plugin.name)?.manifest).settingsSchema,
+		})),
 	}));
 
 	fastify.post("/api/plugins/install", async (request, reply) => {
@@ -765,7 +886,7 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 			return reply.code(500).send({ error: result.error });
 		}
 
-		return { ok: true };
+		return result;
 	});
 
 	fastify.post("/api/plugins/uninstall", async (request, reply) => {
@@ -797,33 +918,27 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 			}
 		}
 
-		if (plugin) {
-			await pluginManager.unloadPlugin(plugin.name, "uninstall");
-		}
-
 		const npmTarget = plugin?.npmPackage || packageName;
 		if (!isValidPluginPackage(npmTarget)) {
 			return reply.code(400).send({
 				error: "Invalid package name. Must be an adb-plugin-* package.",
 			});
 		}
-
 		const result = await runJob(
 			{ label: `Uninstall ${npmTarget}`, kind: "uninstall" },
-			(emitLog) => runNpmUninstall(npmTarget, logger, emitLog),
+			async (emitLog) => {
+				const result = await runNpmUninstall(npmTarget, logger, emitLog);
+				if (!result.ok) return result;
+				if (plugin && !(await pluginManager.unloadPlugin(plugin.name, "uninstall"))) {
+					return { ok: false, error: `Package removed, but ${plugin.name} could not be unloaded` };
+				}
+				await pluginManager.loadAll();
+				await syncAllCommands(pluginManager);
+				return result;
+			},
 		);
 		if (!result.ok) {
 			return reply.code(500).send({ error: result.error });
-		}
-
-		await pluginManager.loadAll();
-
-		// The uninstalled plugin's commands are gone — refresh every guild's set.
-		try {
-			const { syncAllGuilds } = require("../command-sync");
-			await syncAllGuilds(pluginManager, pluginManager.client);
-		} catch (error) {
-			logger.error("Command sync after uninstall failed", error);
 		}
 
 		return { ok: true };
@@ -835,6 +950,7 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		if (!ok) {
 			return reply.code(404).send({ error: "Plugin not unloaded" });
 		}
+		await syncAllCommands(pluginManager);
 
 		return { ok: true };
 	});
@@ -848,6 +964,7 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 				emitLog(`Reloading plugin ${name}…\n`);
 				const ok = await pluginManager.reloadPlugin(name, { force: true });
 				emitLog(ok ? "Reloaded.\n" : "Plugin could not be reloaded.\n");
+				if (ok) await syncAllCommands(pluginManager);
 				return { ok };
 			},
 		);
@@ -855,15 +972,6 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 			return reply.code(409).send({ error: "Plugin not reloadable" });
 		}
 
-		if (result.ok) {
-			// Reload re-registers commands — refresh the guild set.
-			try {
-				const { syncAllGuilds } = require("../command-sync");
-				await syncAllGuilds(pluginManager, pluginManager.client);
-			} catch (error) {
-				logger.error("Command sync after reload failed", error);
-			}
-		}
 		return { ok: true };
 	});
 
@@ -897,7 +1005,7 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 			return reply.code(400).send({ error: "Package name required" });
 		}
 
-		const details = await registry.getPluginDetails(packageName);
+		const details = await registry.getRegistryPluginDetails(packageName);
 		if (!details) {
 			return reply.code(404).send({ error: "Plugin not found in registry" });
 		}
@@ -925,6 +1033,9 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 				error: `Registry entry for ${packageName} has no npmPackage; cannot update.`,
 			});
 		}
+		if (typeof details.version !== "string" || !semver.valid(details.version)) {
+			return reply.code(422).send({ error: `Registry entry for ${packageName} has no valid version; cannot update.` });
+		}
 		const target = `${details.npmPackage}@${details.version}`;
 		if (!isValidPluginPackage(target)) {
 			return reply.code(400).send({ error: "Invalid package in registry entry." });
@@ -936,7 +1047,7 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		if (!result.ok) {
 			return reply.code(500).send({ error: result.error });
 		}
-		return { ok: true };
+		return result;
 	});
 
 	// Update every installed plugin that has a newer published version. Owner
@@ -971,11 +1082,16 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 
 		const results = [];
 		for (const t of targets) {
-			const result = await runJob(
-				{ label: `Update ${t.target}`, kind: "update" },
-				(emitLog) => runNpmInstall(t.target, pluginManager, logger, emitLog),
-			);
-			results.push({ name: t.name, from: t.from, to: t.to, ok: result.ok, error: result.error || null });
+			let result;
+			try {
+				result = await runJob(
+					{ label: `Update ${t.target}`, kind: "update" },
+					(emitLog) => runNpmInstall(t.target, pluginManager, logger, emitLog),
+				);
+			} catch (error) {
+				result = { ok: false, error: error.message };
+			}
+			results.push({ name: t.name, from: t.from, to: t.to, ok: result.ok, restartRequired: result.restartRequired === true, error: result.error || null });
 		}
 
 		const failed = results.filter((r) => !r.ok);
@@ -1008,7 +1124,7 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 	});
 
 	fastify.get("/api/plugins/registry/:packageName", async (request, reply) => {
-		const plugin = await registry.getPluginDetails(request.params.packageName);
+		const plugin = await registry.getRegistryPluginDetails(request.params.packageName);
 		if (!plugin) {
 			return reply.code(404).send({ error: "Plugin not found in registry" });
 		}
@@ -1038,18 +1154,19 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 	// entry carries no manifest we can't honestly describe what it does, so we
 	// say so rather than showing a reassuringly-empty card.
 	fastify.get("/api/plugins/registry/:packageName/risk-card", async (request, reply) => {
-		const plugin = await registry.getPluginDetails(request.params.packageName);
+		const plugin = await registry.getRegistryPluginDetails(request.params.packageName);
 		if (!plugin) {
 			return reply.code(404).send({ error: "Plugin not found in registry" });
 		}
 		// Registry entries carry no separate manifest — their flat
 		// `permissions` list IS the manifest. riskCardManifest adapts it.
-		const manifest = riskCardManifest(plugin.manifest || plugin.pluginJson || plugin);
-		if (!manifest) {
+		const source = plugin.manifest || plugin.pluginJson || plugin;
+		if (!isObject(source) || (!isObject(source.permissions) && !Array.isArray(source.permissions) && !isObject(source.capabilities))) {
 			return reply.code(422).send({
 				error: "Registry entry has no manifest; cannot generate a risk card.",
 			});
 		}
+		const manifest = riskCardManifest(source);
 		try {
 			return generateFullRiskCard(manifest);
 		} catch (err) {
@@ -1085,6 +1202,7 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 	// Lift a suspension after review. Reversible, admin-gated action: the plugin
 	// resumes receiving events and its violation window resets.
 	fastify.post("/api/plugins/:name/reinstate", async (request, reply) => {
+		if (!requireOwner(request, reply)) return;
 		const broker = pluginManager.broker;
 		if (!broker) return reply.code(503).send({ error: "Isolation not enabled" });
 		const lifted = broker.reinstate(request.params.name);
@@ -1168,24 +1286,26 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		await db.ensureConnection();
 		const config = await db.getPluginConfig(guildId, name);
 		return {
-			settingsSchema: plugin.manifest?.settings?.schema || [],
+			...publicPluginSettings(plugin.manifest, config?.data),
 			commandPermissions: plugin.manifest?.settings?.commandPermissions === true,
 			webUi: plugin.manifest?.webUi || null,
-			config: config?.data || {},
-			enabled: config?.enabled === true,
+			enabled: !pluginManager.isGuildGateable(name) || config?.enabled === true,
 		};
 	});
 
 	fastify.put("/api/guild/:guildId/plugins/:name/settings", async (request, reply) => {
 		const { guildId, name } = request.params;
 		if (!(await requireGuildAccess(request, reply, configurePermission(name)))) return;
-		if (!pluginManager.plugins.has(name)) return reply.code(404).send({ error: "Plugin not found" });
+		const plugin = pluginManager.plugins.get(name);
+		if (!plugin) return reply.code(404).send({ error: "Plugin not found" });
+		const error = validateSettings(plugin, request.body, client.guilds.cache.get(guildId));
+		if (error) return reply.code(400).send({ error });
 		await db.ensureConnection();
 		// Merge into existing config, preserving _commands sub-key
 		const existing = await db.getPluginConfig(guildId, name);
 		const merged = { ...(existing?.data || {}), ...(request.body || {}) };
 		const updated = await db.updatePluginConfig(guildId, name, merged);
-		return { config: updated?.data || {} };
+		return publicPluginSettings(plugin.manifest, updated?.data);
 	});
 
 	// ── Per-command permissions ───────────────────────────────────────────────
@@ -1213,20 +1333,26 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		if (!plugin) return reply.code(404).send({ error: "Plugin not found" });
 		if (!plugin.commandNames.has(cmd)) return reply.code(404).send({ error: "Command not found" });
 
-		const { enabled, allowedRoles } = request.body || {};
-		// Validate allowedRoles as Discord snowflakes (17-19 digit strings)
-		const SNOWFLAKE = /^\d{17,19}$/;
-		const roles = Array.isArray(allowedRoles)
-			? allowedRoles.filter((r) => typeof r === "string" && SNOWFLAKE.test(r))
-			: [];
+		const body = request.body;
+		if (!isObject(body) || !Object.keys(body).length || Object.keys(body).some((key) => !["enabled", "allowedRoles"].includes(key))) {
+			return reply.code(400).send({ error: "Expected enabled and/or allowedRoles" });
+		}
+		const { enabled, allowedRoles } = body;
+		if (enabled !== undefined && typeof enabled !== "boolean") {
+			return reply.code(400).send({ error: "enabled must be a boolean" });
+		}
+		if (allowedRoles !== undefined && (!Array.isArray(allowedRoles) || !allowedRoles.every((role) =>
+			typeof role === "string" && SNOWFLAKE.test(role) && client.guilds.cache.get(guildId)?.roles.cache.has(role)))) {
+			return reply.code(400).send({ error: "allowedRoles must contain role IDs from this guild" });
+		}
 
 		await db.ensureConnection();
 		const existing = await db.getPluginConfig(guildId, name);
 		const data = existing?.data || {};
 		data._commands = data._commands || {};
 		data._commands[cmd] = {
-			enabled: enabled !== false,
-			allowedRoles: roles,
+			enabled: enabled ?? (data._commands[cmd]?.enabled !== false),
+			allowedRoles: allowedRoles ?? data._commands[cmd]?.allowedRoles ?? [],
 		};
 		const updated = await db.updatePluginConfig(guildId, name, data);
 		return { command: updated?.data?._commands?.[cmd] };
@@ -1251,7 +1377,10 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 					"This plugin is part of the platform or runs un-sandboxed; it is always on and cannot be enabled or disabled per server.",
 			});
 		}
-		const enabled = request.body?.enabled === true;
+		if (typeof request.body?.enabled !== "boolean") {
+			return reply.code(400).send({ error: "enabled must be a boolean" });
+		}
+		const enabled = request.body.enabled;
 		await db.ensureConnection();
 		await db.setPluginEnabledForGuild(guildId, name, enabled, request.session.user?.id);
 		// Reflect the toggle in the runtime gate immediately.
@@ -1278,6 +1407,7 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 			const gateable = pluginManager.isGuildGateable(p.name);
 			return {
 				...p,
+				settingsSchema: publicPluginSettings(pluginManager.plugins.get(p.name)?.manifest).settingsSchema,
 				gateable,
 				// Non-gateable plugins (core/in-repo/raw-client) are always active.
 				enabledForGuild: gateable ? enabledNames.has(p.name) : true,
@@ -1318,17 +1448,17 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 	fastify.put("/api/guild/:guildId/roles/grants/:roleId", async (request, reply) => {
 		const { guildId, roleId } = request.params;
 		if (!(await requireGuildAccess(request, reply, "roles.manage"))) return;
-		const SNOWFLAKE = /^\d{17,19}$/;
-		if (!SNOWFLAKE.test(roleId)) {
+		if (!SNOWFLAKE.test(roleId) || !client.guilds.cache.get(guildId)?.roles.cache.has(roleId)) {
 			return reply.code(400).send({ error: "invalid roleId" });
 		}
 		// Only permissions that actually exist in the catalog can be granted, so a
 		// stale or hand-crafted request can't mint access to something undefined.
 		const valid = catalogKeys(Array.from(pluginManager.plugins.values()));
-		const requested = Array.isArray(request.body?.permissions)
-			? request.body.permissions
-			: [];
-		const granted = requested.filter((p) => valid.has(p));
+		const requested = request.body?.permissions;
+		if (!Array.isArray(requested) || !requested.every((permission) => valid.has(permission))) {
+			return reply.code(400).send({ error: "permissions must be an array of catalog keys" });
+		}
+		const granted = [...new Set(requested)];
 
 		await db.ensureConnection();
 		await db.setGuildRoleGrant(guildId, roleId, granted, request.session.user?.id);
@@ -1390,22 +1520,58 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 	});
 
 	fastify.get("/api/guild/:guildId/config", async (request, reply) => {
-		if (!(await requireGuildAccess(request, reply, "guild.view"))) return;
+		const access = await requireGuildAccess(request, reply, "guild.view");
+		if (!access) return;
 
 		await db.ensureConnection();
 
 		const serverConfig = await db.getServerConfig(request.params.guildId);
 		const pluginConfigs = await db.getAllPluginConfigs(request.params.guildId);
 
-		return { serverConfig, pluginConfigs };
+		return {
+			serverConfig,
+			pluginConfigs: pluginConfigs
+				.filter((config) => pluginManager.plugins.has(config.pluginName) && access.permissions.has(viewPermission(config.pluginName)))
+				.map(publicPluginConfig),
+		};
 	});
 
 	fastify.put("/api/guild/:guildId/config", async (request, reply) => {
 		if (!(await requireGuildAccess(request, reply, "guild.configure"))) return;
+		if (!isObject(request.body)) return reply.code(400).send({ error: "Config must be an object" });
+		const { serverConfig, pluginConfig, pluginConfigs, antiRaid, economy } = request.body || {};
+		for (const [Model, patch] of [[db.ServerConfig, serverConfig], [db.AntiRaid, antiRaid], [db.GuildEconomy, economy]]) {
+			if (patch === undefined) continue;
+			if (!isConfigPatch(patch)) return reply.code(400).send({ error: "Invalid config fields" });
+			try {
+				// Validate locally, including enums and unknown fields, before the
+				// database's update helpers (which do not run update validators).
+				const candidate = new Model({ guildId: request.params.guildId, ...patch }, undefined, { strict: "throw" });
+				await candidate.validate();
+			} catch (error) {
+				if (["ValidationError", "StrictModeError", "CastError"].includes(error.name)) {
+					return reply.code(400).send({ error: error.message });
+				}
+				throw error;
+			}
+		}
+		if (pluginConfigs !== undefined && !Array.isArray(pluginConfigs)) {
+			return reply.code(400).send({ error: "pluginConfigs must be an array" });
+		}
+		const entries = [...(pluginConfigs || []), ...(pluginConfig !== undefined ? [pluginConfig] : [])];
+		// Validate and authorize the entire batch before making any writes.
+		for (const entry of entries) {
+			if (!isObject(entry) || typeof entry.pluginName !== "string") {
+				return reply.code(400).send({ error: "pluginName required" });
+			}
+			if (!(await requireGuildAccess(request, reply, configurePermission(entry.pluginName)))) return;
+			const plugin = pluginManager.plugins.get(entry.pluginName);
+			if (!plugin) return reply.code(404).send({ error: "Plugin not found" });
+			const error = validateSettings(plugin, entry.data, client.guilds.cache.get(request.params.guildId));
+			if (error) return reply.code(400).send({ error });
+		}
 
 		await db.ensureConnection();
-
-		const { serverConfig, pluginConfig, pluginConfigs, antiRaid, economy } = request.body || {};
 
 		let updatedServer = null;
 		if (serverConfig) {
@@ -1433,25 +1599,13 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 
 		const updatedPlugins = [];
 
-		if (Array.isArray(pluginConfigs)) {
-			for (const entry of pluginConfigs) {
-				if (!entry?.pluginName) continue;
-				updatedPlugins.push(
-					await db.updatePluginConfig(
-						request.params.guildId,
-						entry.pluginName,
-						entry.data || {},
-					),
-				);
-			}
-		}
-
-		if (pluginConfig?.pluginName) {
+		for (const entry of entries) {
+			const existing = await db.getPluginConfig(request.params.guildId, entry.pluginName);
 			updatedPlugins.push(
 				await db.updatePluginConfig(
 					request.params.guildId,
-					pluginConfig.pluginName,
-					pluginConfig.data || {},
+					entry.pluginName,
+					{ ...(existing?.data || {}), ...entry.data },
 				),
 			);
 		}
@@ -1459,7 +1613,7 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		return {
 			ok: true,
 			serverConfig: updatedServer,
-			pluginConfigs: updatedPlugins,
+			pluginConfigs: updatedPlugins.map(publicPluginConfig),
 		};
 	});
 
@@ -1537,7 +1691,8 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		}).catch(function () {});
 	};
 
-	hooks.onAny((hookName, payload) => {
+	const stopBroadcasting = hooks.onAny((hookName, payload) => {
+		if (hookName === "onPluginLoad" || hookName === "onPluginUnload") permissions.invalidateAll();
 		const guildId = payload?.guildId || payload?.interaction?.guild?.id;
 
 		broadcast({
@@ -1547,6 +1702,7 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 			payload,
 		});
 	});
+	fastify.addHook("onClose", async () => stopBroadcasting());
 
 	broadcastInstallLog = (data) => {
 		broadcast({
@@ -1613,6 +1769,7 @@ async function runNpmInstallInternal(packageName, emitLog) {
 		child.stderr.on("data", (data) => {
 			emitLog({ type: "stderr", message: data.toString() });
 		});
+		child.once("error", (error) => resolve({ ok: false, error: error.message }));
 
 		child.on("close", (code) => {
 			if (code === 0) {
@@ -1629,26 +1786,46 @@ async function runNpmInstall(packageName, pluginManager, logger, emitLog) {
 	if (!result.ok) return result;
 
 	logger.info(`Installed ${packageName}`);
+	const npmPackage = packageName.replace(/@[^@/]+$/, "");
 
 	// Persist the install so a container rebuild reinstalls it.
 	try {
-		require("../plugin-persistence").recordInstall(packageName.split("@")[0]);
+		require("../plugin-persistence").recordInstall(npmPackage);
 	} catch (error) {
 		logger.error("Failed to record install in persistence manifest", error);
 	}
 
 	try {
+		// loadAll skips names already in the runtime map. Unload just the updated
+		// package and let discovery re-read its installed manifest before loading.
+		const current = pluginManager.getPluginList().find((plugin) => plugin.npmPackage === npmPackage);
+		const installed = pluginManager.discoverPlugins().find((plugin) => plugin.packageName === npmPackage);
+		if (current && (current.requiresRestart || installed?.manifest?.requiresRestart)) {
+			return { ok: true, restartRequired: true };
+		}
+		if (current) {
+			const state = pluginManager.plugins.get(current.name);
+			if (!(await pluginManager.unloadPlugin(current.name, "update"))) {
+				return { ok: false, error: `Could not unload ${current.name} for update` };
+			}
+			pluginManager.bustRequireCache(state.path, state.entryPath);
+		}
 		await pluginManager.loadAll();
+		const loaded = pluginManager.getPluginList().find((plugin) => plugin.npmPackage === npmPackage);
+		if (!loaded || !loaded.enabled || loaded.lastError) {
+			return { ok: false, error: loaded?.lastError || `Installed ${npmPackage}, but it did not load` };
+		}
 	} catch (error) {
 		logger.error("Failed to refresh plugins after install", error);
+		return { ok: false, error: `Installed ${npmPackage}, but refresh failed: ${error.message}` };
 	}
 
 	// New commands (or new plugin) — push the gated set to every guild.
 	try {
-		const { syncAllGuilds } = require("../command-sync");
-		await syncAllGuilds(pluginManager, pluginManager.client);
+		await syncAllCommands(pluginManager);
 	} catch (error) {
 		logger.error("Command sync after install failed", error);
+		return { ok: false, error: `Installed ${npmPackage}, but command sync failed: ${error.message}` };
 	}
 
 	return result;
@@ -1667,6 +1844,7 @@ async function runNpmUninstall(packageName, logger, emitLog) {
 		child.stderr.on("data", (data) => {
 			emitLog({ type: "stderr", message: data.toString() });
 		});
+		child.once("error", (error) => resolve({ ok: false, error: error.message }));
 
 		child.on("close", (code) => {
 			if (code === 0) {

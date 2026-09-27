@@ -1,4 +1,4 @@
-const { PermissionFlagsBits } = require("discord.js");
+const { PermissionFlagsBits, PermissionsBitField } = require("discord.js");
 
 // 🛡️ Check if user is a moderator
 function isModerator(member) {
@@ -15,17 +15,23 @@ function isModerator(member) {
     PermissionFlagsBits.Administrator,
   ];
 
-  return modPermissions.some((perm) => member.permissions.has(perm));
+	try {
+		const permissions = new PermissionsBitField(member.permissions?.bitfield ?? member.permissions ?? 0n);
+		return permissions.any(modPermissions);
+	} catch {
+		return false;
+	}
 }
 
 // 👑 Check if user is server owner
 function isServerOwner(member, guild) {
   if (!member || !guild) return false;
-  return member.id === guild.ownerId;
+	const id = member.id || member.user?.id;
+	return typeof id === "string" && id.length > 0 && id === guild.ownerId;
 }
 
 // 🔒 Check if user has specific role names commonly used for moderators
-function hasModeratorRole(member) {
+function hasModeratorRole(member, guild) {
   if (!member) return false;
 
   const modRoleNames = [
@@ -39,9 +45,11 @@ function hasModeratorRole(member) {
     "team",
   ];
 
-  return member.roles.cache.some((role) =>
-    modRoleNames.some((modRole) => role.name.toLowerCase().includes(modRole))
-  );
+	const roles = Array.isArray(member.roles)
+		? member.roles.map((id) => guild?.roles?.cache?.get(id))
+		: Array.from(member.roles?.cache?.values() || []);
+	return roles.some((role) => typeof role?.name === "string" &&
+		modRoleNames.some((modRole) => role.name.toLowerCase().includes(modRole)));
 }
 
 // 🎯 Comprehensive moderator check
@@ -49,7 +57,7 @@ function isModeratorOrOwner(member, guild) {
   return (
     isServerOwner(member, guild) ||
     isModerator(member) ||
-    hasModeratorRole(member)
+    hasModeratorRole(member, guild)
   );
 }
 

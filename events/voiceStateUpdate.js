@@ -1,104 +1,62 @@
 const { Events } = require("discord.js");
 const Database = require("../utils/database");
 
+// Voice sessions are transient; the shipped UserProfile schema has no join-time
+// fields. Weak guild keys also discard sessions when a guild leaves the client.
+const voiceSessions = new WeakMap();
+
 module.exports = {
-  name: Events.VoiceStateUpdate,
-  async execute(oldState, newState) {
-    const db = await Database.getInstance();
-await db.ensureConnection(); // Ensure connection is established
+	name: Events.VoiceStateUpdate,
+	async execute(oldState, newState, client = newState.client || oldState.client) {
+		const guild = newState.guild || oldState.guild;
+		const member = newState.member || oldState.member;
+		if (!guild || !member || member.user.bot || client?.shuttingDown) return;
+		if (oldState.channelId === newState.channelId) return;
+		const at = Date.now();
+		let sessions = voiceSessions.get(guild);
+		if (!sessions) {
+			sessions = new Map();
+			voiceSessions.set(guild, sessions);
+		}
+		let session = sessions.get(member.id);
+		if (!session) {
+			session = { channelId: null, joinedAt: null, work: Promise.resolve() };
+			sessions.set(member.id, session);
+		}
 
-    try {
-      // Get server config
-      const guildId = oldState.guild?.id || newState.guild?.id;
-      if (!guildId) return;
+		// Database waits must not reorder a member's join/switch/leave events or
+		// let two leave callbacks award the same session twice.
+		const work = session.work.then(async () => {
+			const manager = client?.pluginManager;
+			const levels = manager?.plugins.get("adb-plugin-levels");
+			if (client?.shuttingDown || (levels?.enabled && levels.loaded !== false && manager.isEnabledForGuild(guild.id, "adb-plugin-levels"))) {
+				session.channelId = null;
+				return;
+			}
+			const db = client?.db || await Database.getInstance();
+			const config = await db.getServerConfig(guild.id);
+			if (!config.xpEnabled || client?.shuttingDown) {
+				session.channelId = null;
+				return;
+			}
 
-      const config = await db.getServerConfig(guildId);
-      if (!config.xpEnabled) return;
-
-      const userId = oldState.member?.id || newState.member?.id;
-      if (!userId) return;
-
-      // User joined a voice channel
-      if (!oldState.channelId && newState.channelId) {
-        await handleVoiceJoin(userId, guildId, newState, db);
-      }
-      // User left a voice channel
-      else if (oldState.channelId && !newState.channelId) {
-        await handleVoiceLeave(userId, guildId, oldState, db, config);
-      }
-      // User switched voice channels
-      else if (
-        oldState.channelId &&
-        newState.channelId &&
-        oldState.channelId !== newState.channelId
-      ) {
-        await handleVoiceLeave(userId, guildId, oldState, db, config);
-        await handleVoiceJoin(userId, guildId, newState, db);
-      }
-      // User muted/unmuted or deafened/undeafened
-      else if (oldState.channelId === newState.channelId) {
-        // Track state changes but don't award XP for just muting/unmuting
-        return;
-      }
-    } catch (error) {
-      console.error("Error in voiceStateUpdate event:", error);
-    }
-  },
+			const minutes = session.channelId && session.channelId === oldState.channelId
+				? Math.floor((at - session.joinedAt) / 60000)
+				: 0;
+			session.channelId = newState.channelId || null;
+			session.joinedAt = newState.channelId ? at : null;
+			if (minutes < 1) return;
+			const xp = minutes * (config.xpPerVoiceMinute ?? 2);
+			if (xp <= 0) return;
+			const result = await db.addXP(member.id, guild.id, xp, "voice", `${minutes} minutes in voice chat`);
+			if (result.levelUp && client?.hooks) {
+				await client.hooks.emitHook("onLevelUp", {
+					user: member.user, guild, guildId: guild.id, newLevel: result.newLevel, profile: result.profile,
+				});
+			}
+		}).catch((error) => console.error("Error in voiceStateUpdate event:", error));
+		session.work = work;
+		await work;
+		if (session.work === work && !session.channelId) sessions.delete(member.id);
+	},
 };
-
-async function handleVoiceJoin(userId, guildId, voiceState, db) {
-  try {
-    // Update user profile with voice join time
-    await db.updateUserProfile(userId, guildId, {
-      voiceJoinedAt: new Date(),
-      currentVoiceChannelId: voiceState.channelId,
-    });
-
-    console.log(
-      `👥 ${voiceState.member.user.username} joined voice channel ${voiceState.channel.name}`
-    );
-  } catch (error) {
-    console.error("Error handling voice join:", error);
-  }
-}
-
-async function handleVoiceLeave(userId, guildId, voiceState, db, config) {
-  try {
-    const profile = await db.getUserProfile(userId, guildId);
-
-    if (!profile.voiceJoinedAt) return;
-
-    // Calculate time spent in voice channel
-    const joinTime = new Date(profile.voiceJoinedAt);
-    const leaveTime = new Date();
-    const minutesSpent = Math.floor((leaveTime - joinTime) / 60000);
-
-    // Only award XP if user was in voice for at least 1 minute
-    if (minutesSpent >= 1) {
-      const xpPerMinute = config.xpPerVoiceMinute || 2;
-      const totalXP = minutesSpent * xpPerMinute;
-
-      // Add XP for voice activity
-      await db.addXP(
-        userId,
-        guildId,
-        totalXP,
-        "voice",
-        `${minutesSpent} minutes in voice chat`
-      );
-
-      console.log(
-        `🎤 ${voiceState.member.user.username} earned ${totalXP} XP for ${minutesSpent} minutes in voice`
-      );
-    }
-
-    // Clear voice tracking data
-    await db.updateUserProfile(userId, guildId, {
-      voiceJoinedAt: null,
-      currentVoiceChannelId: null,
-      lastVoiceAt: new Date(),
-    });
-  } catch (error) {
-    console.error("Error handling voice leave:", error);
-  }
-}

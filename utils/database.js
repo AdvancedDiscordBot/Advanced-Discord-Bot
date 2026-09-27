@@ -19,6 +19,9 @@ class Database {
 	constructor() {
 		// Don't connect in constructor to avoid multiple connections
 		this.isConnected = false;
+		this._connecting = null;
+		this._closing = null;
+		this._closed = false;
 
 		// Expose models for direct access
 		this.ServerConfig = ServerConfig;
@@ -41,35 +44,49 @@ class Database {
 	static async getInstance() {
 		if (!Database.instance) {
 			Database.instance = new Database();
-			await Database.instance.connect();
 		}
-		return Database.instance;
+		const instance = Database.instance;
+		await instance.connect();
+		return instance;
 	}
 
 	async connect() {
-		if (this.isConnected || mongoose.connection.readyState === 1) {
+		if (this._closed) throw new Error("Database is closed");
+		if (this._connecting) return this._connecting;
+		if (mongoose.connection.readyState === 1) {
+			this.isConnected = true;
 			return;
 		}
+		this.isConnected = false;
+		if (!process.env.MONGODB_URI) {
+			throw new Error("MONGODB_URI environment variable is not set");
+		}
 
-		try {
-			if (!process.env.MONGODB_URI) {
-				throw new Error("MONGODB_URI environment variable is not set");
+		this._connecting = (async () => {
+			try {
+				await mongoose.connect(process.env.MONGODB_URI);
+				if (this._closed) throw new Error("Database closed during connection");
+				this.isConnected = true;
+				console.log("MongoDB connected successfully");
+			} catch (error) {
+				this.isConnected = false;
+				// close() owns disconnection if shutdown raced the initial connect.
+				if (!this._closed) {
+					try { await mongoose.disconnect(); }
+					catch (cleanupError) { console.error("MongoDB connection cleanup failed:", cleanupError); }
+				}
+				throw error;
 			}
-
-			await mongoose.connect(process.env.MONGODB_URI);
-
-			this.isConnected = true;
-			console.log("🚀 MongoDB connected successfully");
-		} catch (error) {
-			console.error("❌ MongoDB connection error:", error);
-			process.exit(1);
+		})();
+		try {
+			await this._connecting;
+		} finally {
+			this._connecting = null;
 		}
 	}
 
 	async ensureConnection() {
-		if (!this.isConnected && mongoose.connection.readyState !== 1) {
-			await this.connect();
-		}
+		await this.connect();
 	}
 
 	// 🏰 Server Config Methods
@@ -528,12 +545,12 @@ class Database {
 		await this.ensureConnection();
 		try {
 			const config = await this.getServerConfig(guildId);
-			const profile = await this.getUserProfile(userId, guildId);
 
-			if (!config.roleAutomation || !config.roleRewards) {
-				return { newRoles: [], removedRoles: [] };
+			if (!config.roleAutomation || !config.roleRewards?.length) {
+				return { eligibleRoles: [], currentRoles: [] };
 			}
 
+			const profile = await this.getUserProfile(userId, guildId);
 			const eligibleRoles = [];
 			const topUsers = await this.getTopUsers(guildId, 50);
 			const userRank = topUsers.findIndex((u) => u.userId === userId) + 1;
@@ -746,11 +763,19 @@ class Database {
 		}
 	}
 
-	close() {
-		if (mongoose.connection.readyState === 1) {
-			mongoose.disconnect();
-			console.log("📊 Database connection closed");
-		}
+	async close() {
+		if (this._closing) return this._closing;
+		this._closed = true;
+		this.isConnected = false;
+		this._closing = (async () => {
+			try {
+				if (this._connecting) await this._connecting.catch(() => {});
+				await mongoose.disconnect();
+			} finally {
+				this.isConnected = false;
+			}
+		})();
+		return this._closing;
 	}
 }
 
