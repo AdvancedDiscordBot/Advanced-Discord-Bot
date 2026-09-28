@@ -45,19 +45,24 @@ class Database {
 		if (!Database.instance) {
 			Database.instance = new Database();
 		}
+
 		const instance = Database.instance;
 		await instance.connect();
+
 		return instance;
 	}
 
 	async connect() {
 		if (this._closed) throw new Error("Database is closed");
 		if (this._connecting) return this._connecting;
+
 		if (mongoose.connection.readyState === 1) {
 			this.isConnected = true;
 			return;
 		}
+
 		this.isConnected = false;
+
 		if (!process.env.MONGODB_URI) {
 			throw new Error("MONGODB_URI environment variable is not set");
 		}
@@ -65,19 +70,32 @@ class Database {
 		this._connecting = (async () => {
 			try {
 				await mongoose.connect(process.env.MONGODB_URI);
-				if (this._closed) throw new Error("Database closed during connection");
+
+				if (this._closed) {
+					throw new Error("Database closed during connection");
+				}
+
 				this.isConnected = true;
 				console.log("MongoDB connected successfully");
 			} catch (error) {
 				this.isConnected = false;
+
 				// close() owns disconnection if shutdown raced the initial connect.
 				if (!this._closed) {
-					try { await mongoose.disconnect(); }
-					catch (cleanupError) { console.error("MongoDB connection cleanup failed:", cleanupError); }
+					try {
+						await mongoose.disconnect();
+					} catch (cleanupError) {
+						console.error(
+							"MongoDB connection cleanup failed:",
+							cleanupError,
+						);
+					}
 				}
+
 				throw error;
 			}
 		})();
+
 		try {
 			await this._connecting;
 		} finally {
@@ -92,11 +110,14 @@ class Database {
 	// 🏰 Server Config Methods
 	async getServerConfig(guildId) {
 		await this.ensureConnection();
+
 		try {
 			let config = await ServerConfig.findOne({ guildId });
+
 			if (!config) {
 				config = await ServerConfig.create({ guildId });
 			}
+
 			return config;
 		} catch (error) {
 			console.error("Error getting server config:", error);
@@ -106,12 +127,14 @@ class Database {
 
 	async updateServerConfig(guildId, updateData) {
 		await this.ensureConnection();
+
 		try {
 			const config = await ServerConfig.findOneAndUpdate(
 				{ guildId },
 				{ $set: updateData },
 				{ upsert: true, new: true },
 			);
+
 			return config;
 		} catch (error) {
 			console.error("Error updating server config:", error);
@@ -122,6 +145,7 @@ class Database {
 	// 🧩 Plugin Config Methods
 	async getPluginConfig(guildId, pluginName) {
 		await this.ensureConnection();
+
 		try {
 			// Atomic upsert — a plain findOne-then-create races when the
 			// dashboard and bot events request the same missing config
@@ -129,8 +153,17 @@ class Database {
 			// guildId+pluginName index rejects one with E11000.
 			return await PluginConfig.findOneAndUpdate(
 				{ guildId, pluginName },
-				{ $setOnInsert: { guildId, pluginName, data: {} } },
-				{ upsert: true, new: true },
+				{
+					$setOnInsert: {
+						guildId,
+						pluginName,
+						data: {},
+					},
+				},
+				{
+					upsert: true,
+					new: true,
+				},
 			);
 		} catch (error) {
 			console.error("Error getting plugin config:", error);
@@ -140,12 +173,14 @@ class Database {
 
 	async updatePluginConfig(guildId, pluginName, data) {
 		await this.ensureConnection();
+
 		try {
 			const config = await PluginConfig.findOneAndUpdate(
 				{ guildId, pluginName },
 				{ $set: { data } },
 				{ upsert: true, new: true },
 			);
+
 			return config;
 		} catch (error) {
 			console.error("Error updating plugin config:", error);
@@ -155,8 +190,11 @@ class Database {
 
 	async getAllPluginConfigs(guildId) {
 		await this.ensureConnection();
+
 		try {
-			return await PluginConfig.find({ guildId }).sort({ pluginName: 1 });
+			return await PluginConfig.find({ guildId }).sort({
+				pluginName: 1,
+			});
 		} catch (error) {
 			console.error("Error listing plugin configs:", error);
 			throw error;
@@ -168,14 +206,23 @@ class Database {
 	// guild admin has to opt in.
 	async isPluginEnabledForGuild(guildId, pluginName) {
 		await this.ensureConnection();
-		const config = await PluginConfig.findOne({ guildId, pluginName }).select(
-			"enabled",
-		);
+
+		const config = await PluginConfig.findOne({
+			guildId,
+			pluginName,
+	}).select("enabled");
+
 		return config?.enabled === true;
 	}
 
-	async setPluginEnabledForGuild(guildId, pluginName, enabled, actorId = null) {
+	async setPluginEnabledForGuild(
+		guildId,
+		pluginName,
+		enabled,
+		actorId = null,
+	) {
 		await this.ensureConnection();
+
 		return PluginConfig.findOneAndUpdate(
 			{ guildId, pluginName },
 			{
@@ -185,15 +232,21 @@ class Database {
 					enabledAt: enabled ? new Date() : null,
 				},
 			},
-			{ upsert: true, new: true },
+			{
+				upsert: true,
+				new: true,
+			},
 		);
 	}
 
 	async getEnabledPluginNames(guildId) {
 		await this.ensureConnection();
-		const rows = await PluginConfig.find({ guildId, enabled: true }).select(
-			"pluginName",
-		);
+
+		const rows = await PluginConfig.find({
+			guildId,
+			enabled: true,
+		}).select("pluginName");
+
 		return rows.map((row) => row.pluginName);
 	}
 
@@ -201,35 +254,62 @@ class Database {
 	// Powers the in-memory enable index the runtime gate reads synchronously.
 	async getAllEnabledPluginRows() {
 		await this.ensureConnection();
-		const rows = await PluginConfig.find({ enabled: true }).select(
-			"guildId pluginName",
-		);
-		return rows.map((row) => ({ guildId: row.guildId, pluginName: row.pluginName }));
+
+		const rows = await PluginConfig.find({
+			enabled: true,
+		}).select("guildId pluginName");
+
+		return rows.map((row) => ({
+			guildId: row.guildId,
+			pluginName: row.pluginName,
+		}));
 	}
 
 	// 🔐 Guild role grants (dashboard RBAC)
 	async getGuildRoleGrants(guildId) {
 		await this.ensureConnection();
-		return GuildRoleGrant.find({ guildId }).sort({ roleId: 1 });
+
+		return GuildRoleGrant.find({ guildId }).sort({
+			roleId: 1,
+		});
 	}
 
-	async setGuildRoleGrant(guildId, roleId, permissions, actorId = null) {
+	async setGuildRoleGrant(
+		guildId,
+		roleId,
+		permissions,
+		actorId = null,
+	) {
 		await this.ensureConnection();
+
 		return GuildRoleGrant.findOneAndUpdate(
 			{ guildId, roleId },
-			{ $set: { permissions, updatedBy: actorId } },
-			{ upsert: true, new: true },
+			{
+				$set: {
+					permissions,
+					updatedBy: actorId,
+				},
+			},
+			{
+				upsert: true,
+				new: true,
+			},
 		);
 	}
 
 	async deleteGuildRoleGrant(guildId, roleId) {
 		await this.ensureConnection();
-		return GuildRoleGrant.deleteOne({ guildId, roleId });
+
+		return GuildRoleGrant.deleteOne({
+			guildId,
+			roleId,
+		});
 	}
 
 	// 🎫 Ticket Methods
 	async createTicket(ticketData) {
 		await this.ensureConnection();
+
 		try {
 			const ticket = await Ticket.create(ticketData);
 			return ticket;
@@ -241,12 +321,18 @@ class Database {
 
 	async getTickets(guildId, status = null) {
 		await this.ensureConnection();
+
 		try {
 			const query = { guildId };
+
 			if (status) {
 				query.status = status;
 			}
-			const tickets = await Ticket.find(query).sort({ createdAt: -1 });
+
+			const tickets = await Ticket.find(query).sort({
+				createdAt: -1,
+			});
+
 			return tickets;
 		} catch (error) {
 			console.error("Error getting tickets:", error);
@@ -256,6 +342,7 @@ class Database {
 
 	async getTicketByChannel(channelId) {
 		await this.ensureConnection();
+
 		try {
 			const ticket = await Ticket.findOne({ channelId });
 			return ticket;
@@ -267,6 +354,7 @@ class Database {
 
 	async getTicketById(ticketId) {
 		await this.ensureConnection();
+
 		try {
 			const ticket = await Ticket.findById(ticketId);
 			return ticket;
@@ -278,10 +366,16 @@ class Database {
 
 	async updateTicket(ticketId, updateData) {
 		await this.ensureConnection();
+
 		try {
-			const ticket = await Ticket.findByIdAndUpdate(ticketId, updateData, {
-				new: true,
-			});
+			const ticket = await Ticket.findByIdAndUpdate(
+				ticketId,
+				updateData,
+				{
+					new: true,
+				},
+			);
+
 			return ticket;
 		} catch (error) {
 			console.error("Error updating ticket:", error);
@@ -289,18 +383,32 @@ class Database {
 		}
 	}
 
-	async updateTicketStatus(ticketId, status, moderatorId = null) {
+	async updateTicketStatus(
+		ticketId,
+		status,
+		moderatorId = null,
+	) {
 		await this.ensureConnection();
+
 		try {
 			const updateData = { status };
-			if (moderatorId) updateData.moderatorId = moderatorId;
+
+			if (moderatorId) {
+				updateData.moderatorId = moderatorId;
+			}
+
 			if (status === "closed" || status === "resolved") {
 				updateData.closedAt = new Date();
 			}
 
-			const ticket = await Ticket.findByIdAndUpdate(ticketId, updateData, {
-				new: true,
-			});
+			const ticket = await Ticket.findByIdAndUpdate(
+				ticketId,
+				updateData,
+				{
+					new: true,
+				},
+			);
+
 			return ticket;
 		} catch (error) {
 			console.error("Error updating ticket status:", error);
@@ -308,8 +416,14 @@ class Database {
 		}
 	}
 
-	async addTicketMessage(ticketId, userId, message, attachmentUrl = null) {
+	async addTicketMessage(
+		ticketId,
+		userId,
+		message,
+		attachmentUrl = null,
+	) {
 		await this.ensureConnection();
+
 		try {
 			const messageData = {
 				userId,
@@ -320,9 +434,16 @@ class Database {
 
 			const ticket = await Ticket.findByIdAndUpdate(
 				ticketId,
-				{ $push: { messages: messageData } },
-				{ new: true },
+				{
+					$push: {
+						messages: messageData,
+					},
+				},
+				{
+					new: true,
+				},
 			);
+
 			return ticket;
 		} catch (error) {
 			console.error("Error adding ticket message:", error);
@@ -338,48 +459,182 @@ class Database {
 		timeWindow = 3600000,
 	) {
 		await this.ensureConnection();
+
 		try {
 			const now = new Date();
-			let rateLimit = await AIRateLimit.findOne({ userId, guildId });
 
-			if (!rateLimit) {
-				// First request
-				await AIRateLimit.create({
+			/*
+			 * Atomically increment the counter only when:
+			 *   1. The rate-limit window is still active.
+			 *   2. The maximum number of requests has not been reached.
+			 *
+			 * This replaces the old:
+			 *
+			 *     findOne()
+			 *     -> modify document
+			 *     -> save()
+			 *
+			 * sequence, which was vulnerable to concurrent requests
+			 * reading the same requestCount.
+			 */
+			const updatedRateLimit = await AIRateLimit.findOneAndUpdate(
+				{
 					userId,
 					guildId,
-					requestCount: 1,
-					lastRequest: now,
-					resetAt: new Date(now.getTime() + timeWindow),
-				});
-				return { allowed: true, remaining: maxRequests - 1 };
-			}
+					resetAt: { $gt: now },
+					requestCount: { $lt: maxRequests },
+				},
+				{
+					$inc: {
+						requestCount: 1,
+					},
+					$set: {
+						lastRequest: now,
+					},
+				},
+				{
+					new: true,
+				},
+			);
 
-			const timeDiff = now.getTime() - rateLimit.lastRequest.getTime();
-
-			if (timeDiff > timeWindow || now > rateLimit.resetAt) {
-				// Reset counter
-				rateLimit.requestCount = 1;
-				rateLimit.lastRequest = now;
-				rateLimit.resetAt = new Date(now.getTime() + timeWindow);
-				await rateLimit.save();
-				return { allowed: true, remaining: maxRequests - 1 };
-			} else if (rateLimit.requestCount >= maxRequests) {
-				// Rate limited
-				return {
-					allowed: false,
-					remaining: 0,
-					resetTime: rateLimit.resetAt,
-				};
-			} else {
-				// Increment counter
-				rateLimit.requestCount += 1;
-				rateLimit.lastRequest = now;
-				await rateLimit.save();
+			/*
+			 * An existing active rate-limit record was successfully
+			 * incremented. The update itself is atomic in MongoDB.
+			 */
+			if (updatedRateLimit) {
 				return {
 					allowed: true,
-					remaining: maxRequests - rateLimit.requestCount,
+					remaining: Math.max(
+						0,
+						maxRequests - updatedRateLimit.requestCount,
+					),
 				};
 			}
+
+			/*
+			 * The atomic increment did not happen. This means the
+			 * document either:
+			 *
+			 *   - does not exist yet,
+			 *   - belongs to an expired window, or
+			 *   - has already reached the maximum request count.
+			 */
+			const currentRateLimit = await AIRateLimit.findOne({
+				userId,
+				guildId,
+			});
+
+			/*
+			 * First request for this user/guild.
+			 *
+			 * The schema has a unique userId + guildId index. Two
+			 * simultaneous first requests can therefore race here:
+			 *
+			 *   Request A -> create()
+			 *   Request B -> create()
+			 *
+			 * One succeeds and the other receives E11000.
+			 * The losing request retries the atomic update above.
+			 */
+			if (!currentRateLimit) {
+				try {
+					const resetAt = new Date(
+						now.getTime() + timeWindow,
+					);
+
+					await AIRateLimit.create({
+						userId,
+						guildId,
+						requestCount: 1,
+						lastRequest: now,
+						resetAt,
+					});
+
+					return {
+						allowed: true,
+						remaining: Math.max(0, maxRequests - 1),
+					};
+				} catch (error) {
+					if (error?.code === 11000) {
+						/*
+						 * Another concurrent request created the
+						 * record first. Retry and let the atomic
+						 * update handle this request.
+						 */
+						return this.checkRateLimit(
+							userId,
+							guildId,
+							maxRequests,
+							timeWindow,
+						);
+					}
+
+					throw error;
+				}
+			}
+
+			/*
+			 * The existing rate-limit window has expired.
+			 *
+			 * The reset operation is also conditional: only one
+			 * concurrent request can change the expired document
+			 * because resetAt must still be <= now.
+			 */
+			if (now >= currentRateLimit.resetAt) {
+				const newResetAt = new Date(
+					now.getTime() + timeWindow,
+				);
+
+				const resetRateLimit =
+					await AIRateLimit.findOneAndUpdate(
+						{
+							userId,
+							guildId,
+							resetAt: { $lte: now },
+						},
+						{
+							$set: {
+								requestCount: 1,
+								lastRequest: now,
+								resetAt: newResetAt,
+							},
+						},
+						{
+							new: true,
+						},
+					);
+
+				if (resetRateLimit) {
+					return {
+						allowed: true,
+						remaining: Math.max(
+							0,
+							maxRequests - 1,
+						),
+					};
+				}
+
+				/*
+				 * Another concurrent request won the reset race.
+				 * Retry through the atomic increment path.
+				 */
+				return this.checkRateLimit(
+					userId,
+					guildId,
+					maxRequests,
+					timeWindow,
+				);
+			}
+
+			/*
+			 * The window is active and the maximum number of
+			 * requests has already been reached.
+			 */
+			return {
+				allowed: false,
+				remaining: 0,
+				resetTime: currentRateLimit.resetAt,
+			};
 		} catch (error) {
 			console.error("Error checking rate limit:", error);
 			throw error;
@@ -389,11 +644,20 @@ class Database {
 	// 👤 User Profile & XP Methods
 	async getUserProfile(userId, guildId) {
 		await this.ensureConnection();
+
 		try {
-			let profile = await UserProfile.findOne({ userId, guildId });
+			let profile = await UserProfile.findOne({
+				userId,
+				guildId,
+			});
+
 			if (!profile) {
-				profile = await UserProfile.create({ userId, guildId });
+				profile = await UserProfile.create({
+					userId,
+					guildId,
+				});
 			}
+
 			return profile;
 		} catch (error) {
 			console.error("Error getting user profile:", error);
@@ -403,12 +667,17 @@ class Database {
 
 	async updateUserProfile(userId, guildId, updateData) {
 		await this.ensureConnection();
+
 		try {
 			const profile = await UserProfile.findOneAndUpdate(
 				{ userId, guildId },
 				{ $set: updateData },
-				{ upsert: true, new: true },
+				{
+					upsert: true,
+					new: true,
+				},
 			);
+
 			return profile;
 		} catch (error) {
 			console.error("Error updating user profile:", error);
@@ -416,14 +685,28 @@ class Database {
 		}
 	}
 
-	async addXP(userId, guildId, amount, type = "message", reason = null) {
+	async addXP(
+		userId,
+		guildId,
+		amount,
+		type = "message",
+		reason = null,
+	) {
 		await this.ensureConnection();
+
 		try {
 			// Get current profile
-			const profile = await this.getUserProfile(userId, guildId);
+			const profile = await this.getUserProfile(
+				userId,
+				guildId,
+			);
 
 			// Calculate new XP and level
-			const newTotalXp = Math.max(0, profile.totalXp + amount);
+			const newTotalXp = Math.max(
+				0,
+				profile.totalXp + amount,
+			);
+
 			const newLevel = this.calculateLevel(newTotalXp);
 
 			// Update profile
@@ -433,22 +716,29 @@ class Database {
 				dailyXp: profile.dailyXp + amount,
 				weeklyXp: profile.weeklyXp + amount,
 				monthlyXp: profile.monthlyXp + amount,
-				activityScore: this.calculateActivityScore(profile, amount, type),
+				activityScore: this.calculateActivityScore(
+					profile,
+					amount,
+					type,
+				),
 			};
 
 			if (type === "message") {
-				updateData.messageCount = (profile.messageCount || 0) + 1;
+				updateData.messageCount =
+					(profile.messageCount || 0) + 1;
 				updateData.lastMessageAt = new Date();
 			} else if (type === "voice") {
-				updateData.voiceMinutes = (profile.voiceMinutes || 0) + 1;
+				updateData.voiceMinutes =
+					(profile.voiceMinutes || 0) + 1;
 				updateData.lastVoiceAt = new Date();
 			}
 
-			const updatedProfile = await UserProfile.findOneAndUpdate(
-				{ userId, guildId },
-				{ $set: updateData },
-				{ new: true },
-			);
+			const updatedProfile =
+				await UserProfile.findOneAndUpdate(
+					{ userId, guildId },
+					{ $set: updateData },
+					{ new: true },
+				);
 
 			// Record XP transaction
 			await XPTransaction.create({
@@ -486,21 +776,31 @@ class Database {
 		const multiplier = type === "voice" ? 1.5 : 1;
 		const timeBonus = this.getTimeBonus();
 
-		return Math.floor(baseScore + xpGained * multiplier * timeBonus);
+		return Math.floor(
+			baseScore + xpGained * multiplier * timeBonus,
+		);
 	}
 
 	getTimeBonus() {
 		const hour = new Date().getHours();
+
 		// Higher bonus during peak hours (6 PM - 10 PM)
 		if (hour >= 18 && hour <= 22) return 1.2;
+
 		// Lower bonus during quiet hours (11 PM - 6 AM)
 		if (hour >= 23 || hour <= 6) return 0.8;
+
 		return 1.0;
 	}
 
 	// 🏆 Leaderboard Methods
-	async getTopUsers(guildId, limit = 10, type = "totalXp") {
+	async getTopUsers(
+		guildId,
+		limit = 10,
+		type = "totalXp",
+	) {
 		await this.ensureConnection();
+
 		try {
 			const sortField = {};
 			sortField[type] = -1;
@@ -522,18 +822,32 @@ class Database {
 		}
 	}
 
-	async getUserRank(userId, guildId, type = "totalXp") {
+	async getUserRank(
+		userId,
+		guildId,
+		type = "totalXp",
+	) {
 		await this.ensureConnection();
+
 		try {
-			const user = await UserProfile.findOne({ userId, guildId });
+			const user = await UserProfile.findOne({
+				userId,
+				guildId,
+			});
+
 			if (!user) return null;
 
 			const rankQuery = {};
 			rankQuery[type] = { $gt: user[type] };
 			rankQuery.guildId = guildId;
 
-			const rank = (await UserProfile.countDocuments(rankQuery)) + 1;
-			return { rank, user };
+			const rank =
+				(await UserProfile.countDocuments(rankQuery)) + 1;
+
+			return {
+				rank,
+				user,
+			};
 		} catch (error) {
 			console.error("Error getting user rank:", error);
 			throw error;
@@ -543,26 +857,51 @@ class Database {
 	// 🎯 Role Reward Methods
 	async checkRoleRewards(userId, guildId) {
 		await this.ensureConnection();
+
 		try {
 			const config = await this.getServerConfig(guildId);
 
-			if (!config.roleAutomation || !config.roleRewards?.length) {
-				return { eligibleRoles: [], currentRoles: [] };
+			if (
+				!config.roleAutomation ||
+				!config.roleRewards?.length
+			) {
+				return {
+					eligibleRoles: [],
+					currentRoles: [],
+				};
 			}
 
-			const profile = await this.getUserProfile(userId, guildId);
+			const profile = await this.getUserProfile(
+				userId,
+				guildId,
+			);
+
 			const eligibleRoles = [];
-			const topUsers = await this.getTopUsers(guildId, 50);
-			const userRank = topUsers.findIndex((u) => u.userId === userId) + 1;
+			const topUsers = await this.getTopUsers(
+				guildId,
+				50,
+			);
+
+			const userRank =
+				topUsers.findIndex(
+					(u) => u.userId === userId,
+				) + 1;
 
 			for (const reward of config.roleRewards) {
 				let eligible = false;
 
-				if (reward.xpThreshold && profile.totalXp >= reward.xpThreshold) {
+				if (
+					reward.xpThreshold &&
+					profile.totalXp >= reward.xpThreshold
+				) {
 					eligible = true;
 				}
 
-				if (reward.topRank && userRank > 0 && userRank <= reward.topRank) {
+				if (
+					reward.topRank &&
+					userRank > 0 &&
+					userRank <= reward.topRank
+				) {
 					eligible = true;
 				}
 
@@ -571,15 +910,27 @@ class Database {
 				}
 			}
 
-			return { eligibleRoles, currentRoles: profile.currentRoles || [] };
+			return {
+				eligibleRoles,
+				currentRoles:
+					profile.currentRoles || [],
+			};
 		} catch (error) {
-			console.error("Error checking role rewards:", error);
+			console.error(
+				"Error checking role rewards:",
+				error,
+			);
 			throw error;
 		}
 	}
 
-	async updateUserRoles(userId, guildId, newRoles) {
+	async updateUserRoles(
+		userId,
+		guildId,
+		newRoles,
+	) {
 		await this.ensureConnection();
+
 		try {
 			const rolesData = newRoles.map((role) => ({
 				roleId: role.roleId,
@@ -587,11 +938,18 @@ class Database {
 				earnedAt: new Date(),
 			}));
 
-			const profile = await UserProfile.findOneAndUpdate(
-				{ userId, guildId },
-				{ $set: { currentRoles: rolesData } },
-				{ new: true },
-			);
+			const profile =
+				await UserProfile.findOneAndUpdate(
+					{ userId, guildId },
+					{
+						$set: {
+							currentRoles: rolesData,
+						},
+					},
+					{
+						new: true,
+					},
+				);
 
 			return profile;
 		} catch (error) {
@@ -603,11 +961,17 @@ class Database {
 	// 📊 Statistics Methods
 	async resetDailyStats(guildId) {
 		await this.ensureConnection();
+
 		try {
 			const result = await UserProfile.updateMany(
 				{
 					guildId,
-					lastDailyReset: { $lt: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+					lastDailyReset: {
+						$lt: new Date(
+							Date.now() -
+								24 * 60 * 60 * 1000,
+						),
+					},
 				},
 				{
 					$set: {
@@ -616,21 +980,29 @@ class Database {
 					},
 				},
 			);
+
 			return result;
 		} catch (error) {
-			console.error("Error resetting daily stats:", error);
+			console.error(
+				"Error resetting daily stats:",
+				error,
+			);
 			throw error;
 		}
 	}
 
 	async resetWeeklyStats(guildId) {
 		await this.ensureConnection();
+
 		try {
 			const result = await UserProfile.updateMany(
 				{
 					guildId,
 					lastWeeklyReset: {
-						$lt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+						$lt: new Date(
+							Date.now() -
+								7 * 24 * 60 * 60 * 1000,
+						),
 					},
 				},
 				{
@@ -640,33 +1012,66 @@ class Database {
 					},
 				},
 			);
+
 			return result;
 		} catch (error) {
-			console.error("Error resetting weekly stats:", error);
+			console.error(
+				"Error resetting weekly stats:",
+				error,
+			);
 			throw error;
 		}
 	}
 
 	async getServerStats(guildId) {
 		await this.ensureConnection();
+
 		try {
-			const totalUsers = await UserProfile.countDocuments({ guildId });
+			const totalUsers =
+				await UserProfile.countDocuments({
+					guildId,
+				});
+
 			const totalXp = await UserProfile.aggregate([
-				{ $match: { guildId } },
-				{ $group: { _id: null, total: { $sum: "$totalXp" } } },
+				{
+					$match: { guildId },
+				},
+				{
+					$group: {
+						_id: null,
+						total: {
+							$sum: "$totalXp",
+						},
+					},
+				},
 			]);
-			const totalMessages = await UserProfile.aggregate([
-				{ $match: { guildId } },
-				{ $group: { _id: null, total: { $sum: "$messageCount" } } },
-			]);
+
+			const totalMessages =
+				await UserProfile.aggregate([
+					{
+						$match: { guildId },
+					},
+					{
+						$group: {
+							_id: null,
+							total: {
+								$sum: "$messageCount",
+							},
+						},
+					},
+				]);
 
 			return {
 				totalUsers,
 				totalXp: totalXp[0]?.total || 0,
-				totalMessages: totalMessages[0]?.total || 0,
+				totalMessages:
+					totalMessages[0]?.total || 0,
 			};
 		} catch (error) {
-			console.error("Error getting server stats:", error);
+			console.error(
+				"Error getting server stats:",
+				error,
+			);
 			throw error;
 		}
 	}
@@ -680,101 +1085,164 @@ class Database {
 		reason = "No reason provided",
 	) {
 		await this.ensureConnection();
+
 		try {
 			// Update giver (deduct points and increment pointsGiven)
-			const giverUpdate = await UserProfile.findOneAndUpdate(
-				{ userId: fromUserId, guildId },
-				{
-					$inc: {
-						points: -amount,
-						pointsGiven: amount,
+			const giverUpdate =
+				await UserProfile.findOneAndUpdate(
+					{
+						userId: fromUserId,
+						guildId,
 					},
-				},
-				{ upsert: true, new: true },
-			);
+					{
+						$inc: {
+							points: -amount,
+							pointsGiven: amount,
+						},
+					},
+					{
+						upsert: true,
+						new: true,
+					},
+				);
 
 			// Update receiver (add points and increment pointsReceived)
-			const receiverUpdate = await UserProfile.findOneAndUpdate(
-				{ userId: toUserId, guildId },
-				{
-					$inc: {
-						points: amount,
-						pointsReceived: amount,
+			const receiverUpdate =
+				await UserProfile.findOneAndUpdate(
+					{
+						userId: toUserId,
+						guildId,
 					},
-				},
-				{ upsert: true, new: true },
-			);
+					{
+						$inc: {
+							points: amount,
+							pointsReceived: amount,
+						},
+					},
+					{
+						upsert: true,
+						new: true,
+					},
+				);
 
-			return { giver: giverUpdate, receiver: receiverUpdate };
+			return {
+				giver: giverUpdate,
+				receiver: receiverUpdate,
+			};
 		} catch (error) {
 			console.error("Error giving points:", error);
 			throw error;
 		}
 	}
 
-	async getPointsLeaderboard(guildId, limit = 10, skip = 0) {
+	async getPointsLeaderboard(
+		guildId,
+		limit = 10,
+		skip = 0,
+	) {
 		await this.ensureConnection();
+
 		try {
-			const users = await UserProfile.find({ guildId })
+			const users = await UserProfile.find({
+				guildId,
+			})
 				.sort({ points: -1 })
 				.skip(skip)
 				.limit(limit)
 				.lean();
 
-			const totalUsers = await UserProfile.countDocuments({
-				guildId,
-				points: { $gt: 0 },
-			});
+			const totalUsers =
+				await UserProfile.countDocuments({
+					guildId,
+					points: { $gt: 0 },
+				});
 
-			return { users, totalUsers };
+			return {
+				users,
+				totalUsers,
+			};
 		} catch (error) {
-			console.error("Error getting points leaderboard:", error);
+			console.error(
+				"Error getting points leaderboard:",
+				error,
+			);
 			throw error;
 		}
 	}
 
 	async getUserPoints(userId, guildId) {
 		await this.ensureConnection();
+
 		try {
-			const profile = await UserProfile.findOne({ userId, guildId });
+			const profile =
+				await UserProfile.findOne({
+					userId,
+					guildId,
+				});
+
 			return {
 				points: profile?.points || 0,
-				pointsGiven: profile?.pointsGiven || 0,
-				pointsReceived: profile?.pointsReceived || 0,
+				pointsGiven:
+					profile?.pointsGiven || 0,
+				pointsReceived:
+					profile?.pointsReceived || 0,
 			};
 		} catch (error) {
-			console.error("Error getting user points:", error);
+			console.error(
+				"Error getting user points:",
+				error,
+			);
 			throw error;
 		}
 	}
 
 	async getGuildEconomy(guildId) {
 		try {
-			let economySettings = await this.GuildEconomy.findOne({ guildId });
+			let economySettings =
+				await this.GuildEconomy.findOne({
+					guildId,
+				});
+
 			if (!economySettings) {
 				// If no settings exist, create them with default values
-				economySettings = new this.GuildEconomy({ guildId });
+				economySettings =
+					new this.GuildEconomy({
+						guildId,
+					});
+
 				await economySettings.save();
 			}
+
 			return economySettings;
 		} catch (error) {
-			console.error("Error getting guild economy settings:", error);
+			console.error(
+				"Error getting guild economy settings:",
+				error,
+			);
 			return null;
 		}
 	}
 
 	async close() {
 		if (this._closing) return this._closing;
+
 		this._closed = true;
 		this.isConnected = false;
+
 		this._closing = (async () => {
 			try {
-				if (this._connecting) await this._connecting.catch(() => {});
+				if (this._connecting) {
+					await this._connecting.catch(
+						() => {},
+					);
+				}
+
 				await mongoose.disconnect();
 			} finally {
 				this.isConnected = false;
 			}
 		})();
+
 		return this._closing;
 	}
 }
