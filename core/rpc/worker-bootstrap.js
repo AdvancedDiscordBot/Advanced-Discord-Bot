@@ -274,56 +274,116 @@ function createShimContext(rpc, grantedEnv = {}, registrations = { pending: new 
 
 	// Discord proxy: routes all Discord API calls through RPC
 	const discordProxy = {
-		// Send a rich message (content + embeds + files) to a channel
-		sendToChannel: async (channelId, payload) => {
-			return rpc.call("discord.sendRichMessage", {
-				...(typeof payload === "string" ? { content: payload } : payload),
-				channelId,
-			});
-		},
-		// Send a DM (content + embeds + files) to a user
-		sendDM: async (userId, payload) => {
-			return rpc.call("discord.sendDM", {
-				...(typeof payload === "string" ? { content: payload } : payload),
-				userId,
-			});
-		},
-		// Fetch guild info (returns object with iconURL)
-		getGuild: async (guildId) => {
-			return rpc.call("discord.getGuild", { guildId, iconFormat: "png", iconSize: 128 });
-		},
-		// Fetch member info (returns object with user.avatarURL)
-		getMember: async (guildId, userId) => {
-			return rpc.call("discord.getMember", { guildId, userId, avatarFormat: "png", avatarSize: 256 });
-		},
-		// Fetch channel info
-		fetchChannel: async (channelId) => {
-			return rpc.call("discord.fetchChannel", { channelId });
-		},
-	};
+	sendToChannel: async (channelId, payload) => {
+		return rpc.call("discord.sendRichMessage", {
+			...(typeof payload === "string" ? { content: payload } : payload),
+			channelId,
+		});
+	},
 
-	return {
-		client: null, // Never available in worker — use ctx.discord for Discord ops
-		discord: discordProxy,
-		db: dbProxy,
-		scheduler: schedulerProxy,
-		commands: null, // Commands are registered via ctx.registerCommand()
-		registerCommand,
-		overrideCommand: (name, _overrideFn) => {
-			console.warn(
-				`[plugin:${pluginId}] ctx.overrideCommand("${name}") is not supported in isolated mode.`,
-			);
-		},
-		registerEvent,
-		defineModel,
-		models: null, // Plugins assign after defineModel
-		hooks: hooksProxy,
-		config: { env: grantedEnv || {} },
-		logger: loggerProxy,
-	};
-}
+	sendDM: async (userId, payload) => {
+		return rpc.call("discord.sendDM", {
+			...(typeof payload === "string" ? { content: payload } : payload),
+			userId,
+		});
+	},
 
-// ── Worker Thread Entry (only runs inside a worker_threads Worker) ─────
+	getGuild: async (guildId) => {
+		return rpc.call("discord.getGuild", {
+			guildId,
+			iconFormat: "png",
+			iconSize: 128,
+		});
+	},
+
+	getMember: async (guildId, userId) => {
+		return rpc.call("discord.getMember", {
+			guildId,
+			userId,
+			avatarFormat: "png",
+			avatarSize: 256,
+		});
+	},
+
+	fetchChannel: async (channelId) => {
+		return rpc.call("discord.fetchChannel", {
+			channelId,
+		});
+	},
+
+	sendMessage: async (channelId, content) => {
+		return rpc.call("discord.sendMessage", {
+			channelId,
+			content,
+		});
+	},
+
+	sendEmbed: async (channelId, embed) => {
+		return rpc.call("discord.sendEmbed", {
+			channelId,
+			embed,
+		});
+	},
+
+	addRole: async (guildId, userId, roleId, reason) => {
+		return rpc.call("discord.addRole", {
+			guildId,
+			userId,
+			roleId,
+			reason,
+		});
+	},
+
+	removeRole: async (guildId, userId, roleId, reason) => {
+		return rpc.call("discord.removeRole", {
+			guildId,
+			userId,
+			roleId,
+			reason,
+		});
+	},
+
+	deleteMessage: async (channelId, messageId) => {
+		return rpc.call("discord.deleteMessage", {
+			channelId,
+			messageId,
+		});
+	},
+
+	addReaction: async (channelId, messageId, emoji) => {
+		return rpc.call("discord.addReaction", {
+			channelId,
+			messageId,
+			emoji,
+		});
+	},
+
+	timeout: async (guildId, userId, durationMs, reason) => {
+		return rpc.call("discord.timeout", {
+			guildId,
+			userId,
+			durationMs,
+			reason,
+		});
+	},
+
+	kick: async (guildId, userId, reason) => {
+		return rpc.call("discord.kick", {
+			guildId,
+			userId,
+			reason,
+		});
+	},
+
+	ban: async (guildId, userId, reason) => {
+		return rpc.call("discord.ban", {
+			guildId,
+			userId,
+			reason,
+		});
+	},
+};
+	// ── Worker Thread Entry (only runs inside a worker_threads Worker) ─────
 
 if (IS_WORKER) {
 	const rpc = new RpcClient(parentPort, { defaultTimeoutMs: 10000 });
