@@ -10,6 +10,7 @@ import { GuildSettings } from './pages/Settings';
 import { Plugins } from './pages/Plugins';
 import { Roles } from './pages/Roles';
 import { PluginSettings } from './pages/PluginSettings';
+import { PluginHealth } from './pages/PluginHealth';
 import { GuildPicker } from './components/GuildPicker';
 import MemberApp from './MemberApp';
 import { colors } from './theme';
@@ -45,6 +46,7 @@ function AppRoutes() {
           <Route path="guild/:guildId" element={<Dashboard />} />
           <Route path="guild/:guildId/plugins" element={<Plugins />} />
           <Route path="guild/:guildId/plugins/:pluginName/settings" element={<PluginSettings />} />
+          <Route path="plugin-health" element={<PluginHealth />} />
           <Route path="guild/:guildId/roles" element={<Roles />} />
           <Route path="guild/:guildId/settings" element={<GuildSettings />} />
         </Route>
