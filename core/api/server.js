@@ -258,7 +258,87 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		store: sessionStore,
 		saveUninitialized: false,
 	});
+   // ── Plugin health & diagnostics ───────────────────────────────────────
 
+fastify.get("/api/plugins/health", async (request, reply) => {
+    if (!requireOwner(request, reply)) return;
+
+    const workerManager = pluginManager.workerManager;
+
+    if (!workerManager) {
+        return {
+            isolationEnabled: false,
+            summary: {
+                status: "disabled",
+                total: 0,
+                healthy: 0,
+                starting: 0,
+                crashed: 0,
+                quarantined: 0,
+                stopped: 0,
+            },
+            workers: {},
+            metrics: {},
+            violations: [],
+        };
+    }
+
+    const workers = workerManager.getWorkerStatus();
+    const summary = workerManager.getHealthSummary();
+    const metrics = workerManager.getWorkerMetrics();
+
+    const broker = pluginManager.broker;
+
+    const violations = broker
+        ? broker.getViolationSummary()
+        : [];
+
+    return {
+        isolationEnabled: true,
+        timestamp: new Date().toISOString(),
+        summary,
+        workers,
+        metrics,
+        violations,
+    };
+});
+	fastify.post("/api/plugins/:name/recover", async (request, reply) => {
+    if (!requireOwner(request, reply)) return;
+
+    const name = request.params.name;
+
+    const plugin = pluginManager.plugins.get(name);
+
+    if (!plugin) {
+        return reply.code(404).send({
+            error: "Plugin not found",
+        });
+    }
+
+    try {
+        const ok = await pluginManager.reloadPlugin(name, { force: true });
+
+        if (!ok) {
+            return reply.code(409).send({
+                error: "Plugin could not be recovered",
+            });
+        }
+
+        await syncAllCommands(pluginManager);
+
+        return {
+            ok: true,
+            plugin: name,
+            message: "Plugin recovered successfully",
+        };
+    } catch (error) {
+        logger.error(`Failed to recover plugin ${name}: ${error.message}`);
+
+        return reply.code(500).send({
+            error: error.message,
+        });
+    }
+});
 	fastify.get("/", async (request, reply) => {
 		const indexPath = path.join(__dirname, "..", "..", "public", "index.html");
 		if (require("fs").existsSync(indexPath)) {
