@@ -42,9 +42,18 @@ class WorkerManager {
 		this.hooks = hooks;
 		this.logger = createLogger(logNamespace);
 
-		/** @type {Map<string, WorkerEntry>} pluginId → worker state */
 		this.workers = new Map();
-		this._shuttingDown = false;
+
+/**
+ * Persistent health history for workers.
+ *
+ * `workers` only contains currently active workers. Once a worker is
+ * quarantined after repeated crashes it is removed from that map, so
+ * diagnostics would otherwise lose the crash history.
+ */
+this.healthHistory = new Map();
+
+this._shuttingDown = false;
 
 		// Handle resource limit events from workers
 		this._resourceEventHandlers = new Map();
@@ -103,6 +112,10 @@ class WorkerManager {
 			// in load() gets a fresh entry (crashCount 0) on every restart and the
 			// MAX_CRASH_COUNT circuit breaker never trips, crash-looping forever.
 			crashCount: options.crashCount || 0,
+			lastError: null,
+            lastCrashAt: null,
+            lastReadyAt: null,
+            restartCount: 0,
 			spawnedAt: Date.now(),
 			ready: false,
 			stopped: false,
@@ -265,9 +278,30 @@ class WorkerManager {
 
 		// Worker signals ready
 		if (msg.type === "worker:ready") {
-			if (entry.ready) return;
-			entry.ready = true;
-			this.logger.info(`Worker ${pluginId} is ready`);
+    if (entry.ready) return;
+
+    entry.ready = true;
+    entry.lastReadyAt = Date.now();
+
+    const previous = this.healthHistory.get(pluginId) || {};
+
+    this.healthHistory.set(pluginId, {
+        ...previous,
+        pluginId,
+        pluginName: entry.pluginName,
+        status: "healthy",
+        lastReadyAt: entry.lastReadyAt,
+        lastError: entry.lastError || previous.lastError || null,
+        lastCrashAt: entry.lastCrashAt || previous.lastCrashAt || null,
+        crashCount: entry.crashCount,
+        restartCount: entry.restartCount || previous.restartCount || 0,
+    });
+
+    this.logger.info(`Worker ${pluginId} is ready`);
+
+    if (entry._startupResolve) entry._startupResolve();
+    return;
+}
 			if (entry._startupResolve) entry._startupResolve();
 			return;
 		}
@@ -375,14 +409,39 @@ class WorkerManager {
 	/**
 	 * Handle a worker crash. Auto-restart if under the crash limit.
 	 */
-	_handleCrash(entry, error) {
-		const { pluginId } = entry;
+	const now = Date.now();
+const previous = this.healthHistory.get(pluginId) || {};
+
+entry.lastError = error?.message || String(error);
+entry.lastCrashAt = now;
+entry.restartCount = (previous.restartCount || 0) + 1;
+
+this.healthHistory.set(pluginId, {
+    ...previous,
+    pluginId,
+    pluginName: entry.pluginName,
+    status: "crashed",
+    lastError: entry.lastError,
+    lastCrashAt: now,
+    crashCount: entry.crashCount + 1,
+    restartCount: entry.restartCount,
+});
 		if (this._shuttingDown || this.workers.get(pluginId) !== entry || entry.stopped) return;
 
 		entry.crashCount++;
 		const stopping = this._stopWorker(entry, error);
 
 		if (entry.crashCount >= MAX_CRASH_COUNT) {
+			this.healthHistory.set(pluginId, {
+    ...(this.healthHistory.get(pluginId) || {}),
+    pluginId,
+    pluginName: entry.pluginName,
+    status: "quarantined",
+    lastError: entry.lastError,
+    lastCrashAt: entry.lastCrashAt,
+    crashCount: entry.crashCount,
+    restartCount: entry.restartCount || 0,
+});
 			this.logger.error(
 				`Worker ${pluginId} crashed ${entry.crashCount} times - giving up. ` +
 					`The plugin will not be loaded until manually reloaded.`,
@@ -422,17 +481,116 @@ class WorkerManager {
 	 * Get the status of all workers.
 	 */
 	getWorkerStatus() {
-		const status = {};
-		for (const [pluginId, entry] of this.workers) {
-			status[pluginId] = {
-				ready: entry.ready,
-				crashCount: entry.crashCount,
-				spawnedAt: entry.spawnedAt,
-				uptime: Date.now() - entry.spawnedAt,
-			};
-		}
-		return status;
-	}
+    const status = {};
+    const now = Date.now();
+
+    // Include currently running workers.
+    for (const [pluginId, entry] of this.workers) {
+        const history = this.healthHistory.get(pluginId) || {};
+
+        let state = "starting";
+
+        if (entry.ready) {
+            state = "healthy";
+        } else if (entry.stopped) {
+            state = "stopped";
+        }
+
+        status[pluginId] = {
+            pluginId,
+            pluginName: entry.pluginName,
+
+            status: state,
+            ready: entry.ready,
+
+            crashCount: entry.crashCount || 0,
+            restartCount: entry.restartCount || history.restartCount || 0,
+
+            spawnedAt: entry.spawnedAt,
+            lastReadyAt: entry.lastReadyAt || history.lastReadyAt || null,
+            lastCrashAt: entry.lastCrashAt || history.lastCrashAt || null,
+
+            uptime: entry.ready
+                ? Math.max(0, now - entry.spawnedAt)
+                : 0,
+
+            lastError:
+                entry.lastError ||
+                history.lastError ||
+                null,
+        };
+    }
+
+    // Include workers that are no longer running but have useful
+    // diagnostic history, such as quarantined plugins.
+    for (const [pluginId, history] of this.healthHistory) {
+        if (status[pluginId]) continue;
+
+        status[pluginId] = {
+            ...history,
+            pluginId,
+            status: history.status || "unknown",
+            ready: false,
+            uptime: 0,
+        };
+    }
+
+    return status;
+}/**
+ * Return an aggregate health summary for the plugin worker system.
+ */
+getHealthSummary() {
+    const workers = this.getWorkerStatus();
+
+    const entries = Object.values(workers);
+
+    const summary = {
+        status: "healthy",
+        total: entries.length,
+        healthy: 0,
+        starting: 0,
+        crashed: 0,
+        quarantined: 0,
+        stopped: 0,
+    };
+
+    for (const worker of entries) {
+        switch (worker.status) {
+            case "healthy":
+                summary.healthy++;
+                break;
+
+            case "starting":
+                summary.starting++;
+                break;
+
+            case "crashed":
+                summary.crashed++;
+                break;
+
+            case "quarantined":
+                summary.quarantined++;
+                break;
+
+            case "stopped":
+                summary.stopped++;
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    if (summary.quarantined > 0) {
+        summary.status = "critical";
+    } else if (summary.crashed > 0) {
+        summary.status = "degraded";
+    } else if (summary.starting > 0) {
+        summary.status = "starting";
+    }
+
+    return summary;
+}
 
 	/**
 	 * Check if a plugin is running in a worker.
