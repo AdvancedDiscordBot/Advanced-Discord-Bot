@@ -1,0 +1,7 @@
+{
+  "name": "adb-plugin-automod",
+  "version": "1.0.0",
+  "description": "Advanced auto-moderation pipeline plugin",
+  "main": "index.js",
+  "requiresRestart": false
+}
