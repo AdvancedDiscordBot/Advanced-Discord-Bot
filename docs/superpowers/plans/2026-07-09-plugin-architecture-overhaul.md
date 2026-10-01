@@ -1,5 +1,17 @@
 # Plugin Architecture Overhaul Implementation Plan
 
+> **Status: shipped (2026-07).** `core/permissions.js` exists with
+> `HUMAN_LABELS`, `validateFlags`, `describe` and `computePermissionInteger`; the
+> invite integer is computed from enabled plugins' `discordPermissions`; the
+> dashboard has install / update / update-all / restart against npm only; the
+> risk card, brochure and violations endpoints are live. Two of this plan's
+> assumptions were later changed by the isolation work
+> ([`2026-07-16-plugin-isolation-architecture.md`](./2026-07-16-plugin-isolation-architecture.md)):
+> in-repo plugins are now tagged `source: "builtin"` / `"local"` rather than
+> `"local"` only, and `permissions` became the manifest v2 object rather than the
+> flat `db.read`-style array shown in the constraints below. Kept as a record of
+> the decisions.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Turn the plugin system into a managed store — protected core plugins, Discord-permission declarations that compute the invite integer, version-aware npm updates, dependency warnings, and a Restart button that deploys before starting.

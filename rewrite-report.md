@@ -3,6 +3,32 @@
 **Date:** July 17, 2026  
 **Scope:** Full plugin isolation system — Capability Broker, RPC protocol, worker_threads sandboxing, and developer documentation.
 
+> **Status: historical record of a shipped change (2026-07-17).** Kept for the
+> decisions, not as current reference — read `ARCHITECTURE.md`,
+> `CREATE-PLUGIN.md` and `docs/VERIFICATION.md` for how the platform behaves now.
+> **Known drift from the code as written below:**
+>
+> - `core/rpc/` now has **11** files, not 8 — `process-router.js`,
+>   `violations.js` and `schema-serialize.js` were added, and the RPC catalog has
+>   grown from 47 to **61** methods.
+> - Event forwarding is no longer a fixed list of 11 events. `_forwardDiscordEvents`
+>   subscribes to whatever a worker registers, accepting any discord.js `Events`
+>   value plus `"ready"`; the shipped plugins register 24 distinct events.
+> - `loadPlugin()` no longer honours `manifest.isolation === false`. Isolation is
+>   decided by `this.isolationEnabled && this.workerManager &&
+>   plugin.source === "package" && !wantsRawClient` — an npm plugin is always
+>   isolated unless it declares `system:raw-client`.
+> - `core/rpc/resource-limits.js` is **not** wired into the spawn path. Workers
+>   get the fixed `DEFAULT_RESOURCE_LIMITS` constant in `worker-manager.js`, and
+>   the manifest's `maxExecutionMs` / `memoryMb` are validated but not applied.
+>   `process-router.js` has no consumer either.
+> - `plugins/adb-plugin-template/` is **not** in this repository. The template is
+>   its own repo, [`AdvancedDiscordBot/adb-plugin-template`](https://github.com/AdvancedDiscordBot/adb-plugin-template),
+>   as is every other plugin.
+> - The system that shipped also includes per-guild enablement and live RBAC
+>   (`core/permission-resolver.js`, `core/dashboard-permissions.js`) and the
+>   member portal, which post-date this report.
+
 ---
 
 ## Executive Summary

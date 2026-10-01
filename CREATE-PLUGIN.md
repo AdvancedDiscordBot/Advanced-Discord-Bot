@@ -1,15 +1,69 @@
 # Creating an ADB Plugin
 
-This guide covers everything you need to create a plugin for the ADB Discord bot.
-Plugins can run in two modes: **direct** (in the main process) or **isolated** (in a sandboxed worker thread).
+What a plugin is, how to write one, and what the platform guarantees. Plugins run
+in two modes: **direct** (main process) or **isolated** (a `worker_thread`), and
+anything you write has to work in both.
+
+> **🤖 AI coding agents: read [`AGENTS.md`](./AGENTS.md) before this guide.** A
+> plugin is **never** created inside the `Advanced-Discord-Bot` repository. If you
+> were told to `mkdir plugins/adb-plugin-…` in the bot repo, that advice is wrong.
+> Stop, and re-read [`AGENTS.md`](./AGENTS.md).
+
+---
+
+## Where plugin code lives
+
+**Every plugin is its own repository** under the
+[`AdvancedDiscordBot`](https://github.com/AdvancedDiscordBot) org, named
+`adb-plugin-<name>`, published to npm as `adb-plugin-<name>`.
+
+The `Advanced-Discord-Bot` repository is the **platform core**. Its `plugins/`
+directory contains exactly one plugin — `administration`, the dashboard host — and
+that is not a place to add yours. At runtime, `PluginManager` discovers plugins in
+two places:
+
+- `node_modules/adb-plugin-*/plugin.json` — how plugins are actually installed;
+- the local `plugins/` directory — for linking during development only.
+
+So creating a plugin means creating a repository and installing it from npm, not
+adding a folder to the bot repo.
 
 ---
 
 ## Quick Start
 
 ```bash
-mkdir plugins/adb-plugin-my-plugin
-cd plugins/adb-plugin-my-plugin
+# 1. Start from the maintained template (it ships the manifest, models and a
+#    working offline test harness).
+git clone https://github.com/AdvancedDiscordBot/adb-plugin-template.git
+mv adb-plugin-template adb-plugin-my-plugin
+cd adb-plugin-my-plugin
+
+# 2. Rename the package everywhere it is referenced.
+grep -rl 'adb-plugin-template' . --exclude-dir=.git \
+  | xargs sed -i 's/adb-plugin-template/adb-plugin-my-plugin/g'
+
+# 3. Confirm the shipped tests still pass before you change anything.
+npm install && npm test
+```
+
+Then create an empty repository named `adb-plugin-my-plugin` under the
+`AdvancedDiscordBot` org and push. To run it inside a local bot checkout:
+
+```bash
+cd /path/to/Advanced-Discord-Bot
+npm install --no-save --package-lock=false ../adb-plugin-my-plugin
+npm run deploy && npm start
+```
+
+See [`LOCAL-SETUP.md`](./LOCAL-SETUP.md) for the complete local workflow, and
+[`AGENTS.md`](./AGENTS.md) for the rules an AI agent must follow.
+
+<details>
+<summary>Or write <code>plugin.json</code> by hand</summary>
+
+```bash
+mkdir -p adb-plugin-my-plugin && cd adb-plugin-my-plugin
 
 cat > plugin.json << 'EOF'
 {
@@ -22,6 +76,7 @@ cat > plugin.json << 'EOF'
   "requiresRestart": false,
   "manifestVersion": 2,
   "process": { "model": "pooled", "maxExecutionMs": 5000, "memoryMb": 128, "persistentReason": null },
+  "engines": { "core": ">=2.0.0" },
   "capabilities": {
     "storage": ["own-collection"],
     "discord": ["SendMessages"]
@@ -57,6 +112,12 @@ module.exports = { load };
 EOF
 ```
 
+Add `package.json` with `"name": "adb-plugin-my-plugin"` and a `test` script that
+runs your offline harness. Prefer copying `adb-plugin-template` — it already has
+both.
+
+</details>
+
 ---
 
 ## Plugin Isolation
@@ -81,22 +142,64 @@ published plugin runs isolated and write it isolation-safe.
 
 ### What isolation gives you
 
-- **Process isolation** — your plugin code cannot access `process.env`, `require('fs')`, or other Node.js built-ins directly
-- **Capability gating** — you can only use resources your `plugin.json` declares; an undeclared RPC call is **denied at runtime** (throws `Missing capability: ...`)
-- **Resource limits** — memory and execution time are capped per plugin
-- **Crash containment** — a plugin crash doesn't take down the bot. ⚠️ But note: a worker that **throws during `load()`** (e.g. calls an RPC it didn't declare a capability for) is retried a few times then respawned — so a missing capability shows up as a repeating crash/deny in the logs, not a one-line error. Declare capabilities correctly.
+- **A narrowed environment** — the worker is spawned with `env:` set to only the
+  variables your plugin was granted, so the bot's `process.env` is not visible.
+- **Capability gating** — you can only reach resources your `plugin.json`
+  declares. An undeclared RPC call is **denied at runtime**; the broker replies
+  with `Missing capability: <category>:<Value>` and tells you which key to add.
+- **A registry of violations** — 5 capability violations inside a 60s rolling
+  window suspend the plugin; its calls are then refused with *"Plugin is
+  suspended pending review after repeated capability violations"*, and the
+  dashboard can show the recent violations and reinstate the plugin.
+- **Crash containment** — a plugin crash doesn't take down the bot. A worker is
+  respawned up to a fixed number of consecutive times before the plugin is given
+  up on, and it is respawned with only your granted env. ⚠️ But note: a worker
+  that **throws during `load()`** (e.g. calls an RPC it didn't declare a
+  capability for) is respawned, so a missing capability shows up as a repeating
+  crash/deny in the logs, not a one-line error.
+
+> **Known gap — `process` limits are declared but not applied.**
+> `process.maxExecutionMs` and `process.memoryMb` are range-checked and clamped at
+> manifest-validation time, but the worker is spawned with **fixed**
+> `resourceLimits` (512 MB old-generation, 32 MB young-generation, 4 MB stack)
+> taken from a constant in `core/rpc/worker-manager.js`, not from your manifest,
+> and the RPC client's per-call timeout is its own default rather than
+> `maxExecutionMs`. Declare sensible values and expect the current numbers to be
+> the ones that matter; do not rely on them as a hard quota. `core/rpc/resource-limits.js`
+> and `core/rpc/process-router.js` exist but are not wired into the spawn path.
+
+**What isolation does not give you.** A `worker_thread` is not an OS sandbox.
+`require('fs')`, `require('net')`, `require('child_process')` and friends still
+*resolve* inside the worker. What actually constrains a plugin is:
+
+- the broker denying undeclared RPC calls at runtime, and
+- `core/manifest-crossvalidate.js`, which parses your source with `acorn` at
+  install time and **rejects the manifest** if the code imports a gated
+  Node built-in you have not declared permission for (`fs` needs
+  `filesystem.read`/`write`, `net`/`http`/`https`/`tls` need
+  `network.outbound`, `child_process`/`cluster`/`worker_threads` need
+  `childProcess: true`; `vm`, `module` and `repl` are never allowed), or
+  `require()`s a package that is missing from `declaredDependencies`.
+
+So: treat every installed plugin as trusted code, and keep `declaredDependencies`
+and `permissions` honest. `docs/VERIFICATION.md` says the same about relying on
+isolation for hostile code.
 
 ### What changes in isolated mode
 
 | Direct mode | Isolated mode |
 |-------------|---------------|
 | `ctx.client` available | `ctx.client` is `null` — use `ctx.discord` |
+| no `ctx.discord` | `ctx.discord` exists (5 methods, see below) |
 | `ctx.db` is real DB | `ctx.db` routes through RPC |
-| `require('mongoose')` works | Not available — use `ctx.defineModel()` |
-| `require('discord.js')` works | Not available — use `ctx.discord` |
-| `require('node-cron')` works | Not available — use `ctx.scheduler` |
-| any `require('<npm-dep>')` works | Only your own `./files` resolve; bundled deps do not |
-| `ctx.config.env` has env vars | Empty unless you declare `system:env` / `system:bot-token` |
+| `ctx.config` is the plugin's per-guild config | `ctx.config` is `{ env }` — granted vars only |
+| `ctx.commands` is the `Collection` | `ctx.commands` is `null`; register via `ctx.registerCommand()` |
+| `require('mongoose')`, `require('discord.js')`, `require('node-cron')` resolve | the same `require`s resolve, but Core has no idea you did it — anything you use must be in `declaredDependencies`, and the Discord/DB/cron APIs must be the `ctx.*` surfaces |
+| `ctx.scheduler.schedule(name, expr, fn)` / `unschedule(name)` | `ctx.scheduler.schedule(expr, cb, name)` → `taskId` / `cancel(taskId)` |
+| `ctx.overrideCommand()` works | warns and does nothing |
+| `ctx.hooks.onAny()` works | not available — use `ctx.hooks.on(name, handler)` |
+| `process.env` is the bot's env | only granted vars |
+| event payloads are discord.js instances | serialized plain objects |
 
 ### Writing dual-mode plugins
 
@@ -157,6 +260,7 @@ adb-plugin-my-plugin/
   "requiresRestart": false,
   "manifestVersion": 2,
   "process": { "model": "pooled", "maxExecutionMs": 5000, "memoryMb": 128, "persistentReason": null },
+  "engines": { "core": ">=2.0.0" },
   "capabilities": {
     "storage": ["own-collection"],
     "discord": ["SendMessages", "EmbedLinks"],
@@ -192,18 +296,20 @@ adb-plugin-my-plugin/
 | `capabilities` | object | Declare what resources your plugin needs (see below) — **the broker enforces this** |
 | `permissions` | object | v2 mirror of capabilities + `network.outbound` host allowlist, `filesystem`, `childProcess`, `nativeAddons` |
 | `discordPermissions` | array | Discord permission flags for the bot invite link |
-| `engines` | object | Version constraints: `{ core: ">=2.0.0", plugins: { "administration": ">=2.0.0" } }` — see **Plugin Dependencies** |
+| `engines` | object | Version constraints: `{ core: ">=2.0.0", plugins: { "administration": ">=2.0.0" } }` — see **Plugin Dependencies**. In practice you should always declare it: `normalize()` fills in `engines.core: null` when you omit the block, and `validateManifestV2()` then rejects the manifest with *"engines.core must be a valid semver range, got null"*. That check runs in the integration check (`npm run test:integration`), not in the runtime load path, so an omitted block loads fine but fails verification. |
 | `settings` | object | Dashboard settings schema + command-permission toggle — see **Plugin Settings** |
 | `webUi` | object | Plugin-hosted frontend: `{ port, label, icon, memberPages }` — requires `web:host-ui` capability — see **webUi block** |
 | `dashboard` | object | Optional RBAC block: `{ permissions: [...] }` for finer-grained dashboard permission keys — see **Dashboard Access (RBAC)** |
-| `configSchema` | object | JSON Schema for server admin settings UI (legacy; prefer `settings.schema`) |
+| `configSchema` | object | JSON Schema `properties`. Not how the settings UI is built — that comes from `settings.schema` — but the API still reads it for per-field **secret detection** (`secret`/`writeOnly`/`format: "password"`, which make a value write-only over HTTP) and as a fallback source of per-key validation constraints. |
+| `dependsOn`, `dependencies` | array | Additional load-order dependencies, unioned with `engines.plugins` by `getDependencies()`. No version constraint attached. |
 
 > `capabilities` (the v1-style category→values block) is what the runtime broker
 > checks on every RPC. `permissions` (the v2 block) additionally drives the
 > network host allowlist and the install-time risk disclosure. Author **both**,
 > keeping the `discord`/`storage`/`hooks`/`scheduler`/`system` values identical
-> between them. See `plugins/adb-plugin-template/plugin.json` (in the template
-> repo) for the canonical shape.
+> between them. See
+> [`adb-plugin-template/plugin.json`](https://github.com/AdvancedDiscordBot/adb-plugin-template/blob/main/plugin.json)
+> for the canonical shape.
 
 ---
 
@@ -218,30 +324,38 @@ capability you didn't declare):
 
 | Capability | RPC methods it unlocks |
 |------------|------------------------|
-| `storage:own-collection` | `ctx.db.getPluginConfig/updatePluginConfig/getAllPluginConfigs`, ticket methods, and all `ctx.defineModel()` model ops (`find`, `findOne`, `create`, `updateOne`, `deleteOne`, `countDocuments`, `save`) |
+| `storage:own-collection` | `ctx.db.getPluginConfig/updatePluginConfig/getAllPluginConfigs` (3), the five ticket methods `createTicket`/`getTickets`/`getTicketById`/`updateTicket`/`updateTicketStatus`, and 11 model ops behind `ctx.defineModel()` — `find`, `findOne`, `findById`, `create`, `updateOne`, `updateMany`, `findOneAndUpdate`, `deleteOne`, `deleteMany`, `countDocuments`, `save` (19 methods total; `markModified` is reached through the `save` params) |
 | `storage:read-profiles` | `getUserProfile`, `getTopUsers`, `getUserRank`, `checkRoleRewards`, `getServerConfig`, `getServerStats`, `getUserPoints`, `getPointsLeaderboard` |
 | `storage:write-profiles` | `updateUserProfile`, `addXP`, `updateUserRoles`, `givePoints`, `updateServerConfig` |
-| `discord:SendMessages` | `ctx.discord.sendToChannel()` (sendMessage/sendRichMessage), `ctx.discord.sendDM()` |
-| `discord:EmbedLinks` | *(capability reserved — no `ctx.discord` accessor yet; embeds go via the `embeds` array of `sendToChannel`/`sendDM`)* |
-| `discord:AddReactions` | *(capability reserved — no `ctx.discord` accessor yet)* |
-| `discord:ManageMessages` | *(capability reserved — no `ctx.discord` accessor yet)* |
-| `discord:ModerateMembers` | *(capability reserved — no `ctx.discord` accessor yet)* |
-| `discord:KickMembers` | *(capability reserved — no `ctx.discord` accessor yet)* |
-| `discord:BanMembers` | *(capability reserved — no `ctx.discord` accessor yet)* |
-| `discord:ManageRoles` | *(capability reserved — no `ctx.discord` accessor yet)* |
+| `discord:SendMessages` | `ctx.discord.sendToChannel()`, `ctx.discord.sendDM()`, and all ten `interaction.*` methods (`reply`, `deferReply`, `editReply`, `followUp`, `fetchReply`, `deleteReply`, `update`, `deferUpdate`, `showModal`, `respond`) |
 | `discord:GuildInfo` | `ctx.discord.getGuild()`, `ctx.discord.getMember()` |
 | `discord:ChannelInfo` | `ctx.discord.fetchChannel()` |
-| `hooks:subscribe` | `ctx.hooks.on()` |
-| `hooks:emit` | `ctx.hooks.emitHook()` |
+| `hooks:subscribe` | `ctx.hooks.on()` (RPC `hooks.on`) |
+| `hooks:emit` | `ctx.hooks.emitHook()` (RPC `hooks.emit`) |
 | `scheduler:cron` | `ctx.scheduler.schedule()`, `ctx.scheduler.cancel()` |
 | `network:outbound-http` | `network.fetch` — additionally gated by the `permissions.network.outbound` host allowlist (empty = reach nothing) |
 | `system:env` / `system:bot-token` / `system:raw-client` | Escalations — see below |
 
-There are `discord` capability values with **no RPC method** (e.g.
-`ManageChannels`, `ManageGuild`, `ViewAuditLog`, `MentionEveryone`). The sandbox
-can't perform those — a plugin needing them must run direct via
-`system:raw-client`. They still appear on the invite link if listed in
-`discordPermissions`.
+`discord.sendEmbed`, `discord.addReaction`, `discord.deleteMessage`,
+`discord.timeout`, `discord.kick`, `discord.ban`, `discord.addRole` and
+`discord.removeRole` are real RPC methods with real capabilities
+(`discord:EmbedLinks`, `AddReactions`, `ManageMessages`, `ModerateMembers`,
+`KickMembers`, `BanMembers`, `ManageRoles`), but Core does not expose them on
+`ctx.discord` — there is no accessor to call them with. Embeds still work,
+because `sendToChannel`/`sendDM` accept an `embeds` array under
+`discord:SendMessages` alone. The rest are reachable only from a
+`system:raw-client` plugin using the real client.
+
+The remaining `discord` capability values — `ManageChannels`, `ManageGuild`,
+`ViewAuditLog`, `MentionEveryone`, `ViewChannel`, `UseApplicationCommands`,
+`ReadMessageHistory`, `AttachFiles`, `Connect`, `Speak`, `MoveMembers` — have no
+RPC method at all. The sandbox cannot perform those; a plugin that needs them
+must run direct via `system:raw-client`. They still appear on the invite link if
+listed in `discordPermissions`.
+
+`ai:gemini-proxy` and `web:host-ui` are declared in the capability schema. No
+shipped plugin declares `gemini-proxy`; `web:host-ui` is covered under
+**webUi block** below.
 
 ### Escalation capabilities (`system`) — HIGH RISK
 
@@ -343,26 +457,47 @@ const MyModel = ctx.defineModel("myModel", {
 // CRUD operations
 const doc = await MyModel.create({ userId: "123", guildId: "456", data: "hello" });
 const found = await MyModel.findOne({ userId: "123" });
-const many = await MyModel.find({ guildId: "456" });   // returns a plain ARRAY
 await MyModel.updateOne({ userId: "123" }, { data: "updated" });
 await MyModel.deleteOne({ userId: "123" });
 const count = await MyModel.countDocuments({ guildId: "456" });
+```
 
-// Persist a doc you fetched: pass the doc + the changed fields (there is no
-// doc.save() over RPC). markModifiedField is optional (for Mixed subpaths).
+Also available: `findById`, `updateMany`, `findOneAndUpdate`, `deleteMany`.
+
+`find()` and `findOne()` return a **query object**, so mongoose-style chaining
+works before you await:
+
+```javascript
+const recent = await MyModel.find({ guildId })
+  .sort({ createdAt: -1 })
+  .limit(10)
+  .lean();          // .skip(), .select() and .exec() are there too
+const rows = await MyModel.find({ guildId });   // awaited directly → plain array
+```
+
+Two ways to persist:
+
+```javascript
+// 1. Mutate a doc you fetched, then save it. markModified marks a Mixed subpath.
+found.data = "changed";
+found.markModified("nested");
+await found.save();
+
+// 2. Or hand the model the doc plus the fields that changed.
 await MyModel.save(found, { data: "changed" });
 ```
 
 > **Isolated-mode model gotchas (they bite):**
-> - `find()` returns a **plain array** — there is **no** `.limit()` / `.sort()` /
->   `.lean()` / `.populate()` chaining over RPC. Sort and cap in memory after
->   awaiting: `const recent = (await M.find(q)).sort(...).slice(0, 10)`.
-> - Fetched docs are plain objects, not Mongoose documents — use
->   `M.save(doc, changes)` to persist, not `doc.save()`.
-> - Schemas are sent to Core and rehydrated there. Use plain scalar field types
->   (`String`, `Number`, `Date`, `Boolean`), `default`, `required`, `enum`,
->   `unique`/`index`. Exotic types, custom validators, methods, and virtuals do
->   **not** cross the worker boundary.
+> - Awaiting a query yields plain objects, not Mongoose documents. `doc.save()`
+>   is present on hydrated docs (it round-trips through RPC), but
+>   `doc.validate()`, virtuals and instance methods are not.
+> - **No `.populate()`** over RPC. Resolve the referenced id yourself.
+> - Schemas are sent to Core and rehydrated there, so use plain scalar field
+>   types (`String`, `Number`, `Date`, `Boolean`) with `default`, `required`,
+>   `enum`, `unique`/`index`. Exotic types, custom validators, methods and
+>   virtuals do **not** cross the worker boundary.
+> - The returned document has `markModified` and `save` defined as
+>   non-enumerable properties, so spreading it (`{...doc}`) drops them.
 
 ### ctx.registerCommand — Slash commands
 
@@ -391,9 +526,19 @@ In isolated mode the payload is a **serialized plain object**, not a discord.js
 instance — no methods (`.kick()`, `.reply()`, `.delete()`), no lazy `.fetch()`,
 no `.guild`/`.channel` objects. Only the fields Core serializes are present.
 
-**Events forwarded to isolated plugins:** `guildMemberAdd`, `guildMemberRemove`,
-`guildMemberUpdate`, `messageCreate`, `messageDelete`, `messageUpdate`,
-`guildCreate`, `guildDelete`, `interactionCreate`, `voiceStateUpdate`, `ready`.
+**Event names:** any value from discord.js's `Events` enum, plus the deprecated
+`"ready"` string, which Core still accepts for older plugins. Core subscribes to
+the client event only for the names a plugin actually registers. Between them
+the shipped plugins register 24 of them — `channelCreate`, `channelDelete`,
+`channelUpdate`, `guildBanAdd`, `guildBanRemove`, `guildCreate`, `guildDelete`,
+`guildMemberAdd`, `guildMemberRemove`, `guildMemberUpdate`, `guildUpdate`,
+`interactionCreate`, `inviteCreate`, `inviteDelete`, `messageCreate`,
+`messageDelete`, `messageDeleteBulk`, `messageReactionAdd`,
+`messageReactionRemove`, `messageUpdate`, `raw`, `roleCreate`, `roleDelete`,
+`roleUpdate`, `voiceStateUpdate` — but any valid name will be forwarded.
+
+The handler is called as `handler(...args, client)`. In isolated mode the raw
+`client` is that trailing `null`.
 
 **Serialized `GuildMember` payload** (guildMemberAdd/Remove/Update):
 ```js
@@ -445,25 +590,27 @@ await ctx.hooks.emitHook("myPluginEvent", { data: "something" });
 
 ### ctx.scheduler — Recurring tasks
 
-Signature (isolated mode — the default): `schedule(cronExpression, callback, name)`
-— **expression first**, name last. Core runs the cron and invokes your callback on
-tick; a bundled `node-cron` will NOT work in an isolated worker, so always use
+Isolated mode signature: `schedule(cronExpression, callback, name)` — **expression
+first, name last** — and it resolves to a `taskId`. `cancel()` takes that
+`taskId`, not the name you passed. Core runs the cron and invokes your callback
+on tick; a bundled `node-cron` will not work in an isolated worker, so always use
 `ctx.scheduler`.
 
 ```javascript
-await ctx.scheduler.schedule("0 * * * *", async () => {
-  // Runs every hour
+const taskId = await ctx.scheduler.schedule("0 * * * *", async () => {
   ctx.logger.info("Running hourly cleanup...");
-}, "cleanup");           // <- name is the 3rd arg; pass it to cancel() later
+}, "cleanup");      // "cleanup" is a label, for Core's bookkeeping
 
-await ctx.scheduler.cancel("cleanup");
+await ctx.scheduler.cancel(taskId);
 ```
 
 > **Direct mode differs.** When your plugin runs direct (`system:raw-client` or
 > in-repo), `ctx.scheduler` is the real `TaskScheduler`, whose signature is
 > **name-first**: `schedule(name, cronExpression, fn)`, and cancellation is
 > `unschedule(name)` — there is no `cancel()`. Only isolated mode uses the
-> `schedule(expression, callback, name)` / `cancel(name)` shim shown above.
+> `schedule(expression, callback, name)` / `cancel(taskId)` shim shown above.
+> Because the two differ in both argument order and cancel name, wrap the call
+> once and use that wrapper everywhere.
 
 ### ctx.logger — Namespaced logging
 
@@ -489,8 +636,6 @@ When running in a worker thread, keep these in mind:
 
 ---
 
-<!-- DOCS_PLACEHOLDER -->
-
 ## Plugin Settings & Dashboard Integration
 
 Plugins can expose settings, per-command permissions, and an optional hosted web UI — all surfaced in the left sidebar of the admin dashboard under a **PLUGINS** section.
@@ -514,7 +659,15 @@ Add a `settings` block to `plugin.json` to expose configuration fields in the da
 }
 ```
 
-**Field types:** `string`, `number`, `boolean`, `channel`, `role`, `select` (requires `options`).
+**Field types:** `string`, `number`, `boolean`, `channel`, `role`, `select`
+(requires `options`). These are exactly the six the dashboard knows how to
+render.
+
+**Secret fields.** A field with `"secret": true` (or `"writeOnly": true`, or
+`"format": "password"`) is stripped from every API response and replaced by a
+boolean in a separate `configuredSecrets` map. The stored value stays readable
+by your plugin via `ctx.db.getPluginConfig`, but the dashboard can never read it
+back — so a blank submit does not overwrite what is already saved.
 
 `commandPermissions: true` adds a per-command table to the settings page where admins can toggle each command on/off and restrict it to specific roles.
 
@@ -581,40 +734,69 @@ Once registered, the dashboard sidebar shows an **"Open UI"** link that opens `/
 
 > **Security:** The watchdog only proxies to a port that the bot explicitly registered. A plugin cannot proxy to an arbitrary port by claiming it in the manifest — the bot validates the port matches the manifest declaration before registering.
 
-> **Isolation note:** `webUi` requires binding a real port, which is not possible from a sandboxed worker thread. Plugins using `webUi` must also declare `system:raw-client` (direct/un-isolated mode) or run as a `local` (in-repo) plugin.
+> **Isolation note:** a **hosted** page needs `webUi.port` bound on a real port,
+> which an isolated worker thread cannot do. A plugin serving its own UI must
+> therefore also declare `system:raw-client` (direct mode) or be an in-repo
+> `local` plugin. A **rendered** member page has no such requirement — it needs
+> no port, so an isolated plugin can ship one.
 
 #### Member portal pages (`webUi.memberPages`)
 
 The admin dashboard is for people who *configure* the server. The **member
 portal** (`/me`) is the self-service surface for everyone else — a member logs
-in, picks a server they're in, and sees pages that show **their own** data (my
+in, picks a server they're in, and sees pages showing **their own** data (my
 rank, my reminders, my tickets). It is not gated on any dashboard permission:
 any member of the guild can reach it.
 
-Declare member pages on your `webUi` block. Each entry is a route into the
-same web server you already host — the portal opens it at
-`/plugin-ui/<name><path>?guildId=<id>`:
+There are two kinds of page, and you almost certainly want the first.
+
+**A platform-rendered page — no web server needed.** You declare a model and a
+view; the platform reads the model, renders the page, and scopes every query to
+the caller. This needs **no `webUi.port`** and no `system:raw-client`, so an
+isolated plugin can do it. All 16 registered plugins do it this way.
 
 ```json
 "webUi": {
-  "port": 3210,
-  "label": "My Plugin UI",
   "memberPages": [
-    { "path": "/me/rank", "label": "My Rank", "icon": "Trophy" },
-    { "path": "/me/reminders", "label": "My Reminders" }
+    {
+      "path": "/me/rank",
+      "label": "My Rank",
+      "icon": "Star",
+      "source": { "model": "Level", "scope": "member", "limit": 1 },
+      "view": {
+        "type": "stat",
+        "stats": [
+          { "field": "level", "label": "Level" },
+          { "field": "xp",    "label": "Total XP" }
+        ]
+      }
+    }
   ]
 }
 ```
 
-Rules:
+The model is your own `ctx.defineModel()` name. The platform queries it with
+`{ guildId, userId }` — **the caller's identity, forced** — applies your `sort`
+and a `limit` capped at 500, and returns the rows. You cannot widen that scope
+from the client. A declared `view.actions` entry also becomes a row action the
+member can invoke; the client chooses only *which* declared action and *which*
+returned row id, never the operation or the field.
+
+**A hosted page.** Give `webUi` a `port` and the portal opens your own server at
+`/plugin-ui/<name><path>?guildId=<id>`, with the member's session cookie riding
+along so your handler can scope to *this member in this guild*. Resolve who the
+member is from the session the same way the admin API does.
+
+Rules for both:
 - `path` is required and must start with `/`; `label` is required; `icon` is
   optional (a lucide-react icon name). Duplicate paths are dropped.
-- A page only appears in a guild's portal when the plugin is **active for that
-  guild** (same per-guild enable gate as everything else — gateable plugins are
-  off until an admin enables them).
-- The portal passes `guildId` as a query parameter and the member's session
-  cookie rides along, so your handler can scope to *this member in this guild*.
-  Resolve who the member is from the session the same way the admin API does.
+- A page is treated as rendered when it sets `rendered: true` or declares both
+  `source.model` and `view.type`. A page that is neither rendered nor backed by
+  a `webUi.port` is silently skipped, so a hosted page without a port will not
+  show up.
+- A page only appears in a guild's portal when the plugin is **enabled for that
+  guild** — the same per-guild gate as everything else. Gateable plugins are off
+  until an admin enables them.
 
 ---
 
@@ -725,9 +907,11 @@ Rules:
 - Keys are **always re-namespaced** under `plugin.<name>.` — you cannot mint a
   permission outside your own namespace (declaring `plugins.manage` becomes
   `plugin.<name>.plugins.manage`, which grants nothing platform-level).
-- Declaring your own `permissions` array **replaces** the default
-  `view`/`configure` pair, so include equivalents if you still want them.
-- Entries may be a plain string (`"export"`) or `{ key, label, description }`.
+- Declared keys are **added to** the automatic `view`/`configure` pair, not
+  substituted for it. You keep both by default; a declared key that collides
+  with one of them is ignored.
+- Entries may be a plain string (`"export"`) or `{ key, label, description }`. A
+  key with no `label` gets `<DisplayName>: <key>`.
 
 There is no runtime enforcement helper to call — the platform filters the
 sidebar and 403s the API based on the resolved permission set. Your plugin code

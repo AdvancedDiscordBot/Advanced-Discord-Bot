@@ -1,5 +1,19 @@
 # Plugin Isolation Architecture — Implementation Plan
 
+> **Status: shipped (2026-07-17).** The Core / Broker / Worker model in this plan
+> is what runs today: `core/rpc/` (broker, protocol, worker-bootstrap,
+> worker-manager, process-router, resource-limits, violations, metrics), manifest
+> v2 in `core/manifest-schema.js` with v1 migration, the capability catalog in
+> `core/capabilities.js`, and install-time source cross-validation in
+> `core/manifest-crossvalidate.js`. `rewrite-report.md` in the repo root is the
+> companion write-up of the same change. **Three things did not land as planned**
+> and are documented where they matter: the declared `process.maxExecutionMs` /
+> `process.memoryMb` are validated but not applied to the worker (it gets fixed
+> `resourceLimits`); `core/rpc/process-router.js` and `core/rpc/resource-limits.js`
+> are not wired into the spawn path; and `worker_threads` is a contract boundary,
+> not an OS sandbox. See "Known gap" in `CREATE-PLUGIN.md` and the operational
+> notes in `ARCHITECTURE.md`. Kept as a record of the decisions.
+
 > **Spec source:** User-provided architecture spec (Core / Broker / Worker model)
 > **Date:** 2026-07-16
 > **Status:** Planning → Ready to implement

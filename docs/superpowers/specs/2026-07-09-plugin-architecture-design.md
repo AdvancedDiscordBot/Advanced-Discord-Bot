@@ -1,7 +1,19 @@
 # Plugin Architecture Overhaul — Design
 
 Date: 2026-07-09
-Status: Approved (brainstorm), pending implementation plan
+
+> **Status: implemented** by
+> [`../plans/2026-07-09-plugin-architecture-overhaul.md`](../plans/2026-07-09-plugin-architecture-overhaul.md).
+> One non-goal below has since been closed: *"Sandboxing/enforcement of
+> `discordPermissions` at runtime — this spec only declares, aggregates, and
+> displays them. Actual capability enforcement is a separate concern."* That
+> concern was built later as a **capability** layer — `discordPermissions` is
+> still only declared and aggregated, while `permissions` / `capabilities` are
+> what the broker enforces per RPC call. See
+> [`../plans/2026-07-16-plugin-isolation-architecture.md`](../plans/2026-07-16-plugin-isolation-architecture.md).
+> The "10 external `~/Projects/adb-plugin-*` plugins" referenced here are now 17
+> separate `adb-plugin-*` repositories under the `AdvancedDiscordBot` org. Kept as
+> a record of the decisions.
 
 ## Goal
 

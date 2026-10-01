@@ -1,5 +1,17 @@
 # Dashboard Rework — Plugin-Centric UI Implementation Plan
 
+> **Status: shipped (2026-07).** Everything in this plan was implemented: the
+> feature-specific settings pages, `plugins/ai/` and `plugins/economy/` and the
+> in-repo `administration` plugin folder are gone, and
+> `plugins/administration/web` now ships `Dashboard.jsx`, `Plugins.jsx`,
+> `Settings.jsx`, `CommandPalette.jsx` and `GuildLayout.jsx`, with the
+> administration host living in `core/adminPlugin.js` and
+> `/api/guild/:id/server-stats` backing the home widget. **The plan has since
+> been extended** by two later changes it does not mention: a role-grant editor
+> (`Roles.jsx`, the Access page) and the `/me` member-portal route tree. For the
+> dashboard as it stands, read `plugins/administration/web/src/` and the API
+> section of `ARCHITECTURE.md`. Kept as a record of the decisions.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Tear out all feature-specific settings pages from the admin dashboard and replace them with a plugin-centric UI: widget grid home, best-in-class plugin manager, command palette, and a lean settings page.

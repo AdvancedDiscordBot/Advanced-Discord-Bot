@@ -61,6 +61,66 @@ Remove the disposable instance afterwards:
 docker stop adb-verification-mongo
 ```
 
+## Known limitations of the integration check
+
+`scripts/check-plugin-runtime.js` builds its own **in-memory stand-in for
+discord.js** so the check can run without a gateway. That stand-in implements
+only the parts of the discord.js surface the shipped scenarios happened to touch.
+Anything outside it is missing, and that has two consequences you must understand
+before you act on a result:
+
+1. **False failures.** A plugin that calls a perfectly valid discord.js method
+   will crash the check with the host's generic
+   *"An error occurred while processing your request. Please try again later."*
+   The plugin is fine; the mock is incomplete.
+2. **Silent coverage holes.** A missing mock method is never called, so whole code
+   paths report as "passing" without having been exercised at all.
+
+Always read the underlying exception in the test output — the generic reply text
+tells you nothing. If the stack ends in `scripts/check-plugin-runtime.js` rather
+than in your plugin, it is a mock gap.
+
+### Confirmed mock gaps (as of the plugin sweep)
+
+Missing from the mock boundary, each hiding or breaking real plugin code:
+
+| Missing API | Real plugin code it breaks/hides |
+|---|---|
+| `interaction.deleteReply()` | `adb-plugin-levels` `commands/level.js` → `/level` fails the check for users with no XP |
+| `interaction.getSubcommandGroup()` (hardcoded to `null`) | every subcommand-group dispatch — `/automod rule add\|remove\|edit`, `/welcome background\|social\|button` |
+| `interaction.values`, `isStringSelectMenu()` → `false` | select-menu handlers, e.g. `adb-plugin-reaction-roles` dropdowns |
+| `interaction.deferUpdate()`, `update()`, `showModal()` | component and modal flows |
+| `channel.messages.fetch({ limit })` (only single-id fetch) | `adb-plugin-moderation` `commands/purge.js` and the `commands/ticket.js` transcript |
+| `channel.bulkDelete()` | the `/purge` deletion path |
+| `channel.setRateLimitPerUser()` | `/slowmode` |
+| `message.mentions` | `adb-plugin-automod` `checkMention()` — the mention filter |
+| `client.guilds.fetch()` | `adb-plugin-invite-tracker` `/invites-admin codes` |
+| `guild.channels.fetch()` with no argument (returns `null`) | `adb-plugin-aegis` `lib/lockdown.js` — the whole raid-lockdown path |
+| `guild.members.ban()` / `unban()` / `kick()` | `/ban`, `/unban`, `/kick` |
+| `channel.pins`, `setTopic`, `setUserLimit`, `setBitrate`, `setParent`, `setNSFW` | moderation and tempvoice channel management |
+
+Because of this, **"the integration check passed" is not by itself evidence that a
+command works.** The three-layer rule for a plugin change is:
+
+1. `npm test` in the plugin repo (offline, both load modes);
+2. `npm run test:integration` in the bot checkout (real models, real MongoDB);
+3. the feature exercised by a human in a real test server.
+
+### Filling a gap
+
+If you need coverage the mock does not provide, extend the boundary in
+`scripts/check-plugin-runtime.js` (`discordBoundary()`) rather than weakening the
+plugin. Keep the additions faithful to real discord.js semantics — notably:
+
+- `channel.messages.fetch({ limit })` returns a `Collection` ordered **oldest →
+  newest** (this is why `/purge` must reverse before slicing);
+- `bulkDelete()` returns a `Collection` of what it actually deleted, and its
+  second argument means *filter out messages older than 14 days* — it does **not**
+  reorder anything;
+- a **required** user/channel option still resolves to `null` when the member
+  left or the channel was deleted, so plugin code must null-check
+  `getUser()` / `getChannel()` results.
+
 ## Live Acceptance
 
 Offline checks do not prove gateway authorization, Developer Portal intents,

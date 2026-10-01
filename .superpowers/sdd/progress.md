@@ -1,3 +1,10 @@
+> **Status: closed.** This is the working log for the plugin-architecture-overhaul
+> branch (`feat/plugin-architecture-overhaul`, last commit `15c8c0e` on origin),
+> which shipped on 2026-07-09 — see
+> `docs/superpowers/plans/2026-07-09-plugin-architecture-overhaul.md` and
+> `rewrite-report.md`. The "minor review items deferred" listed below were never
+> picked up. Kept as a record.
+
 Task 0: docs committed (1e3ec37)
 Task 1: complete (commit df2e013, 7/7 tests)
 Tasks 2-8: complete (commit 80a95df, backend; 14/14 tests)

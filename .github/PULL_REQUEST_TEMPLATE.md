@@ -1,8 +1,8 @@
 ---
 name: 🛠️ Pull Request
 about: Submit a pull request for code, documentation, or feature enhancement
-title: '[PR] <type>: <short description>'
-labels: 'gssoc', 'under review'
+title: '<type>(<scope>): <short description>'
+labels: ''
 assignees: ''
 
 ---
@@ -13,13 +13,16 @@ assignees: ''
 
 <!-- A detailed description of what this PR does and why it's needed. -->
 
-> This PR adds the course upload module to the admin panel, allowing instructors to upload video content and attach downloadable PDFs.
-
 ---
 
 ## 🧪 Related Issues
 
 Fixes #<issue-number> (if applicable)
+
+> One PR is one change. A feature, bug fix or improvement that belongs to a
+> plugin goes in that plugin's repository, not here — see `AGENTS.md`.
+> Conventional Commit subjects, e.g. `fix(purge): delete the newest N messages`.
+> In this repository, `beta` is where work lands; `main` is release-only.
 
 ---
 
@@ -39,13 +42,12 @@ Please delete options that are not relevant:
 
 Before submitting your PR, check all the points below:
 
-- [ ] My code follows the **style guidelines** of this project
-- [ ] I have performed a **self-review** of my code
-- [ ] I have **commented** my code, especially in hard-to-understand areas
+- [ ] The change belongs to this repository, not to a plugin repo
+- [ ] I have performed a **self-review** of my change
 - [ ] I have made corresponding changes to the **documentation**
-- [ ] My changes **generate no new warnings**
 - [ ] I have added **tests** that prove my fix is effective or that my feature works
-- [ ] New and existing unit tests pass locally
+- [ ] New and existing tests pass locally (`npm test`)
+- [ ] I have stated **how I tested this**, and what I could not test
 - [ ] I have **linked the related issue**
 
 ---
@@ -59,7 +61,3 @@ Paste screenshots or a screen recording of the feature/bug fix.
 ## 🙋‍♂️ Reviewer Notes
 
 Mention anything that reviewers should focus on or be aware of.
-
----
-
-> ✅ PRs that follow the structure and guidelines are reviewed and merged faster!
