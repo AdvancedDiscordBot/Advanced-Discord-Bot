@@ -272,36 +272,131 @@ function createShimContext(rpc, grantedEnv = {}, registrations = { pending: new 
 		},
 	};
 
-	// Discord proxy: routes all Discord API calls through RPC
 	const discordProxy = {
-		// Send a rich message (content + embeds + files) to a channel
-		sendToChannel: async (channelId, payload) => {
-			return rpc.call("discord.sendRichMessage", {
-				...(typeof payload === "string" ? { content: payload } : payload),
-				channelId,
-			});
-		},
-		// Send a DM (content + embeds + files) to a user
-		sendDM: async (userId, payload) => {
-			return rpc.call("discord.sendDM", {
-				...(typeof payload === "string" ? { content: payload } : payload),
-				userId,
-			});
-		},
-		// Fetch guild info (returns object with iconURL)
-		getGuild: async (guildId) => {
-			return rpc.call("discord.getGuild", { guildId, iconFormat: "png", iconSize: 128 });
-		},
-		// Fetch member info (returns object with user.avatarURL)
-		getMember: async (guildId, userId) => {
-			return rpc.call("discord.getMember", { guildId, userId, avatarFormat: "png", avatarSize: 256 });
-		},
-		// Fetch channel info
-		fetchChannel: async (channelId) => {
-			return rpc.call("discord.fetchChannel", { channelId });
-		},
-	};
+  // Send a simple text message to a channel
+  sendMessage: async (channelId, content) => {
+    return rpc.call("discord.sendMessage", {
+      channelId,
+      content,
+    });
+  },
 
+  // Send a rich message with content, embeds, and files
+  sendToChannel: async (channelId, payload) => {
+    return rpc.call("discord.sendRichMessage", {
+      ...(typeof payload === "string" ? { content: payload } : payload),
+      channelId,
+    });
+  },
+
+  // Send an embed to a channel
+  sendEmbed: async (channelId, embed) => {
+    return rpc.call("discord.sendEmbed", {
+      channelId,
+      embed,
+    });
+  },
+
+  // Send a DM to a user
+  sendDM: async (userId, payload) => {
+    return rpc.call("discord.sendDM", {
+      ...(typeof payload === "string" ? { content: payload } : payload),
+      userId,
+    });
+  },
+
+  // Fetch guild information
+  getGuild: async (guildId) => {
+    return rpc.call("discord.getGuild", {
+      guildId,
+      iconFormat: "png",
+      iconSize: 128,
+    });
+  },
+
+  // Fetch member information
+  getMember: async (guildId, userId) => {
+    return rpc.call("discord.getMember", {
+      guildId,
+      userId,
+      avatarFormat: "png",
+      avatarSize: 256,
+    });
+  },
+
+  // Fetch channel information
+  fetchChannel: async (channelId) => {
+    return rpc.call("discord.fetchChannel", {
+      channelId,
+    });
+  },
+
+  // Add a role to a member
+  addRole: async (guildId, userId, roleId, reason) => {
+    return rpc.call("discord.addRole", {
+      guildId,
+      userId,
+      roleId,
+      reason,
+    });
+  },
+
+  // Remove a role from a member
+  removeRole: async (guildId, userId, roleId, reason) => {
+    return rpc.call("discord.removeRole", {
+      guildId,
+      userId,
+      roleId,
+      reason,
+    });
+  },
+
+  // Delete a message
+  deleteMessage: async (channelId, messageId) => {
+    return rpc.call("discord.deleteMessage", {
+      channelId,
+      messageId,
+    });
+  },
+
+  // Add a reaction to a message
+  addReaction: async (channelId, messageId, emoji) => {
+    return rpc.call("discord.addReaction", {
+      channelId,
+      messageId,
+      emoji,
+    });
+  },
+
+  // Timeout a member
+timeout: async (guildId, userId, ms, reason) => {
+  return rpc.call("discord.timeout", {
+    guildId,
+    userId,
+    ms,
+    reason,
+  });
+},
+  // Kick a member
+  kick: async (guildId, userId, reason) => {
+    return rpc.call("discord.kick", {
+      guildId,
+      userId,
+      reason,
+    });
+  },
+
+  // Ban a member
+  ban: async (guildId, userId, reason, days) => {
+    return rpc.call("discord.ban", {
+      guildId,
+      userId,
+      reason,
+      deleteMessageDays: days,
+    });
+  },
+};
+	
 	return {
 		client: null, // Never available in worker — use ctx.discord for Discord ops
 		discord: discordProxy,
