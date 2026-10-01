@@ -2,7 +2,7 @@
   "name": "administration",
   "displayName": "Administration Dashboard",
   "version": "2.0.0",
-  "description": "ADB Administration Dashboard - Web-based admin panel, plugin settings host, and reverse-proxy target for plugin UIs",
+  "description": "ADB Administration Dashboard - Web-based admin panel, plugin settings host, reverse-proxy target for plugin UIs, and infractions/moderation (/mod)",
   "author": "ADB Development Team",
   "main": "index.js",
   "requiresRestart": false,
@@ -20,5 +20,21 @@
     "childProcess": false,
     "nativeAddons": false
   },
-  "discordPermissions": []
+  "discordPermissions": ["ModerateMembers", "KickMembers", "BanMembers", "ManageRoles"],
+  "settings": {
+    "schema": [
+      {"key": "mute_role_id", "type": "role", "label": "Mute role (empty = /mod mute uses Discord timeout)", "default": ""},
+      {"key": "dm_on_warn", "type": "boolean", "label": "DM members when warned", "default": true},
+      {"key": "dm_on_action", "type": "boolean", "label": "DM members on mute/timeout/kick/ban", "default": true},
+      {"key": "appeal_info", "type": "string", "label": "Appeal info added to DMs (e.g. a link)", "default": ""},
+      {"key": "warn_threshold_mute", "type": "number", "label": "Auto-mute at this many active warnings (0 = off)", "default": 0, "min": 0, "max": 100},
+      {"key": "warn_mute_duration", "type": "string", "label": "Auto-mute duration (e.g. 1h)", "default": "1h"},
+      {"key": "warn_threshold_timeout", "type": "number", "label": "Auto-timeout at this many active warnings (0 = off)", "default": 0, "min": 0, "max": 100},
+      {"key": "warn_timeout_duration", "type": "string", "label": "Auto-timeout duration (max 28d)", "default": "1h"},
+      {"key": "warn_threshold_kick", "type": "number", "label": "Auto-kick at this many active warnings (0 = off)", "default": 0, "min": 0, "max": 100},
+      {"key": "warn_threshold_tempban", "type": "number", "label": "Auto-tempban at this many active warnings (0 = off)", "default": 0, "min": 0, "max": 100},
+      {"key": "warn_tempban_duration", "type": "string", "label": "Auto-tempban duration (e.g. 24h)", "default": "24h"},
+      {"key": "warn_threshold_ban", "type": "number", "label": "Auto-permaban at this many active warnings (0 = off)", "default": 0, "min": 0, "max": 100}
+    ]
+  }
 }

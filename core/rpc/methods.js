@@ -189,6 +189,46 @@ const RPC_METHODS = {
 		handler: "discordBan",
 		description: "Ban a member from the server",
 	},
+	"discord.unban": {
+		capability: "discord:BanMembers",
+		handler: "discordUnban",
+		description: "Lift a ban from a user",
+	},
+	"discord.editMessage": {
+		capability: "discord:SendMessages",
+		handler: "discordEditMessage",
+		description: "Edit a message the bot sent (content, embeds, components)",
+	},
+	"discord.createChannel": {
+		capability: "discord:ManageChannels",
+		handler: "discordCreateChannel",
+		description: "Create a channel in a guild",
+	},
+	"discord.editChannel": {
+		capability: "discord:ManageChannels",
+		handler: "discordEditChannel",
+		description: "Edit a channel (name, topic, slowmode, parent, ...)",
+	},
+	"discord.deleteChannel": {
+		capability: "discord:ManageChannels",
+		handler: "discordDeleteChannel",
+		description: "Delete a channel",
+	},
+	"discord.setPermissionOverwrite": {
+		capability: "discord:ManageChannels",
+		handler: "discordSetPermissionOverwrite",
+		description: "Create or edit a role/member permission overwrite on a channel",
+	},
+	"discord.sendViaWebhook": {
+		capability: "discord:ManageWebhooks",
+		handler: "discordSendViaWebhook",
+		description: "Send a message through a bot-owned channel webhook (custom name/avatar)",
+	},
+	"discord.fetchInvites": {
+		capability: "discord:ManageGuild",
+		handler: "discordFetchInvites",
+		description: "List a guild's invites with inviter and use counts",
+	},
 
 	// ── Discord Lookups ─────────────────────────────────────────────────
 	"discord.getGuild": {
@@ -205,6 +245,16 @@ const RPC_METHODS = {
 		capability: "discord:ChannelInfo",
 		handler: "discordFetchChannel",
 		description: "Fetch a channel by ID",
+	},
+	"discord.getRoles": {
+		capability: "discord:GuildInfo",
+		handler: "discordGetRoles",
+		description: "List a guild's roles",
+	},
+	"discord.getMessage": {
+		capability: "discord:ReadMessageHistory",
+		handler: "discordGetMessage",
+		description: "Fetch a message with attachments, embeds, components and reactions",
 	},
 	"discord.addRole": {
 		capability: "discord:ManageRoles",
@@ -307,6 +357,15 @@ const RPC_METHODS = {
 		capability: "network:outbound-http",
 		handler: "networkFetch",
 		description: "Make an outbound HTTP(S) request to an allowlisted host",
+	},
+
+	// ── AI (gemini-proxy) ───────────────────────────────────────────────
+	// Core holds GEMINI_API_KEY; the shared quota is protected by a per-user
+	// cooldown (admin-configurable) under a per-guild request window.
+	"ai.generate": {
+		capability: "ai:gemini-proxy",
+		handler: "aiGenerate",
+		description: "Generate a Gemini response (per-user cooldown + per-guild rate limit)",
 	},
 };
 

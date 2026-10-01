@@ -27,6 +27,13 @@ const NETWORK_MAX_BODY_BYTES = 5 * 1024 * 1024;
 const NETWORK_TIMEOUT_MS = 15_000;
 const INTERACTION_TTL_MS = 15 * 60 * 1000;
 const DISCORD_PRIVATE_KEYS = new Set(["client", "token", "webhook", "authorization"]);
+// ai.generate limits. The per-user cooldown default applies until a guild admin
+// sets the calling plugin's `ai_user_cooldown_seconds` setting.
+const AI_DEFAULT_USER_COOLDOWN_S = 10;
+const AI_GUILD_MAX_PER_MINUTE = 20;
+const AI_MAX_PROMPT_CHARS = 8000;
+const AI_TIMEOUT_MS = 25_000;
+const AI_DEFAULT_MODEL = "gemini-2.5-flash";
 
 class CapabilityBroker extends EventEmitter {
 	/**
@@ -69,6 +76,10 @@ class CapabilityBroker extends EventEmitter {
 		this.interactionOwners = new Map();
 		this.modalOwners = new Map();
 		this.messageOwners = new Map();
+		/** @type {Map<string, number>} "guildId:userId" → last ai.generate timestamp */
+		this.aiUserLastCall = new Map();
+		/** @type {Map<string, number[]>} guildId → ai.generate timestamps in the last minute */
+		this.aiGuildCalls = new Map();
 
 		// Start metrics collection
 		metricsCollector.start(60000);
@@ -179,7 +190,17 @@ class CapabilityBroker extends EventEmitter {
 				|| this.interactionOwners.get(interaction.message?.interactionMetadata?.id || interaction.message?.interaction?.id);
 		}
 		const entry = this.interactions.get(handle);
-		return entry && entry.expiresAt > Date.now() ? entry.pluginId : null;
+		if (entry && entry.expiresAt > Date.now()) return entry.pluginId;
+		// Components/modals on messages a plugin posted outside an interaction
+		// (ctx.discord.sendToChannel — e.g. a giveaway "Enter" button) have no
+		// owning reply. They route by a "<pluginId>:" customId prefix, which also
+		// survives restarts. Interaction-owned messages above take precedence.
+		if ((interaction.type === 3 || interaction.type === 5) && typeof interaction.customId === "string") {
+			const sep = interaction.customId.indexOf(":");
+			const prefix = sep > 0 ? interaction.customId.slice(0, sep) : null;
+			if (prefix && this.pluginCapabilities.has(prefix) && !this.isSuspended(prefix)) return prefix;
+		}
+		return null;
 	}
 
 	async _interactionAction(pluginId, action, params) {
@@ -602,9 +623,130 @@ class CapabilityBroker extends EventEmitter {
 			case "discordBan": {
 				const guild = await this.client.guilds.fetch(p.guildId);
 				if (!guild) throw new Error(`Guild not found: ${p.guildId}`);
-				const member = await guild.members.fetch(p.userId);
-				await member.ban({ reason: p.reason || "Plugin action" });
+				// Ban by user ID so users who already left can still be banned.
+				const days = Math.min(Math.max(Number(p.deleteMessageDays) || 0, 0), 7);
+				await guild.members.ban(p.userId, {
+					reason: p.reason || "Plugin action",
+					deleteMessageSeconds: days * 86400,
+				});
 				return { ok: true };
+			}
+
+			case "discordUnban": {
+				const guild = await this.client.guilds.fetch(p.guildId);
+				if (!guild) throw new Error(`Guild not found: ${p.guildId}`);
+				await guild.members.unban(p.userId, p.reason || "Plugin action");
+				return { ok: true };
+			}
+
+			case "discordEditMessage": {
+				const channel = await this.client.channels.fetch(p.channelId);
+				if (!channel) throw new Error(`Channel not found: ${p.channelId}`);
+				const message = await channel.messages.fetch(p.messageId);
+				if (message.author?.id !== this.client.user?.id) {
+					throw new Error("Only messages sent by the bot can be edited");
+				}
+				const { channelId, messageId, ...payload } = p;
+				await message.edit(this._messagePayload(payload));
+				return { ok: true, messageId: message.id };
+			}
+
+			case "discordGetMessage": {
+				const channel = await this.client.channels.fetch(p.channelId);
+				if (!channel) throw new Error(`Channel not found: ${p.channelId}`);
+				const message = await channel.messages.fetch(p.messageId);
+				return serializeValue({
+					id: message.id,
+					channelId: message.channelId,
+					guildId: message.guildId,
+					content: message.content,
+					author: message.author && { id: message.author.id, username: message.author.username, bot: message.author.bot },
+					createdTimestamp: message.createdTimestamp,
+					editedTimestamp: message.editedTimestamp,
+					attachments: [...message.attachments.values()].map((a) => ({
+						id: a.id, name: a.name, url: a.url, contentType: a.contentType, size: a.size,
+					})),
+					embeds: message.embeds.map((embed) => embed.toJSON()),
+					components: message.components.map((row) => row.toJSON()),
+					reactions: [...message.reactions.cache.values()].map((r) => ({
+						emoji: r.emoji.id || r.emoji.name, name: r.emoji.name, count: r.count, me: r.me,
+					})),
+				});
+			}
+
+			case "discordCreateChannel": {
+				const guild = await this.client.guilds.fetch(p.guildId);
+				if (!guild) throw new Error(`Guild not found: ${p.guildId}`);
+				const channel = await guild.channels.create({
+					...this._channelFields(p),
+					name: p.name,
+					reason: p.reason || "Plugin action",
+				});
+				return { id: channel.id, name: channel.name, type: channel.type, guildId: channel.guildId, parentId: channel.parentId };
+			}
+
+			case "discordEditChannel": {
+				const channel = await this._guildChannel(p.channelId);
+				await channel.edit({ ...this._channelFields(p), reason: p.reason || "Plugin action" });
+				return { ok: true };
+			}
+
+			case "discordDeleteChannel": {
+				const channel = await this._guildChannel(p.channelId);
+				await channel.delete(p.reason || "Plugin action");
+				return { ok: true };
+			}
+
+			case "discordSetPermissionOverwrite": {
+				const channel = await this._guildChannel(p.channelId);
+				// null overwrites removes the overwrite entirely (e.g. unlock).
+				if (p.overwrites === null) await channel.permissionOverwrites.delete(p.targetId, p.reason || "Plugin action");
+				else await channel.permissionOverwrites.edit(p.targetId, p.overwrites || {}, { reason: p.reason || "Plugin action" });
+				return { ok: true };
+			}
+
+			case "discordSendViaWebhook": {
+				const channel = await this._guildChannel(p.channelId);
+				// The webhook token never crosses the RPC boundary: Core reuses or
+				// creates a bot-owned webhook and sends on the plugin's behalf.
+				const hooks = await channel.fetchWebhooks();
+				const webhook = hooks.find((hook) => hook.owner?.id === this.client.user?.id && hook.token)
+					|| await channel.createWebhook({ name: "ADB", reason: "Plugin webhook delivery" });
+				const { channelId, ...payload } = p;
+				const sent = await webhook.send(this._messagePayload(payload));
+				return { messageId: sent.id };
+			}
+
+			case "discordFetchInvites": {
+				const guild = await this.client.guilds.fetch(p.guildId);
+				if (!guild) throw new Error(`Guild not found: ${p.guildId}`);
+				const invites = await guild.invites.fetch();
+				return [...invites.values()].map((invite) => ({
+					code: invite.code,
+					uses: invite.uses,
+					maxUses: invite.maxUses,
+					inviterId: invite.inviterId || invite.inviter?.id || null,
+					channelId: invite.channelId || invite.channel?.id || null,
+					temporary: invite.temporary,
+					createdTimestamp: invite.createdTimestamp,
+					expiresTimestamp: invite.expiresTimestamp,
+				}));
+			}
+
+			case "discordGetRoles": {
+				const guild = await this.client.guilds.fetch(p.guildId);
+				if (!guild) throw new Error(`Guild not found: ${p.guildId}`);
+				const roles = await guild.roles.fetch();
+				return [...roles.values()].map((role) => ({
+					id: role.id,
+					name: role.name,
+					color: role.color,
+					position: role.position,
+					managed: role.managed,
+					hoist: role.hoist,
+					mentionable: role.mentionable,
+					permissions: role.permissions.bitfield.toString(),
+				}));
 			}
 
 			// ── Hook Actions ──────────────────────────────────────────
@@ -793,6 +935,10 @@ class CapabilityBroker extends EventEmitter {
 			case "networkFetch":
 				return await this._networkFetch(pluginId, p);
 
+			// ── AI ──────────────────────────────────────────────────────
+			case "aiGenerate":
+				return await this._aiGenerate(pluginId, p);
+
 			default:
 				throw new Error(`Handler not implemented: ${handler}`);
 		}
@@ -856,7 +1002,94 @@ class CapabilityBroker extends EventEmitter {
 		}
 	}
 
+	// ── AI ────────────────────────────────────────────────────────────────
+
+	/**
+	 * Generate a Gemini response for a guild member. Two limits protect the one
+	 * shared GEMINI_API_KEY:
+	 *   - per-user cooldown: `ai_user_cooldown_seconds` from the calling plugin's
+	 *     guild settings (dashboard-editable; default 10s, 0 disables), so one
+	 *     member can't drain the quota for everyone else;
+	 *   - per-guild window: AI_GUILD_MAX_PER_MINUTE across all plugins, the outer
+	 *     safety net.
+	 * A limited call resolves `{ text: null, limited, retryAfterMs }` instead of
+	 * throwing, so the plugin can tell the user how long to wait.
+	 *
+	 * @param {string} pluginId
+	 * @param {object} p - { guildId, userId, prompt, systemInstruction? }
+	 * @private
+	 */
+	async _aiGenerate(pluginId, p) {
+		for (const key of ["guildId", "userId", "prompt"]) {
+			if (typeof p[key] !== "string" || !p[key]) throw new Error(`ai.generate requires a non-empty string "${key}"`);
+		}
+		if (p.prompt.length > AI_MAX_PROMPT_CHARS || (p.systemInstruction && String(p.systemInstruction).length > AI_MAX_PROMPT_CHARS)) {
+			throw new Error(`ai.generate prompt exceeds ${AI_MAX_PROMPT_CHARS} characters`);
+		}
+		const apiKey = process.env.GEMINI_API_KEY;
+		if (!apiKey) throw new Error("AI is not configured on this bot (GEMINI_API_KEY is not set)");
+
+		const config = await this.db.getPluginConfig(p.guildId, pluginId);
+		const configured = config?.data?.ai_user_cooldown_seconds;
+		const cooldownMs = (Number.isFinite(configured) && configured >= 0 ? configured : AI_DEFAULT_USER_COOLDOWN_S) * 1000;
+
+		// Re-read the clock after the config await so concurrent calls from the
+		// same user see each other's reservation below.
+		const now = Date.now();
+		const userKey = `${p.guildId}:${p.userId}`;
+		const last = this.aiUserLastCall.get(userKey);
+		if (cooldownMs > 0 && last !== undefined && now - last < cooldownMs) {
+			return { text: null, limited: "user", retryAfterMs: cooldownMs - (now - last) };
+		}
+		const recent = (this.aiGuildCalls.get(p.guildId) || []).filter((t) => now - t < 60_000);
+		if (recent.length >= AI_GUILD_MAX_PER_MINUTE) {
+			this.aiGuildCalls.set(p.guildId, recent);
+			return { text: null, limited: "guild", retryAfterMs: 60_000 - (now - recent[0]) };
+		}
+		// Reserve before the API call: a spammer's parallel messages must not all
+		// pass the check while the first request is still in flight.
+		// ponytail: in-memory, per-process; resets on restart, which is fine for a cooldown.
+		this.aiUserLastCall.set(userKey, now);
+		recent.push(now);
+		this.aiGuildCalls.set(p.guildId, recent);
+
+		if (!this._genai) {
+			const { GoogleGenAI } = require("@google/genai");
+			this._genai = new GoogleGenAI({ apiKey });
+		}
+		let timer;
+		try {
+			const response = await Promise.race([
+				this._genai.models.generateContent({
+					model: process.env.GEMINI_MODEL || AI_DEFAULT_MODEL,
+					contents: p.prompt,
+					...(p.systemInstruction ? { config: { systemInstruction: String(p.systemInstruction) } } : {}),
+				}),
+				new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`AI request timed out after ${AI_TIMEOUT_MS}ms`)), AI_TIMEOUT_MS); }),
+			]);
+			return { text: response.text ?? "" };
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+
 	// ── Helpers ──────────────────────────────────────────────────────────
+
+	/** Fetch a guild channel; refuses DMs so channel-management RPCs stay guild-scoped. @private */
+	async _guildChannel(channelId) {
+		const channel = await this.client.channels.fetch(channelId);
+		if (!channel?.guild) throw new Error(`Guild channel not found: ${channelId}`);
+		return channel;
+	}
+
+	/** Whitelisted channel fields for create/edit — never pass a worker object straight to discord.js. @private */
+	_channelFields(p) {
+		const fields = {};
+		for (const key of ["name", "type", "topic", "parent", "nsfw", "rateLimitPerUser", "position", "permissionOverwrites", "bitrate", "userLimit"]) {
+			if (p[key] !== undefined) fields[key] = p[key];
+		}
+		return fields;
+	}
 
 	/**
 	 * Resolve positional args from worker RPC into named params.

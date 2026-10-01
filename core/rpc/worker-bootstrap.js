@@ -300,11 +300,50 @@ function createShimContext(rpc, grantedEnv = {}, registrations = { pending: new 
 		fetchChannel: async (channelId) => {
 			return rpc.call("discord.fetchChannel", { channelId });
 		},
+		// Each method below is gated by the capability listed in methods.js.
+		sendMessage: (channelId, content) => rpc.call("discord.sendMessage", { channelId, content }),
+		sendEmbed: (channelId, embed) => rpc.call("discord.sendEmbed", { channelId, embed }),
+		editMessage: (channelId, messageId, payload) => rpc.call("discord.editMessage", {
+			...(typeof payload === "string" ? { content: payload } : payload),
+			channelId,
+			messageId,
+		}),
+		getMessage: (channelId, messageId) => rpc.call("discord.getMessage", { channelId, messageId }),
+		deleteMessage: (channelId, messageId) => rpc.call("discord.deleteMessage", { channelId, messageId }),
+		addReaction: (channelId, messageId, emoji) => rpc.call("discord.addReaction", { channelId, messageId, emoji }),
+		addRole: (guildId, userId, roleId, reason) => rpc.call("discord.addRole", { guildId, userId, roleId, reason }),
+		removeRole: (guildId, userId, roleId, reason) => rpc.call("discord.removeRole", { guildId, userId, roleId, reason }),
+		getRoles: (guildId) => rpc.call("discord.getRoles", { guildId }),
+		// durationMs null clears an active timeout.
+		timeout: (guildId, userId, durationMs, reason) => rpc.call("discord.timeout", { guildId, userId, durationMs, reason }),
+		kick: (guildId, userId, reason) => rpc.call("discord.kick", { guildId, userId, reason }),
+		ban: (guildId, userId, reason, deleteMessageDays = 0) => rpc.call("discord.ban", { guildId, userId, reason, deleteMessageDays }),
+		unban: (guildId, userId, reason) => rpc.call("discord.unban", { guildId, userId, reason }),
+		createChannel: (guildId, options) => rpc.call("discord.createChannel", { ...options, guildId }),
+		editChannel: (channelId, options) => rpc.call("discord.editChannel", { ...options, channelId }),
+		deleteChannel: (channelId, reason) => rpc.call("discord.deleteChannel", { channelId, reason }),
+		setSlowmode: (channelId, seconds, reason) => rpc.call("discord.editChannel", { channelId, rateLimitPerUser: seconds, reason }),
+		// overwrites null removes the overwrite.
+		setPermissionOverwrite: (channelId, targetId, overwrites, reason) =>
+			rpc.call("discord.setPermissionOverwrite", { channelId, targetId, overwrites, reason }),
+		sendViaWebhook: (channelId, payload) => rpc.call("discord.sendViaWebhook", {
+			...(typeof payload === "string" ? { content: payload } : payload),
+			channelId,
+		}),
+		fetchInvites: (guildId) => rpc.call("discord.fetchInvites", { guildId }),
+	};
+
+	// AI proxy: Core holds the API key and enforces per-user/per-guild limits.
+	const aiProxy = {
+		// Resolves { text } or, when rate limited, { text: null, limited: "user"|"guild", retryAfterMs }.
+		generate: (guildId, userId, prompt, options = {}) =>
+			rpc.call("ai.generate", { guildId, userId, prompt, systemInstruction: options.systemInstruction }, 30000),
 	};
 
 	return {
 		client: null, // Never available in worker — use ctx.discord for Discord ops
 		discord: discordProxy,
+		ai: aiProxy,
 		db: dbProxy,
 		scheduler: schedulerProxy,
 		commands: null, // Commands are registered via ctx.registerCommand()

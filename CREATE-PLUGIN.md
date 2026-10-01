@@ -221,16 +221,21 @@ capability you didn't declare):
 | `storage:own-collection` | `ctx.db.getPluginConfig/updatePluginConfig/getAllPluginConfigs`, ticket methods, and all `ctx.defineModel()` model ops (`find`, `findOne`, `create`, `updateOne`, `deleteOne`, `countDocuments`, `save`) |
 | `storage:read-profiles` | `getUserProfile`, `getTopUsers`, `getUserRank`, `checkRoleRewards`, `getServerConfig`, `getServerStats`, `getUserPoints`, `getPointsLeaderboard` |
 | `storage:write-profiles` | `updateUserProfile`, `addXP`, `updateUserRoles`, `givePoints`, `updateServerConfig` |
-| `discord:SendMessages` | `ctx.discord.sendToChannel()` (sendMessage/sendRichMessage), `ctx.discord.sendDM()` |
-| `discord:EmbedLinks` | *(capability reserved — no `ctx.discord` accessor yet; embeds go via the `embeds` array of `sendToChannel`/`sendDM`)* |
-| `discord:AddReactions` | *(capability reserved — no `ctx.discord` accessor yet)* |
-| `discord:ManageMessages` | *(capability reserved — no `ctx.discord` accessor yet)* |
-| `discord:ModerateMembers` | *(capability reserved — no `ctx.discord` accessor yet)* |
-| `discord:KickMembers` | *(capability reserved — no `ctx.discord` accessor yet)* |
-| `discord:BanMembers` | *(capability reserved — no `ctx.discord` accessor yet)* |
-| `discord:ManageRoles` | *(capability reserved — no `ctx.discord` accessor yet)* |
-| `discord:GuildInfo` | `ctx.discord.getGuild()`, `ctx.discord.getMember()` |
+| `discord:SendMessages` | `ctx.discord.sendToChannel()`, `sendMessage()`, `sendDM()`, `editMessage()` (bot's own messages only) |
+| `discord:EmbedLinks` | `ctx.discord.sendEmbed()` (embeds also go via the `embeds` array of `sendToChannel`/`sendDM`) |
+| `discord:AddReactions` | `ctx.discord.addReaction()` |
+| `discord:ManageMessages` | `ctx.discord.deleteMessage()` |
+| `discord:ReadMessageHistory` | `ctx.discord.getMessage()` (attachments, embeds, components, reactions) |
+| `discord:ModerateMembers` | `ctx.discord.timeout()` (`durationMs: null` clears it) |
+| `discord:KickMembers` | `ctx.discord.kick()` |
+| `discord:BanMembers` | `ctx.discord.ban()`, `ctx.discord.unban()` |
+| `discord:ManageRoles` | `ctx.discord.addRole()`, `ctx.discord.removeRole()` |
+| `discord:ManageChannels` | `ctx.discord.createChannel()`, `editChannel()`, `setSlowmode()`, `deleteChannel()`, `setPermissionOverwrite()` |
+| `discord:ManageWebhooks` | `ctx.discord.sendViaWebhook()` (webhook token stays in Core) |
+| `discord:ManageGuild` | `ctx.discord.fetchInvites()` |
+| `discord:GuildInfo` | `ctx.discord.getGuild()`, `ctx.discord.getMember()`, `ctx.discord.getRoles()` |
 | `discord:ChannelInfo` | `ctx.discord.fetchChannel()` |
+| `ai:gemini-proxy` | `ctx.ai.generate()` — per-user cooldown + per-guild limit (see below) |
 | `hooks:subscribe` | `ctx.hooks.on()` |
 | `hooks:emit` | `ctx.hooks.emitHook()` |
 | `scheduler:cron` | `ctx.scheduler.schedule()`, `ctx.scheduler.cancel()` |
@@ -238,7 +243,7 @@ capability you didn't declare):
 | `system:env` / `system:bot-token` / `system:raw-client` | Escalations — see below |
 
 There are `discord` capability values with **no RPC method** (e.g.
-`ManageChannels`, `ManageGuild`, `ViewAuditLog`, `MentionEveryone`). The sandbox
+`ViewAuditLog`, `MentionEveryone`, voice). The sandbox
 can't perform those — a plugin needing them must run direct via
 `system:raw-client`. They still appear on the invite link if listed in
 `discordPermissions`.
@@ -328,6 +333,66 @@ const guild = await ctx.discord.getGuild(guildId);
 // Fetch member info
 const member = await ctx.discord.getMember(guildId, userId);
 // Returns: { id, user: { id, tag, username, avatarURL }, nickname, roles }
+```
+
+Moderation, roles, messages and channels (each needs the capability in the
+table above):
+
+```javascript
+await ctx.discord.addRole(guildId, userId, roleId, "Level 10 reward");
+await ctx.discord.removeRole(guildId, userId, roleId);
+await ctx.discord.addReaction(channelId, messageId, "✅");
+await ctx.discord.deleteMessage(channelId, messageId);
+await ctx.discord.timeout(guildId, userId, 10 * 60_000, "Spam"); // null clears
+await ctx.discord.kick(guildId, userId, "Reason");
+await ctx.discord.ban(guildId, userId, "Reason", 1);              // delete 1 day of messages
+await ctx.discord.unban(guildId, userId);
+
+const { messageId } = await ctx.discord.sendToChannel(channelId, { content: "Giveaway!", components: [...] });
+await ctx.discord.editMessage(channelId, messageId, { content: "Ended", components: [] });
+const msg = await ctx.discord.getMessage(channelId, messageId);  // attachments, reactions, ...
+
+const ch = await ctx.discord.createChannel(guildId, { name: "ticket-42", type: 0, parent: categoryId });
+await ctx.discord.setSlowmode(channelId, 10);
+await ctx.discord.setPermissionOverwrite(channelId, everyoneRoleId, { SendMessages: false }); // lock
+await ctx.discord.setPermissionOverwrite(channelId, everyoneRoleId, null);                   // remove
+await ctx.discord.sendViaWebhook(channelId, { content: "Anonymous confession", username: "Confessions" });
+const invites = await ctx.discord.fetchInvites(guildId); // [{ code, uses, inviterId, ... }]
+```
+
+**Buttons/selects on messages you post with `sendToChannel`:** prefix each
+`custom_id` with your plugin name and a colon (`"adb-plugin-giveaways:enter"`).
+Clicks are then routed to your `interactionCreate` handler with a live handle,
+so `interaction.update()` / `reply({ ephemeral: true })` work — even after a
+bot restart.
+
+### ctx.ai — Gemini proxy (`ai:gemini-proxy`)
+
+The API key never leaves Core. Each call is limited by a **per-user cooldown**
+(default 10s) under a **per-guild limit** (20 requests/minute shared by all
+plugins), so one member can't exhaust the shared quota.
+
+```javascript
+const res = await ctx.ai.generate(guildId, userId, message.content, {
+  systemInstruction: "You are a helpful assistant for this server.",
+});
+if (res.limited) {
+  // "user" = this member is on cooldown, "guild" = server-wide limit hit
+  return ctx.discord.sendToChannel(channelId, `Please wait ${Math.ceil(res.retryAfterMs / 1000)}s.`);
+}
+await ctx.discord.sendToChannel(channelId, res.text);
+```
+
+Let admins tune the cooldown from the dashboard by declaring this setting in
+your `plugin.json` (the broker reads it from your plugin's guild settings;
+`0` disables the per-user cooldown):
+
+```json
+"settings": {
+  "schema": [
+    { "key": "ai_user_cooldown_seconds", "type": "number", "label": "Per-user AI cooldown (seconds)", "default": 10, "min": 0, "max": 3600 }
+  ]
+}
 ```
 
 ### ctx.defineModel — Namespaced database models
