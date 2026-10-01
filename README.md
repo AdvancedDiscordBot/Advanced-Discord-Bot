@@ -1,474 +1,407 @@
-# 🤖 Advanced Discord Bot (ADB)
-
 <div align="center">
 
-![Discord Bot](https://img.shields.io/badge/Discord-Bot-7289DA?style=for-the-badge&logo=discord&logoColor=white)
-![Node.js](https://img.shields.io/badge/Node.js-20+-43853D?style=for-the-badge&logo=node.js&logoColor=white)
-![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-4EA94B?style=for-the-badge&logo=mongodb&logoColor=white)
-![Gemini AI](https://img.shields.io/badge/Gemini-AI-4285F4?style=for-the-badge&logo=google&logoColor=white)
-![Plugin Ready](https://img.shields.io/badge/Plugins-Ready-6A5ACD?style=for-the-badge)
-![License](https://img.shields.io/badge/License-AGPL--3.0-blue?style=for-the-badge)
+# 🤖 Advanced Discord Bot
 
-<br/>
+### Self-hosted Discord bot platform with a plugin marketplace
 
-<a href="https://discord.com/oauth2/authorize?client_id=1522106470018191532&permissions=8&integration_type=0&scope=bot+applications.commands">
-  <img src="screenshots/invite-button.svg" alt="Invite Bot" height="40" />
-</a>
-<a href="https://adb.gollabharath.me">
-  <img src="screenshots/dashboard-button.svg" alt="Dashboard" height="40" />
-</a>
+[![Build](https://img.shields.io/github/last-commit/AdvancedDiscordBot/Advanced-Discord-Bot?style=flat-square)](https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot/commits/beta)
+[![License](https://img.shields.io/github/license/AdvancedDiscordBot/Advanced-Discord-Bot?style=flat-square)](LICENSE)
+[![Node](https://img.shields.io/badge/node-20%2B-43853D?style=flat-square)](https://nodejs.org)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](CONTRIBUTING.md)
+[![Plugins](https://img.shields.io/badge/plugins-16%20published-6A5ACD?style=flat-square)](https://github.com/AdvancedDiscordBot/registry)
 
-<br/>
+[**Get Started**](#-quick-start) · [**Plugins**](#-official-plugins) · [**Build a Plugin**](#-build-your-own-plugin) · [**Docs**](CONTRIBUTING.md#-documentation-map) · [**Report a Bug**](https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot/issues/new?template=bug_report.md)
 
-**🚀 ADB is a self-hosted Discord bot platform built to become whatever your server needs.**  
-**🔌 Install plugins • 🧩 Build your own modules • 🖥️ Manage everything from a dashboard • 🔓 Own the stack**
-
-[![Features](https://img.shields.io/badge/-Features-4CAF50?style=for-the-badge&logo=sparkles&logoColor=white)](#-features)
-[![Installation](https://img.shields.io/badge/-Installation-FF9800?style=for-the-badge&logo=visualstudiocode&logoColor=white)](#-quick-start)
-[![Commands](https://img.shields.io/badge/-Commands-1976D2?style=for-the-badge&logo=terminal&logoColor=white)](#commands)
-[![Plugins](https://img.shields.io/badge/-Plugin%20Docs-6A5ACD?style=for-the-badge)](./CREATE-PLUGIN.md)
-[![Contributing](https://img.shields.io/badge/Contributing-Guidelines-blue?style=for-the-badge)](./CONTRIBUTING.md)
+<img src="screenshots/MainMenu.png" alt="ADB dashboard" width="85%" />
 
 </div>
 
 ---
 
-## 📊 Project Statistics
+## 📖 Contents
 
-<div align="center">
-
-<table>
-<tr>
-<td align="center">
-<img src="https://img.shields.io/github/stars/AdvancedDiscordBot/Advanced-Discord-Bot?style=social" alt="GitHub Stars">
-<br><b>Stars</b>
-</td>
-<td align="center">
-<img src="https://img.shields.io/github/forks/AdvancedDiscordBot/Advanced-Discord-Bot?style=social" alt="GitHub Forks">
-<br><b>Forks</b>
-</td>
-<td align="center">
-<img src="https://img.shields.io/github/issues/AdvancedDiscordBot/Advanced-Discord-Bot" alt="GitHub Issues">
-<br><b>Open Issues</b>
-</td>
-<td align="center">
-<img src="https://img.shields.io/github/issues-pr/AdvancedDiscordBot/Advanced-Discord-Bot" alt="GitHub Pull Requests">
-<br><b>Pull Requests</b>
-</td>
-<td align="center">
-<img src="https://img.shields.io/github/contributors/AdvancedDiscordBot/Advanced-Discord-Bot" alt="GitHub Contributors">
-<br><b>Contributors</b>
-</td>
-</tr>
-</table>
-
-</div>
-
-## 👑 Maintainer
-
-| Role | Name | GitHub |
-| ---- | ---- | ------ |
-| 🛠️ Maintainer | DeadIndian | [@DeadIndian](https://github.com/DeadIndian) |
-
-ADB is not participating in any open source contribution program at the moment. Contributions are reviewed through regular GitHub issues and pull requests.
-
+- [Why](#-why)
+- [Quick Start](#-quick-start)
+- [Official Plugins](#-official-plugins)
+- [Build Your Own Plugin](#-build-your-own-plugin)
+- [Contributing](#-contributing)
+- [How It Works](#-how-it-works)
+- [Configuration](#-configuration)
+- [Testing](#-testing)
+- [Docs](#-docs)
 
 ---
 
-## 🖼️ Screenshots
+## 💡 Why
 
-### 🎨 Feature Showcase
+A Discord bot you actually own. The source is AGPL, your data stays in your
+MongoDB, and the features you don't want are plugins you can simply not install.
 
-<div align="center">
+**Core ships no user-facing commands on purpose.** Moderation, levels, welcome
+messages — all of that is a plugin. That boundary is why a community plugin can
+never take down your bot process, and it is why adding a feature to your server
+doesn't mean forking the bot.
 
-<table>
-<tr>
-<td width="33%">
-<img src="screenshots/Birthday.png" alt="Birthday System" width="100%">
-<i>🎂 Birthday System</i>
-</td>
-<td width="33%">
-<img src="screenshots/DailyPoints.png" alt="Daily Points" width="100%">
-<i>💰 Daily Rewards</i>
-</td>
-<td width="33%">
-<img src="screenshots/FeedbackForm.png" alt="Feedback Form" width="100%">
-<i>📝 Feedback Collection</i>
-</td>
-</tr>
-<tr>
-<td width="33%">
-<img src="screenshots/FeedBackSuggestion.png" alt="Feedback Suggestions" width="100%">
-<i>💡 Suggestions</i>
-</td>
-<td width="33%">
-<img src="screenshots/LeaderboardPong.png" alt="Leaderboard" width="100%">
-<i>🏆 Leaderboards</i>
-</td>
-<td width="33%">
-<img src="screenshots/MainMenu.png" alt="Main Menu" width="100%">
-<i>📋 Main Menu</i>
-</td>
-</tr>
-<tr>
-<td width="33%">
-<img src="screenshots/Memes.png" alt="Memes System" width="100%">
-<i>😂 Memes</i>
-</td>
-<td width="33%">
-<img src="screenshots/PerformanceDashboard.png" alt="Performance Dashboard" width="100%">
-<i>📊 Performance Dashboard</i>
-</td>
-<td width="33%">
-<img src="screenshots/RemainderSetter.png" alt="Reminder Setter" width="100%">
-<i>⏰ Reminders</i>
-</td>
-</tr>
-</table>
-
-</div>
+- **16 published plugins**, installed from the dashboard or npm
+- **Per-server plugin toggles** — every npm plugin is off until a server admin
+  enables it
+- **Capability-gated plugins** — each declares exactly what it may use; the
+  runtime denies the rest
+- **Optional worker isolation** — plugins can run in a separate thread with a
+  gated RPC surface instead of the main process
+- **Plugin marketplace** — registry-backed discovery and install from the dashboard
 
 ---
 
-## ✨ Why Choose ADB?
+## 🚀 Quick Start
 
-🔌 **Plugin-first foundation** - Add commands, dashboards, scheduled jobs, models, and hooks without editing core code  
-🖥️ **Dashboard-ready** - Built around a web control plane for server admins and plugin management  
-🛒 **Marketplace-ready** - Discover and install community plugins from a registry-backed marketplace  
-🎯 **General or specialized** - Run it as an all-in-one community bot or strip it down into a focused custom bot  
-🔓 **Self-hosted ownership** - Your bot, your data, your infrastructure, your rules  
-🛡️ **Privacy-first** - Data stays in your MongoDB instance instead of a third-party SaaS platform  
-🤖 **AI capable** - Google Gemini integration for assistant and FAQ-style workflows  
-⚡ **Modern Discord stack** - Discord.js v14, Node.js, MongoDB, Fastify/Express pieces, and hot-reloadable plugins  
+Requires **Node.js 20+** and a **MongoDB** you control.
 
----
+### 1. Create a Discord application
 
-## 🎯 Features
+At the [Discord Developer Portal](https://discord.com/developers/applications),
+create an application, add a bot, and reset its token. On the **Bot** page enable
+**Server Members Intent**, **Message Content Intent** and **Presence Intent** —
+the client requests all three and will fail to connect without them.
 
-ADB ships as a **lean core plus a dashboard**. Everything user-facing —
-moderation, levels, economy, giveaways, logging, and more — is delivered by
-**plugins** you install from the marketplace, so you run only what your server
-needs. See [Plugins & Marketplace](#-plugins--marketplace).
-
-### **🔌 Plugin Platform**
-
-- Local plugins from `plugins/` and npm packages (`adb-plugin-*`)
-- Plugin manifests with metadata, config schemas, capabilities, and restart flags
-- Command registration and command overrides
-- Event listeners, scheduled jobs, hook bus, and namespaced database models
-- Sandboxed-by-default isolation — plugins run in a worker and reach Discord/DB
-  only through capability-gated RPC
-
-### **🖥️ Administration Dashboard**
-
-- Discord OAuth-based admin access
-- Guild picker for server-specific management
-- Multi-tenant RBAC: derived HOST_OWNER / GUILD_ADMIN / MEMBER tiers, per-plugin dashboard permission keys, and an **Access** page to grant Discord roles fine-grained dashboard access
-- Per-guild plugin enable gate — installed plugins are off in each guild until an admin turns them on
-- Plugin install, enable, disable, and status views
-- Auto-generated settings pages from each plugin's config schema
-- Member-facing portal and per-plugin dashboards
-
-### **🤖 AI Assistant** *(optional, via Gemini)*
-
-- Google Gemini-powered responses when `GEMINI_API_KEY` is set
-- Configurable AI channels and behavior
-- Rate limiting and graceful failure handling
-
-### **🧩 Official Plugins**
-
-Install from the [registry](https://github.com/AdvancedDiscordBot/registry) —
-moderation, automod, aegis (anti-raid/spam/alt), levels & XP, giveaways,
-counting, confessions, autorole, reaction-roles, invite-tracker, reminders,
-server-logs, temp voice, welcome, custom commands, to-do, and more.
-
----
-
-## Commands
-
-ADB has **no built-in slash commands** — commands come from the plugins you
-install. Commands sync per guild at startup and after supported plugin changes.
-For an explicit deployment, set `CLIENT_ID` and `GUILD_ID`, inspect
-`node deploy-commands.js --dry-run`, then run `npm run deploy`.
-The deploy command never overwrites global commands and refuses an empty command
-set unless `--allow-empty` is explicitly supplied.
-
-For example, installing `adb-plugin-moderation` adds `/ban`, `/kick`,
-`/timeout`, `/warn`, `/purge`, and ticket commands; `adb-plugin-levels` adds
-`/level` and `/leaderboard`. Temporary voice controls use `/voice <subcommand>`
-so they do not collide with moderation's `/lock` and `/unlock`.
-See each plugin's own README for its command
-reference, and [CREATE-PLUGIN.md](./CREATE-PLUGIN.md) to build your own.
-
----
-
-## Quick Start
-
-### Prerequisites
-
-- **Node.js** v20.0.0 or higher (Node 22 or 24 recommended)
-- **MongoDB** database, local or cloud
-- **Discord Bot Token** from the [Discord Developer Portal](https://discord.com/developers/applications)
-- **Google Gemini API Key** from [Google AI Studio](https://makersuite.google.com/app/apikey), optional unless AI features are enabled
-
-### Option 1: Local Setup
-
-1. **Clone the repository**
-
-   ```bash
-   git clone https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot.git
-   cd Advanced-Discord-Bot
-   ```
-
-2. **Install dependencies**
-
-   ```bash
-   npm install
-   ```
-
-3. **Configure environment variables**
-
-   Copy `.env.example` to `.env` and fill in your values — it documents every
-   variable. The essentials:
-
-   ```env
-   DISCORD_TOKEN=your_discord_bot_token_here
-   CLIENT_ID=your_bot_client_id_here
-    GUILD_ID=your_test_guild_id_here          # required for the manual deploy command
-   MONGODB_URI=your_mongodb_connection_string
-   GEMINI_API_KEY=your_gemini_api_key_here   # optional: only for AI features
-
-   # Dashboard / internal API (needed only if you use the web dashboard)
-   BOT_API_ENABLED=true
-   BOT_API_PORT=3210
-   DISCORD_OAUTH_CLIENT_ID=your_oauth_client_id
-   DISCORD_OAUTH_CLIENT_SECRET=your_oauth_client_secret
-   DISCORD_OAUTH_REDIRECT_URI=http://localhost:3210/auth/discord/callback
-   DASHBOARD_REDIRECT_URL=http://localhost:3000
-   SESSION_SECRET=replace_with_a_long_random_secret
-   # Comma-separated Discord user IDs of host owners — the top RBAC tier and the
-   # only one allowed to install/uninstall plugins. Set at least one.
-   OWNER_IDS=your_discord_user_id
-   # Optional: your plugin marketplace registry (see REGISTRY-SETUP.md)
-   PLUGIN_REGISTRY_URL=
-   ```
-
-    See `.env.example` for the full list of options.
-
-    Enable **Server Members**, **Message Content**, and **Presence** gateway
-    intents in the Discord Developer Portal to match the client's requested
-    intents. Invite the bot with the `bot` and `applications.commands` scopes.
-
-4. **Deploy slash commands**
-
-   ```bash
-   npm run deploy
-   ```
-
-5. **Start the bot**
-
-   ```bash
-    npm start
-    ```
-
-    An incomplete optional dashboard configuration disables the API without
-    preventing bot startup. `SIGINT` and `SIGTERM` stop tasks, plugins, workers,
-    Discord and database connections. Core schedules use UTC. Welcome messages
-    come from the configured welcome plugin, not an unsolicited core fallback.
-
-### Verification
-
-See [verification and local plugin setup](docs/VERIFICATION.md) for test commands,
-the disposable-MongoDB integration check, and using edited sibling plugins rather
-than older npm releases. Music requires an external Lavalink v4 server; a successful
-offline test is not proof of live voice playback.
-
-### Option 2: Docker Setup
-
-1. **Clone the repository**
-
-   ```bash
-   git clone https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot.git
-   cd Advanced-Discord-Bot
-   ```
-
-2. **Configure environment variables**
-
-   Create a `.env` file (see `.env.example` for the full list). For the
-   bundled MongoDB container, point `MONGODB_URI` at the `mongo` service:
-
-   ```env
-   DISCORD_TOKEN=your_discord_bot_token_here
-   CLIENT_ID=your_bot_client_id_here
-   GUILD_ID=your_test_guild_id_here
-   # Docker: "mongo" is the compose service name; creds must match MONGO_INITDB_ROOT_* below
-   MONGO_INITDB_ROOT_USERNAME=adb
-   MONGO_INITDB_ROOT_PASSWORD=pick_a_long_random_password
-   MONGODB_URI=mongodb://adb:pick_a_long_random_password@mongo:27017/discord-bot?authSource=admin
-   GEMINI_API_KEY=your_gemini_api_key_here
-   SESSION_SECRET=replace_with_a_long_random_secret
-   ```
-
-3. **Deploy slash commands**
-
-   ```bash
-   docker compose run --rm bot npm run deploy
-   ```
-
-4. **Build and start**
-
-   ```bash
-   docker compose up --build -d
-   ```
-
-5. **View logs**
-
-   ```bash
-   docker compose logs -f bot
-   ```
-
----
-
-## 🌐 Deployment
-
-ADB can run on Render, Railway, Fly.io, a VPS, or any host that supports Node.js and MongoDB access.
-
-Recommended production steps:
-
-1. Set all required environment variables in your host dashboard.
-2. Use `npm install` as the build command.
-3. Use `npm start` as the start command.
-4. Run `npm run deploy` once after first deployment or after slash command changes.
-5. Point the dashboard URL and OAuth callback URLs at your deployed domain.
-
-Suggested service name:
-
-```text
-Advanced Discord Bot
-```
-
----
-
-## 🔧 Database Setup
-
-### MongoDB Options
-
-**Option 1: MongoDB Atlas**
-
-1. Create a cluster at [MongoDB Atlas](https://cloud.mongodb.com)
-2. Create a database user
-3. Allow your deployment host in Network Access
-4. Copy the connection string into `MONGODB_URI`
-
-**Option 2: Local MongoDB**
+### 2. Get the code
 
 ```bash
-mongod --dbpath ./data
+git clone https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot.git
+cd Advanced-Discord-Bot
+npm install
 ```
 
-**Option 3: Docker Compose**
+### 3. Configure it
 
-Use the included `docker-compose.yml` to run MongoDB alongside the bot.
+```bash
+cp .env.example .env
+```
 
-### Database Features
+Minimum viable `.env`:
 
-- Automatic schema creation
-- Persistent guild, user, ticket, economy, XP, birthday, and plugin config data
-- Plugin-specific model namespacing
-- Backup-friendly MongoDB storage
+```env
+DISCORD_TOKEN=your_bot_token
+CLIENT_ID=your_application_id
+GUILD_ID=your_test_server_id
+MONGODB_URI=mongodb://127.0.0.1:27017/adb_dev
+OWNER_IDS=your_discord_user_id
+SESSION_SECRET=openssl-rand-hex-32-output
+```
 
----
+`OWNER_IDS` is the top privilege tier — only these users can install or uninstall
+plugins. `GUILD_ID` makes command registration instant in your own server instead
+of Discord's global sync (which can take an hour).
 
-## 🔌 Plugins & Marketplace
+### 4. Run it
 
-ADB is designed to be extended. A plugin can:
+```bash
+npm run deploy    # register slash commands
+npm start
+```
 
-- Add slash commands
-- Override existing commands
-- Listen to Discord events
-- Register scheduled jobs
-- Define MongoDB models
-- Hook into bot flows
-- Expose its own dashboard
-- Provide a settings schema for generated admin UI
+Confirm it is alive:
 
-Start here:
+```bash
+curl -s http://localhost:3000/health     # -> {"status":"ok"}
+```
 
-- [CREATE-PLUGIN.md](./CREATE-PLUGIN.md) - build a plugin
-- [REGISTRY-SETUP.md](./REGISTRY-SETUP.md) - create or operate a plugin registry
-- [PLUGINS-ROADMAP.md](./PLUGINS-ROADMAP.md) - platform architecture and roadmap
+### Docker
 
----
+```bash
+docker compose up -d --build
+```
 
-## 🛠️ Technical Architecture
+Configuration lives in `.env`; the compose file pins the project name and ports
+so volumes survive a rebuild. Never add `-v` to a deploy — that wipes the
+database.
 
-### **Modern Tech Stack**
-
-- **Discord.js v14** - Discord API wrapper
-- **Node.js 20+** - JavaScript runtime
-- **MongoDB + Mongoose** - Persistent data and schemas
-- **Google Gemini AI** - AI assistant features
-- **Fastify/Express** - Dashboard and internal API surfaces
-- **React** - Administration dashboard
-
-### **Core Runtime**
-
-- Dynamic command and event loading
-- Plugin Manager and Hook Bus
-- Scheduled jobs via `node-cron`
-- MongoDB-backed guild and user configuration
-- Dashboard API for plugin and guild management
-
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for implementation details.
+> **Full walkthrough, including the dashboard and OAuth:** [`LOCAL-SETUP.md`](LOCAL-SETUP.md)
 
 ---
 
-## 📞 Support & Community
+## 🔌 Official Plugins
 
-- 📖 **Documentation** - Start with this README and the linked docs
-- 🐛 **Bug Reports** - Open a GitHub issue
-- 💡 **Feature Requests** - Open an issue with the feature proposal
-- 🔌 **Plugin Ideas** - Discuss or submit plugin-focused issues and PRs
-- 💬 **Direct Contact** - Email [gollabharath2007@gmail.com](mailto:gollabharath2007@gmail.com) or reach out via Discord to **@deadindian**
+Install from the dashboard's marketplace, or with npm:
+
+```bash
+npm install adb-plugin-moderation
+```
+
+npm-installed plugins are **off in every server** until that server's admin
+enables them. See [Build Your Own Plugin](#-build-your-own-plugin) for the
+authoring side.
+
+| Plugin | Repo | npm | Latest | What it does |
+|---|---|---|---|---|
+| Aegis | [`aegis`](https://github.com/AdvancedDiscordBot/adb-plugin-aegis) | `adb-plugin-aegis` | 1.2.1 | Anti-raid, anti-spam, anti-link and anti-alt detection, each module toggled separately |
+| Automod | [`automod`](https://github.com/AdvancedDiscordBot/adb-plugin-automod) | `adb-plugin-automod` | 1.3.3 | Rule-based filtering for spam, links, words, caps, mentions, emoji and invites |
+| Autorole | [`autorole`](https://github.com/AdvancedDiscordBot/adb-plugin-autorole) | `adb-plugin-autorole` | 1.3.0 | Assign roles on join, for bots, at an XP level, after a delay, or temporarily |
+| Confessions | [`confessions`](https://github.com/AdvancedDiscordBot/adb-plugin-confessions) | `adb-plugin-confessions` | 1.3.1 | Anonymous webhook posts with moderation queue, cooldowns and a blocklist |
+| Counting | [`counting`](https://github.com/AdvancedDiscordBot/adb-plugin-counting) | `adb-plugin-counting` | 1.3.1 | Sequential counting game with turn enforcement, milestones and per-user stats |
+| Custom Commands | [`custom-commands`](https://github.com/AdvancedDiscordBot/adb-plugin-custom-commands) | `adb-plugin-custom-commands` | 1.3.1 | Admin-defined slash, text and context-menu commands with variable templates |
+| Giveaways | [`giveaways`](https://github.com/AdvancedDiscordBot/adb-plugin-giveaways) | `adb-plugin-giveaways` | 1.3.1 | Scheduled giveaways with entry buttons, role requirements, rerolls and auto-end |
+| Invite Tracker | [`invite-tracker`](https://github.com/AdvancedDiscordBot/adb-plugin-invite-tracker) | `adb-plugin-invite-tracker` | 1.4.0 | Per-user invite attribution, leaderboard, fake-join detection and milestone roles |
+| Levels & XP | [`levels`](https://github.com/AdvancedDiscordBot/adb-plugin-levels) | `adb-plugin-levels` | 1.3.1 | XP from message activity, levels, leaderboards and role rewards on level-up |
+| Moderation | [`moderation`](https://github.com/AdvancedDiscordBot/adb-plugin-moderation) | `adb-plugin-moderation` | 1.3.1 | Ban, kick, timeout, warn, purge, slowmode, lock, tickets and numbered case log |
+| Reaction Roles | [`reaction-roles`](https://github.com/AdvancedDiscordBot/adb-plugin-reaction-roles) | `adb-plugin-reaction-roles` | 2.0.0 | Self-assignable roles via emoji reactions, buttons or select menus |
+| Reminders | [`reminders`](https://github.com/AdvancedDiscordBot/adb-plugin-reminders) | `adb-plugin-reminders` | 1.4.0 | `/remind set|list|cancel`, delivered by DM with a channel fallback and retry backoff |
+| Server Logs | [`server-logs`](https://github.com/AdvancedDiscordBot/adb-plugin-server-logs) | `adb-plugin-server-logs` | 1.3.1 | Audit logging by category for member, message, moderation, voice and channel events |
+| Temp Voice | [`tempvoice`](https://github.com/AdvancedDiscordBot/adb-plugin-tempvoice) | `adb-plugin-tempvoice` | 1.3.0 | Join-to-create voice rooms with name templates, limits, permit/deny and auto-delete |
+| To-Do | [`todo`](https://github.com/AdvancedDiscordBot/adb-plugin-todo) | `adb-plugin-todo` | 1.4.0 | Per-user task lists with paging, per-guild caps and status filters |
+| Welcome | [`welcome`](https://github.com/AdvancedDiscordBot/adb-plugin-welcome) | `adb-plugin-welcome` | 2.1.1 | Welcome and goodbye messages, canvas image cards, DMs, roles and social links |
+
+Not in the table: [`adb-plugin-template`](https://github.com/AdvancedDiscordBot/adb-plugin-template)
+(the authoring scaffold, deliberately never published) and
+[`adb-plugin-music`](https://github.com/AdvancedDiscordBot/adb-plugin-music)
+(a complete Lavalink music plugin that is not yet published — see
+[issue #13](https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot/issues/13)).
+
+### Trust and isolation — read before installing
+
+Each plugin's `plugin.json` declares a `capabilities` block, and the runtime
+denies any RPC the plugin did not declare. A plugin requesting
+`system:raw-client` is the explicit, owner-approved exception: it runs in the
+bot's main process with full host access, and the dashboard shows a risk card
+before you approve it.
+
+Most first-party plugins need this today, so **install only code you have
+reviewed**. Worker separation is not an operating-system sandbox. Tracked in
+[#39](https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot/issues/39).
 
 ---
+
+## 🧩 Build Your Own Plugin
+
+**Plugins live in their own repository.** This repo is the platform. If you
+arrange a new command folder in here, you have built the wrong thing — see
+[`AGENTS.md`](AGENTS.md).
+
+```bash
+git clone https://github.com/AdvancedDiscordBot/adb-plugin-template.git
+mv adb-plugin-template adb-plugin-myplugin
+cd adb-plugin-myplugin
+
+# rename the package everywhere it is referenced
+grep -rl 'adb-plugin-template' . --exclude-dir=.git \
+  | xargs sed -i 's/adb-plugin-template/adb-plugin-myplugin/g'
+
+npm install && npm test        # 14 tests, no Discord or MongoDB needed
+```
+
+`adb-plugin-template` ships a working harness, a manifest-v2 example and a
+`README.md` that is the authoritative description of the plugin API. Read its
+README before writing anything.
+
+A plugin is one function:
+
+```js
+async function load(ctx) {
+  ctx.registerCommand({
+    data: { name: "hello", description: "Say hello" },
+    async execute(interaction) {
+      await interaction.reply("Hello from my plugin!");
+    },
+  });
+}
+module.exports = { load };
+```
+
+Then, to run it inside a real bot:
+
+```bash
+cd /path/to/Advanced-Discord-Bot
+npm install --no-save --package-lock=false ../adb-plugin-myplugin
+npm run deploy && npm start
+```
+
+### Before you open a PR
+
+A plugin PR is accepted when it does these things, in this order:
+
+1. **Runs.** `npm test` passes in your plugin repo. This is checked first and
+   everything else is secondary — a PR that does not run is not reviewable.
+2. **Works in both load modes.** Isolated (worker) and direct (main process).
+   Anything you write must work in both, or fail loudly and readably in the one it
+   does not support.
+3. **Declares what it uses.** Capabilities, `engines`, `discordPermissions` and
+   the per-guild `settings` schema. An undeclared RPC call is denied at runtime,
+   so a missing declaration is a broken plugin, not a warning.
+4. **Handles absence.** `getUser()` and `getChannel()` return `null` for a
+   departed member or deleted channel **even for a required option**. Every
+   resolved option gets a null check.
+5. **Respects Discord's limits.** Content 2000, embed description 4096, 25 fields,
+   6000 total embed text, 100 messages per bulk delete, 3-second interaction
+   window.
+6. **Has tests for the bug it fixes.** A regression test that fails before your
+   change and passes after it.
+7. **Is testable offline.** No live Discord, MongoDB or network in `npm test`.
+   Ship a mock `ctx` — copy the template's `test/mock-ctx.js` rather than inventing
+   one.
+8. **Bumps `version`** in both `plugin.json` and `package.json`: patch for fixes,
+   minor for new commands or settings, major for breaking manifest or API changes.
+9. **Is readable.** Short commit subjects in Conventional Commit form. A reviewer
+   should be able to tell what changed from the subject line alone.
+
+**Full guide:** [`CREATE-PLUGIN.md`](CREATE-PLUGIN.md)
+**Template:** [`adb-plugin-template`](https://github.com/AdvancedDiscordBot/adb-plugin-template)
+
+---
+
+## 🤝 Contributing
+
+Read [`CONTRIBUTING.md`](CONTRIBUTING.md) first. If you are an AI coding agent,
+read [`AGENTS.md`](AGENTS.md) — it contains hard rules, including not touching
+this repository for plugin work.
+
+### AI assistance: allowed, low-effort volume: not
+
+Using an AI assistant to help you write, review or refactor code is **welcome**.
+What is not welcome is a stream of unreviewed, unreproduced pull requests.
+
+The bar is the same for a human or an agent:
+
+- **You must have run the code.** Not "it should work" — you ran it, you saw the
+  output, you pasted it. A PR whose author cannot describe the observed behaviour
+  will be closed.
+- **You must understand your diff.** If you cannot explain why each changed line
+  is there, do not open the PR.
+- **One change per PR.** No drive-by reformatting, no unrelated "while I was in
+  there" edits.
+- **No speculative PRs.** "I think this might be a problem" is an issue, not a
+  pull request.
+- **No reformatting or boilerplate commits** generated to look busy.
+- **Describe the reasoning, not the diff.** A body that restates `git diff` adds
+  nothing. Say what was broken, what you observed, and why this is the right fix.
+
+PRs that are machine-generated without the author having run or understood the
+change will be closed with a short explanation and not reviewed further. This is
+about accountability, not about tools — a genuinely good AI-assisted PR is
+indistinguishable from a good human one, and it is welcome.
+
+Report a security vulnerability through [`SECURITY.md`](SECURITY.md), not as a
+public issue.
+
+---
+
+## ⚙️ How It Works
+
+```
+Discord Gateway ─┐
+                 ├─► PluginManager ─► hooks ─► scheduler ─► dashboard
+MongoDB ─────────┘        │
+                          ├─► isolated plugin  (worker_thread, gated RPC)
+                          └─► direct plugin     (main process, raw client)
+```
+
+- **`core/PluginManager`** discovers plugins from `node_modules/adb-plugin-*/` and
+  the local `plugins/`, sorts them by declared dependencies, and registers their
+  commands and events.
+- **`core/rpc/`** brokers the resource surface an isolated plugin can reach.
+  Every call is checked against that plugin's declared capabilities.
+- **`core/PluginContext`** is the only API a plugin gets. It is sealed — a plugin
+  cannot mutate the runtime context.
+- **Per-guild gating** is applied on the hot path for events, hooks and commands,
+  so an npm plugin that a server has not enabled does no work there.
+- **`plugins/administration`** is the dashboard host and the only plugin inside
+  this repository.
+
+More: [`ARCHITECTURE.md`](ARCHITECTURE.md) · [`DOCUMENTATION.md`](DOCUMENTATION.md)
+
+---
+
+## 🔧 Configuration
+
+Every variable the code actually reads. `.env` is gitignored — never commit it.
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `DISCORD_TOKEN` | yes | Bot token |
+| `CLIENT_ID` | for deploy | Application id, used to register commands |
+| `GUILD_ID` | recommended | Your test server; makes command sync instant |
+| `MONGODB_URI` | yes | Database connection string |
+| `OWNER_IDS` | yes | Comma-separated user ids allowed to install/uninstall plugins |
+| `SESSION_SECRET` | for dashboard | Signs dashboard sessions |
+| `PLUGIN_ISOLATION` | no | `false` loads every plugin in the main process. Default is isolation on |
+| `BOT_API_ENABLED` | no | Serves the HTTP API and dashboard |
+| `BOT_API_PORT` | no | API port (default `3000`) |
+| `BOT_API_BASE_URL` | no | Externally reachable API base URL |
+| `DISCORD_OAUTH_CLIENT_ID` | for dashboard | OAuth client id |
+| `DISCORD_OAUTH_CLIENT_SECRET` | for dashboard | OAuth client secret |
+| `DISCORD_OAUTH_REDIRECT_URI` | for dashboard | OAuth callback URL |
+| `DASHBOARD_REDIRECT_URL` | for dashboard | Where to send users after login |
+| `CORS_ORIGIN` | no | Allowed dashboard origin |
+| `PLUGIN_REGISTRY_URL` | no | Marketplace registry JSON URL |
+| `DEBUG` | no | Verbose logging |
+| `TRIAL_MODE` | no | Disables destructive admin actions |
+| `INVITE_FORCE_ADMIN` | no | Grants admin to the bot on join |
+| `WATCHDOG_PORT` | no | Dev-only watchdog control API port |
+
+---
+
+## 🧪 Testing
+
+```bash
+npm test                                    # 483 platform tests
+npm run test:dashboard                      # dashboard runtime checks
+npm --prefix plugins/administration/web run build
+```
+
+The full plugin-runtime check boots the real bot with real Mongoose models
+against a disposable database and exercises every plugin's registered commands
+and event handlers:
+
+```bash
+docker run -d --name adb-verify-mongo -p 127.0.0.1:32768:27017 \
+  --tmpfs /data/db:rw,size=512m mongo:7 --quiet --bind_ip_all
+
+ADB_PLUGIN_WORKSPACE=/path/to/your/plugin/checkouts \
+ADB_INTEGRATION_MONGODB_URI=mongodb://127.0.0.1:32768/adb_verify_plugins \
+npm run test:integration
+
+docker rm -f adb-verify-mongo
+```
+
+It refuses any MongoDB that is not on loopback with a database name starting
+`adb_verify_`, and drops only the database it created.
+
+**Offline checks do not prove live behaviour.** Gateway authorisation, channel
+permissions, role hierarchy, OAuth redirects and audio playback still need a
+human in a real server. The check also has
+[known mock limitations](docs/VERIFICATION.md#known-limitations-of-the-integration-check)
+worth reading before you debug a failure.
+
+---
+
+## 📚 Docs
+
+| Document | Covers |
+|---|---|
+| [`AGENTS.md`](AGENTS.md) | Hard rules for AI coding agents |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to contribute, what gets accepted |
+| [`LOCAL-SETUP.md`](LOCAL-SETUP.md) | Running the bot and a plugin locally |
+| [`CREATE-PLUGIN.md`](CREATE-PLUGIN.md) | Plugin authoring guide |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Runtime architecture |
+| [`DOCUMENTATION.md`](DOCUMENTATION.md) | Commands and plugin reference |
+| [`docs/VERIFICATION.md`](docs/VERIFICATION.md) | Test commands and their limits |
+| [`REGISTRY-SETUP.md`](REGISTRY-SETUP.md) | Running a plugin registry |
+| [`SECURITY.md`](SECURITY.md) | Reporting a vulnerability |
+
+---
+
+## 👤 Maintainer
+
+**DeadIndian** — [@DeadIndian](https://github.com/DeadIndian)
+
+---
+
+<div align="center">
 
 ## 📄 License
 
-This project is licensed under the **GNU Affero General Public License v3.0**. See [LICENSE](LICENSE) for details.
+**AGPL-3.0-only** — see [LICENSE](LICENSE). If you run a modified version of this
+bot as a service, you must publish your modifications.
 
-<div align="center">
-
-![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue?style=for-the-badge)
-
-</div>
-
-## 🏆 Acknowledgments
-
-- **Discord Developer Community** - For tooling, examples, and ecosystem knowledge
-- **Open Source Contributors** - For improving the project through issues and PRs
-- **Plugin Authors** - For turning ADB into more than a single-purpose bot
-- **Everyone self-hosting it** - For shaping the project through real-world usage
-
----
-
-<div align="center">
-
-## 🚀 Build The Bot Your Server Actually Needs
-
-### Self-hosted • Plugin-ready • Dashboard-managed
-
-[🌟 Star this repo](https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot) • [🍴 Fork & Deploy](https://github.com/AdvancedDiscordBot/Advanced-Discord-Bot/fork) • [📖 Read the docs](#quick-start)
-
----
-
-_Maintained by [@DeadIndian](https://github.com/DeadIndian)_  
-_"One base bot. Any use case."_
+<sub>Built by <a href="https://github.com/DeadIndian">DeadIndian</a></sub>
 
 </div>
-
-<p align="center">
-  <a href="#top" style="font-size: 18px; padding: 8px 16px; display: inline-block; border: 1px solid #ccc; border-radius: 6px; text-decoration: none;">
-    ⬆️ Back to Top
-  </a>
-</p>
