@@ -395,9 +395,7 @@ class PluginManager {
 			const ctx = this.buildContext(pluginName, logger);
 			this.loadCommandsFromDir(path.join(process.cwd(), "commands"), pluginName, ctx);
 			if (!this.config.commandCollection) {
-				this.loadEventsFromDir(path.join(process.cwd(), "events"), pluginName, ctx, {
-					excludeFiles: ["helpInteraction.js", "modalCreate.js"],
-				});
+				this.loadEventsFromDir(path.join(process.cwd(), "events"), pluginName, ctx);
 			}
 			pluginState.loaded = true;
 			if (!this.config.commandCollection) await this.hooks.emitHook("onPluginLoad", { pluginName });
