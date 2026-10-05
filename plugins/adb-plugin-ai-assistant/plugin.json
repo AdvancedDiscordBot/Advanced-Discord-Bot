@@ -1,0 +1,41 @@
+{
+  "name": "adb-plugin-ai-assistant",
+  "displayName": "AI Assistant",
+  "version": "0.1.0",
+  "description": "Gemini-powered AI replies in a configured channel, with a per-user cooldown that protects the shared API quota.",
+  "author": "ADB Contributors",
+  "main": "index.js",
+  "requiresRestart": false,
+  "manifestVersion": 2,
+  "process": { "model": "pooled", "maxExecutionMs": 15000, "memoryMb": 128, "persistentReason": null },
+  "capabilities": {
+    "storage": ["own-collection"],
+    "discord": ["SendMessages"],
+    "ai": ["gemini-proxy"]
+  },
+  "permissions": {
+    "storage": ["own-collection"],
+    "discord": ["SendMessages"],
+    "ai": ["gemini-proxy"],
+    "network": { "outbound": [] },
+    "filesystem": { "read": [], "write": [] },
+    "childProcess": false,
+    "nativeAddons": false
+  },
+  "discordPermissions": ["ViewChannel", "SendMessages"],
+  "engines": { "core": ">=2.0.0", "plugins": { "administration": ">=2.0.0" } },
+  "settings": {
+    "schema": [
+      { "key": "enabled", "type": "boolean", "label": "AI replies enabled", "default": true },
+      { "key": "aiChannel", "type": "channel", "label": "AI channel" },
+      { "key": "userCooldownSeconds", "type": "number", "label": "Per-user cooldown (seconds, 0 = off)", "default": 12 },
+      {
+        "key": "cooldownNoticeMode", "type": "select", "label": "When a user is on cooldown", "default": "notice",
+        "options": [
+          { "value": "notice", "label": "Reply once with a wait notice" },
+          { "value": "silent", "label": "Ignore silently" }
+        ]
+      }
+    ]
+  }
+}
