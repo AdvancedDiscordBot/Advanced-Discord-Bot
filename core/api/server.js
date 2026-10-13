@@ -19,6 +19,7 @@ const adminPlugin = require("../adminPlugin");
 const { PermissionResolver, TIERS } = require("../permission-resolver");
 const { buildCatalog, catalogKeys, viewPermission, configurePermission } = require("../dashboard-permissions");
 const { generateFullRiskCard, diffRiskCards, UnmappedCapabilityError, riskCardManifest } = require("../risk-disclosure");
+const { isUnsafeMemberField } = require("../manifest-schema");
 
 const ADMIN_PERMISSION = 0x8;
 const MANAGE_GUILD_PERMISSION = 0x20;
@@ -730,6 +731,9 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 					return { ok: res.deletedCount > 0 };
 				}
 				if (action.op === "set") {
+					if (isUnsafeMemberField(action.field)) {
+						return reply.code(400).send({ error: "blocked field" });
+					}
 					const res = await Model.updateOne(scope, {
 						$set: { [action.field]: action.value },
 					});

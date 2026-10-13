@@ -205,6 +205,28 @@ function normalizeMemberSource(source) {
 const MEMBER_VIEW_TYPES = ["list", "table", "stat"];
 const MEMBER_ACTION_OPS = ["set", "delete"];
 
+// Fields a member self-service set action may never touch. Ownership keys
+// would let a caller reassign rows, and prototype / operator keys would let
+// a crafted manifest reach outside the intended document path.
+const MEMBER_ACTION_BLOCKED_FIELDS = new Set([
+	"_id",
+	"id",
+	"guildid",
+	"userid",
+	"__v",
+	"__proto__",
+	"constructor",
+	"prototype",
+]);
+
+function isUnsafeMemberField(field) {
+	if (typeof field !== "string") return true;
+	const name = field.trim();
+	if (!name) return true;
+	if (name.includes("$") || name.includes(".") || name.includes("\0")) return true;
+	return MEMBER_ACTION_BLOCKED_FIELDS.has(name.toLowerCase());
+}
+
 // A rendered page's view spec, consumed by the SPA member-view library. Only
 // declarative field references + a whitelist of own-row actions — no code.
 function normalizeMemberView(view) {
@@ -234,6 +256,7 @@ function normalizeMemberView(view) {
 			const action = { id: a.id.trim(), label: typeof a.label === "string" ? a.label : a.id, op: a.op };
 			if (a.op === "set") {
 				if (typeof a.field !== "string" || !a.field.trim()) continue;
+				if (isUnsafeMemberField(a.field)) continue;
 				action.field = a.field.trim();
 				action.value = a.value; // literal; applied verbatim to the member's own row
 			}
@@ -561,4 +584,5 @@ module.exports = {
 	normalize,
 	validateManifestV2,
 	isValidHost,
+	isUnsafeMemberField,
 };
