@@ -1447,7 +1447,8 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 
 	fastify.put("/api/guild/:guildId/roles/grants/:roleId", async (request, reply) => {
 		const { guildId, roleId } = request.params;
-		if (!(await requireGuildAccess(request, reply, "roles.manage"))) return;
+		const access = await requireGuildAccess(request, reply, "roles.manage");
+		if (!access) return;
 		if (!SNOWFLAKE.test(roleId) || !client.guilds.cache.get(guildId)?.roles.cache.has(roleId)) {
 			return reply.code(400).send({ error: "invalid roleId" });
 		}
@@ -1457,6 +1458,12 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		const requested = request.body?.permissions;
 		if (!Array.isArray(requested) || !requested.every((permission) => valid.has(permission))) {
 			return reply.code(400).send({ error: "permissions must be an array of catalog keys" });
+		}
+		// A caller cannot hand out permissions they do not hold themselves.
+		// Host owners and guild admins resolve to the full catalog so their
+		// flow is unchanged; a delegated member can only re-grant a subset.
+		if (!requested.every((permission) => access.permissions.has(permission))) {
+			return reply.code(403).send({ error: "forbidden", missingPermission: "grant-subset" });
 		}
 		const granted = [...new Set(requested)];
 
