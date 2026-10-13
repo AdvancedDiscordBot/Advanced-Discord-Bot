@@ -219,8 +219,12 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		await sessionStore.close();
 	});
 
+	const corsOrigins = (process.env.CORS_ORIGIN || "")
+		.split(",")
+		.map((s) => s.trim())
+		.filter(Boolean);
 	await fastify.register(cors, {
-		origin: process.env.CORS_ORIGIN || true,
+		origin: corsOrigins.length ? corsOrigins : false,
 		credentials: true,
 	});
 
