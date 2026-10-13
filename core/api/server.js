@@ -1332,6 +1332,12 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		const plugin = pluginManager.plugins.get(name);
 		if (!plugin) return reply.code(404).send({ error: "Plugin not found" });
 		if (!plugin.commandNames.has(cmd)) return reply.code(404).send({ error: "Command not found" });
+		// The router only enforces _commands when the manifest opts in.
+		// Accepting writes for other plugins would return 200 for a control
+		// that never takes effect, so fail here with an explicit error.
+		if (plugin.manifest?.settings?.commandPermissions !== true) {
+			return reply.code(400).send({ error: "commandPermissions not enabled for this plugin" });
+		}
 
 		const body = request.body;
 		if (!isObject(body) || !Object.keys(body).length || Object.keys(body).some((key) => !["enabled", "allowedRoles"].includes(key))) {
