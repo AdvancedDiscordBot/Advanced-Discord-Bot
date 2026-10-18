@@ -1,0 +1,57 @@
+# Runs the local checks from docs/VERIFICATION.md on every push and pull request.
+# The MongoDB integration check (npm run test:integration) is not included yet:
+# it needs the Discord mock gaps from #51 closed before it can pass.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: npm test (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          # No lockfile is committed (see .gitignore), so key the cache on the manifest.
+          cache-dependency-path: package.json
+      - run: npm install --no-audit --no-fund
+      - run: npm test
+
+  dashboard:
+    name: Dashboard check and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: plugins/administration/web/package.json
+      - run: npm install --no-audit --no-fund
+        working-directory: plugins/administration/web
+      - run: npm run test:dashboard
+      - run: npm --prefix plugins/administration/web run build
