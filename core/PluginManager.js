@@ -351,7 +351,7 @@ class PluginManager {
 		const discovered = this.discoverPlugins();
 		const ordered = this.sortByDependencies(discovered);
 		if (this.config.commandCollection && discovered.some((plugin) => plugin.disabled)) {
-			throw new Error("Cannot collect commands with missing plugin dependencies");
+			throw new Error("Cannot collect commands with missing or circular plugin dependencies");
 		}
 
 		for (const plugin of ordered) {
@@ -482,26 +482,36 @@ class PluginManager {
 		}
 
 		const ordered = [];
-		const visiting = new Set();
+		const chain = [];
 		const visited = new Set();
 
+		// Returns whether the plugin can load. A cycle, or a dependency that is
+		// itself disabled, costs only the plugins involved: one bad manifest must
+		// never abort loadAll for every other plugin.
 		const visit = (name) => {
-			if (visited.has(name)) return;
-			if (visiting.has(name)) {
-				throw new Error(`Circular dependency detected at ${name}`);
+			const plugin = nodes.get(name);
+			if (visited.has(name)) return !plugin.disabled;
+			if (chain.includes(name)) {
+				const cycle = [...chain.slice(chain.indexOf(name)), name];
+				this.logger.warn(`Skipping plugins in circular dependency: ${cycle.join(" -> ")}`);
+				for (const member of cycle) nodes.get(member).disabled = true;
+				return false;
 			}
 
-			visiting.add(name);
+			chain.push(name);
 			for (const dep of edges.get(name) || []) {
-				visit(dep);
+				if (!visit(dep) && !plugin.disabled) {
+					this.logger.warn(`Plugin ${name} depends on unavailable plugin ${dep}`);
+					plugin.disabled = true;
+				}
 			}
-			visiting.delete(name);
+			chain.pop();
 			visited.add(name);
-			ordered.push(nodes.get(name));
+			if (!plugin.disabled) ordered.push(plugin);
+			return !plugin.disabled;
 		};
 
 		for (const plugin of discovered) {
-			if (plugin.disabled) continue;
 			visit(plugin.name);
 		}
 
