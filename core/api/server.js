@@ -436,14 +436,6 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 
 	fastify.get("/health", async () => ({ status: "ok" }));
 
-	fastify.get("/diag-guilds", async () => {
-		return {
-			status: client.ws.status,
-			ping: client.ws.ping,
-			guilds: client.guilds.cache.map(g => ({ id: g.id, name: g.name })),
-		};
-	});
-
 	fastify.get("/auth/discord", async (request, reply) => {
 		const returnTo = request.query.redirect;
 		if (returnTo !== undefined && !isLocalReturnUrl(returnTo)) {
@@ -782,6 +774,18 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 			crypto.timingSafeEqual(Buffer.from(presented), Buffer.from(sessionSecret))
 		);
 	};
+
+	fastify.get("/diag-guilds", async (request, reply) => {
+		const isOwner = permissions.isHostOwner(request.session?.user?.id);
+		if (!isOwner && !isInternalCall(request)) {
+			return reply.code(403).send({ error: "forbidden" });
+		}
+		return {
+			status: client.ws.status,
+			ping: client.ws.ping,
+			guilds: client.guilds.cache.map((g) => ({ id: g.id, name: g.name })),
+		};
+	});
 
 	// The watchdog process holds the WebSocket connections but has no Discord
 	// client, so it cannot resolve permissions itself. It reads the session from

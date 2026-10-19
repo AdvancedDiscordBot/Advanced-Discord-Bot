@@ -781,3 +781,35 @@ test("api-runtime: untouched secrets survive ordinary and bulk saves; only confi
 		assert.deepEqual(saved.data._commands, { runtime: { enabled: false } });
 	}
 });
+
+test("api-runtime: diag-guilds rejects unauthenticated requests and requires host owner or internal caller", async (t) => {
+	const h = await harness(t);
+
+	// Anonymous request rejected
+	const resAnon = await h.inject(null, "GET", "/diag-guilds");
+	assert.equal(resAnon.statusCode, 403);
+
+	// Non-owner member rejected
+	const resMember = await h.inject(MEMBER, "GET", "/diag-guilds");
+	assert.equal(resMember.statusCode, 403);
+
+	// Non-owner admin rejected
+	const resAdmin = await h.inject(ADMIN, "GET", "/diag-guilds");
+	assert.equal(resAdmin.statusCode, 403);
+
+	// Host owner succeeds
+	const resOwner = await h.inject(OWNER, "GET", "/diag-guilds");
+	assert.equal(resOwner.statusCode, 200);
+	const data = resOwner.json();
+	assert.equal(data.status, h.client.ws.status);
+	assert.equal(data.ping, h.client.ws.ping);
+	assert.ok(Array.isArray(data.guilds));
+	assert.equal(data.guilds.length, 2);
+	assert.equal(data.guilds[0].id, GUILD);
+
+	// Internal call with correct x-adb-internal secret succeeds
+	const resInternal = await h.inject(null, "GET", "/diag-guilds", undefined, {
+		headers: { "x-adb-internal": process.env.SESSION_SECRET },
+	});
+	assert.equal(resInternal.statusCode, 200);
+});
