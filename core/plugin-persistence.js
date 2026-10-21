@@ -107,6 +107,15 @@ function runNpm(args) {
 		// ponytail: fixed 5-minute ceiling per package; raise if a plugin
 		// legitimately needs a huge dependency tree to install.
 		const timer = setTimeout(() => child.kill("SIGKILL"), 5 * 60 * 1000);
+		// If npm can't be started at all (not on PATH, EACCES, ...) the child
+		// emits "error" and never "close". Unhandled, that surfaces as an
+		// uncaughtException and shuts the bot down mid-boot instead of just
+		// leaving this one plugin missing.
+		child.once("error", (error) => {
+			clearTimeout(timer);
+			logger.error(`Could not start npm ${args.join(" ")}: ${error.message}`);
+			resolve(false);
+		});
 		child.on("close", (code) => {
 			clearTimeout(timer);
 			resolve(code === 0);
