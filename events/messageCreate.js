@@ -106,7 +106,7 @@ async function handleXPTracking(message, db, client) {
 				.setThumbnail(message.author.displayAvatarURL({ dynamic: true }))
 				.setFooter({
 					text: `Keep chatting to earn more XP!`,
-					iconUrl: client.user.displayAvatarURL(),
+					iconURL: client.user.displayAvatarURL(),
 				})
 				.setTimestamp();
 
