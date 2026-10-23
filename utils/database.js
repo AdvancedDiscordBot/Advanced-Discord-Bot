@@ -416,7 +416,7 @@ class Database {
 		}
 	}
 
-	async addXP(userId, guildId, amount, type = "message", reason = null) {
+	async addXP(userId, guildId, amount, type = "message", reason = null, { voiceMinutes = 1 } = {}) {
 		await this.ensureConnection();
 		try {
 			// Get current profile
@@ -440,7 +440,9 @@ class Database {
 				updateData.messageCount = (profile.messageCount || 0) + 1;
 				updateData.lastMessageAt = new Date();
 			} else if (type === "voice") {
-				updateData.voiceMinutes = (profile.voiceMinutes || 0) + 1;
+				// One award covers a whole session, so add the session's length,
+				// not 1, or a 90-minute call shows up as a single voice minute.
+				updateData.voiceMinutes = (profile.voiceMinutes || 0) + voiceMinutes;
 				updateData.lastVoiceAt = new Date();
 			}
 

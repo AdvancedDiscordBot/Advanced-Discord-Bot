@@ -130,6 +130,7 @@ test("core events: voice fallback works with the shipped profile schema and cons
 	assert.equal(h.awards.length, 1);
 	assert.equal(h.awards[0][2], 4);
 	assert.equal(h.awards[0][3], "voice");
+	assert.deepEqual(h.awards[0][5], { voiceMinutes: 2 });
 	assert.equal(h.hooks.find((hook) => hook.name === "onLevelUp")?.payload.guild, h.member.guild);
 });
 
