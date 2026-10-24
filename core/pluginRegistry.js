@@ -27,9 +27,14 @@ function normalizeRegistryUrl(url) {
 	return url;
 }
 
-const REGISTRY_URL = normalizeRegistryUrl(
-	process.env.PLUGIN_REGISTRY_URL || FALLBACK_REGISTRY_URL,
-);
+// Read on every fetch, not at require time: the normal entry point loads
+// dotenv after requiring the API server, so a module-level constant would
+// ignore PLUGIN_REGISTRY_URL set only in .env.
+function getRegistryUrl() {
+	return normalizeRegistryUrl(
+		process.env.PLUGIN_REGISTRY_URL || FALLBACK_REGISTRY_URL,
+	);
+}
 
 const REGISTRY_CACHE_FILE = path.join(process.cwd(), "data", "plugin-registry.json");
 const SUBMISSIONS_FILE = path.join(process.cwd(), "data", "plugin-submissions.json");
@@ -54,8 +59,9 @@ class PluginRegistry {
 		}
 
 		try {
-			this.logger.info(`Fetching plugin registry from ${REGISTRY_URL} ...`);
-			const response = await axios.get(REGISTRY_URL, { timeout: 10000 });
+			const registryUrl = getRegistryUrl();
+			this.logger.info(`Fetching plugin registry from ${registryUrl} ...`);
+			const response = await axios.get(registryUrl, { timeout: 10000 });
 			let data = response.data;
 			// raw.githubusercontent serves text/plain; axios usually parses it, but
 			// guard against a string body (or an HTML error page) all the same.
@@ -114,7 +120,7 @@ class PluginRegistry {
 	}
 
 	getDefaultPlugins() {
-		// No hardcoded fallback — the registry is the GitHub repo at REGISTRY_URL.
+		// No hardcoded fallback — the registry is the GitHub repo at getRegistryUrl().
 		// Kept for API compatibility; returns nothing when remote + cache both fail.
 		return [];
 	}
