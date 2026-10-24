@@ -153,6 +153,48 @@ class Database {
 		}
 	}
 
+	/**
+	 * Merge top-level settings fields without replacing the rest of `data`.
+	 * Each field becomes its own $set path, so concurrent dashboard writes to
+	 * different fields cannot overwrite one another.
+	 */
+	async mergePluginConfig(guildId, pluginName, patch) {
+		await this.ensureConnection();
+		try {
+			if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+				throw new TypeError("Plugin config patch must be an object");
+			}
+			const keys = Object.keys(patch);
+			if (!keys.length) return this.getPluginConfig(guildId, pluginName);
+
+			const set = {};
+			for (const key of keys) {
+				if (
+					key === "__proto__" ||
+					key === "constructor" ||
+					key === "prototype" ||
+					key.startsWith("$") ||
+					key.includes(".")
+				) {
+					throw new Error(`Invalid plugin config field: ${key}`);
+				}
+				set[`data.${key}`] = patch[key];
+			}
+
+			return await PluginConfig.findOneAndUpdate(
+				{ guildId, pluginName },
+				{
+					$set: set,
+					$setOnInsert: { guildId, pluginName },
+				},
+				{ upsert: true, new: true, setDefaultsOnInsert: false },
+			);
+		} catch (error) {
+			console.error("Error merging plugin config:", error);
+			throw error;
+		}
+	}
+
 	async getAllPluginConfigs(guildId) {
 		await this.ensureConnection();
 		try {

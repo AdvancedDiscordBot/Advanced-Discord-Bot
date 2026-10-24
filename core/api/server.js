@@ -1301,10 +1301,9 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		const error = validateSettings(plugin, request.body, client.guilds.cache.get(guildId));
 		if (error) return reply.code(400).send({ error });
 		await db.ensureConnection();
-		// Merge into existing config, preserving _commands sub-key
-		const existing = await db.getPluginConfig(guildId, name);
-		const merged = { ...(existing?.data || {}), ...(request.body || {}) };
-		const updated = await db.updatePluginConfig(guildId, name, merged);
+		// Patch only the declared fields that were sent. A read-then-replace
+		// merge loses fields when two dashboard saves overlap.
+		const updated = await db.mergePluginConfig(guildId, name, request.body || {});
 		return publicPluginSettings(plugin.manifest, updated?.data);
 	});
 
