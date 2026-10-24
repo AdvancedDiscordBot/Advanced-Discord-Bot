@@ -201,83 +201,78 @@ class PluginRegistry {
 		}
 
 		const freshVersions = new Map();
+		const readPlugin = (pluginJsonPath, fallbackName) => {
+			if (!fs.existsSync(pluginJsonPath)) return;
+			try {
+				const pluginJson = JSON.parse(fs.readFileSync(pluginJsonPath, "utf8"));
+				if (!pluginJson || typeof pluginJson !== "object") return;
+				const name =
+					typeof pluginJson.name === "string" && pluginJson.name
+						? pluginJson.name
+						: fallbackName;
+				freshVersions.set(name, {
+					version: pluginJson.version,
+					npmPackage: pluginJson.name,
+					fromLocal: true,
+				});
+			} catch (error) {
+				this.logger.warn(
+					`Failed to read plugin.json at ${pluginJsonPath}:`,
+					error.message,
+				);
+			}
+		};
 
-		// Check local plugins directory
+		// Check the local plugins directory.
 		if (fs.existsSync(pluginsDir)) {
-			const pluginDirs = fs.readdirSync(pluginsDir, { withFileTypes: true })
-				.filter(dir => dir.isDirectory() && !dir.name.startsWith('.'));
-
+			const pluginDirs = fs
+				.readdirSync(pluginsDir, { withFileTypes: true })
+				.filter((dir) => dir.isDirectory() && !dir.name.startsWith("."));
 			for (const dir of pluginDirs) {
-				const pluginJsonPath = path.join(pluginsDir, dir.name, "plugin.json");
-				if (fs.existsSync(pluginJsonPath)) {
-					try {
-						const pluginJson = JSON.parse(fs.readFileSync(pluginJsonPath, "utf8"));
-						const name = pluginJson.name || dir.name;
-						freshVersions.set(name, {
-							version: pluginJson.version,
-							npmPackage: pluginJson.name,
-							fromLocal: true
-						});
-					} catch (error) {
-							this.logger.warn(`Failed to read plugin.json for ${dir.name}:`, error.message);
-						}
-					}
+				readPlugin(
+					path.join(pluginsDir, dir.name, "plugin.json"),
+					dir.name,
+				);
 			}
 		}
 
-		// Check node_modules for adb-plugin-* packages
+		// Check node_modules for adb-plugin-* packages. Scoped packages live one
+		// level deeper, at node_modules/@scope/adb-plugin-*, so the scope
+		// directory itself has to enter the scan.
 		if (fs.existsSync(nodeModulesDir)) {
-			const packages = fs.readdirSync(nodeModulesDir, { withFileTypes: true })
-				.filter(pkg => pkg.isDirectory() && (
-					(pkg.name.startsWith("adb-plugin-") ||
-					(pkg.name.startsWith("@") && pkg.name.includes("/adb-plugin-")))));
-
-			for (const pkg of packages) {
-				let packageName = pkg.name;
-				let pluginDir = path.join(nodeModulesDir, pkg.name);
-
-				// Handle scoped packages
-				if (pkg.name.startsWith("@") && pkg.isDirectory()) {
-					const scopedPath = path.join(nodeModulesDir, pkg.name);
-					if (fs.existsSync(scopedPath)) {
-						const scopedEntries = fs.readdirSync(scopedPath, { withFileTypes: true })
-							.filter(entry => entry.isDirectory() && entry.name.startsWith("adb-plugin-"));
-
-						for (const scopedEntry of scopedEntries) {
-							const scopedPluginJsonPath = path.join(scopedPath, scopedEntry.name, "plugin.json");
-							if (fs.existsSync(scopedPluginJsonPath)) {
-								try {
-									const pluginJson = JSON.parse(fs.readFileSync(scopedPluginJsonPath, "utf8"));
-									const name = pluginJson.name || `${pkg.name}/${scopedEntry.name}`;
-									freshVersions.set(name, {
-										version: pluginJson.version,
-										npmPackage: pluginJson.name,
-										fromLocal: true
-									});
-								} catch (error) {
-										this.logger.warn(`Failed to read plugin.json for ${scopedEntry.name}:`, error.message);
-								}
-								}
-							}
+			const entries = fs
+				.readdirSync(nodeModulesDir, { withFileTypes: true })
+				.filter((entry) => entry.isDirectory());
+			for (const entry of entries) {
+				if (entry.name.startsWith("@")) {
+					const scopeDir = path.join(nodeModulesDir, entry.name);
+					let scopedEntries;
+					try {
+						scopedEntries = fs.readdirSync(scopeDir, { withFileTypes: true });
+					} catch (error) {
+						this.logger.warn(
+							`Failed to scan ${scopeDir}:`,
+							error.message,
+						);
+						continue;
+					}
+					for (const scoped of scopedEntries) {
+						if (!scoped.isDirectory() || !scoped.name.startsWith("adb-plugin-")) {
 							continue;
 						}
+						readPlugin(
+							path.join(scopeDir, scoped.name, "plugin.json"),
+							`${entry.name}/${scoped.name}`,
+						);
+					}
+					continue;
 				}
 
-			if (!pkg.isDirectory()) continue;
-				const pluginJsonPath = path.join(nodeModulesDir, pkg.name, "plugin.json");
-				if (fs.existsSync(pluginJsonPath)) {
-					try {
-						const pluginJson = JSON.parse(fs.readFileSync(pluginJsonPath, "utf8"));
-						const name = pluginJson.name || pkg.name;
-						freshVersions.set(name, {
-							version: pluginJson.version,
-							npmPackage: pluginJson.name,
-							fromLocal: true
-						});
-					} catch (error) {
-							this.logger.warn(`Failed to read plugin.json for ${pkg.name}:`, error.message);
-						}
-				}
+				if (!entry.name.startsWith("adb-plugin-")) continue;
+				readPlugin(
+					path.join(nodeModulesDir, entry.name, "plugin.json"),
+					entry.name,
+				);
 			}
 		}
 
