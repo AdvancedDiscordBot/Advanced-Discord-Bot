@@ -17,15 +17,18 @@
 const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
+const { randomUUID } = require("crypto");
 const { createLogger } = require("./logger");
 
 const logger = createLogger("PluginPersistence");
 
-const MANIFEST_PATH = path.join(process.cwd(), "data", "installed-plugins.json");
+function getManifestPath() {
+	return path.join(process.cwd(), "data", "installed-plugins.json");
+}
 
 function readManifest() {
 	try {
-		const data = JSON.parse(fs.readFileSync(MANIFEST_PATH, "utf8"));
+		const data = JSON.parse(fs.readFileSync(getManifestPath(), "utf8"));
 		return data && typeof data === "object" && Array.isArray(data.plugins)
 			? data.plugins
 			: [];
@@ -35,8 +38,40 @@ function readManifest() {
 }
 
 function writeManifest(plugins) {
-	fs.mkdirSync(path.dirname(MANIFEST_PATH), { recursive: true });
-	fs.writeFileSync(MANIFEST_PATH, JSON.stringify({ plugins }, null, 2));
+	const manifestPath = getManifestPath();
+	const directory = path.dirname(manifestPath);
+	fs.mkdirSync(directory, { recursive: true });
+
+	// Publish a complete file or keep the previous one. Writing in place can
+	// leave truncated JSON after a crash, which readManifest would silently
+	// treat as an empty state and lose every recorded install/uninstall.
+	const tempPath = path.join(
+		directory,
+		`.installed-plugins.${process.pid}.${randomUUID()}.tmp`,
+	);
+	let fd;
+	try {
+		fd = fs.openSync(tempPath, "w", 0o600);
+		fs.writeFileSync(fd, JSON.stringify({ plugins }, null, 2));
+		fs.fsyncSync(fd);
+		fs.closeSync(fd);
+		fd = undefined;
+		fs.renameSync(tempPath, manifestPath);
+	} catch (error) {
+		if (fd !== undefined) {
+			try {
+				fs.closeSync(fd);
+			} catch {
+				// Best effort: the original write error is the useful one.
+			}
+		}
+		try {
+			fs.unlinkSync(tempPath);
+		} catch {
+			// The temporary file may not exist if open failed.
+		}
+		throw error;
+	}
 }
 
 /** Version currently present in node_modules, or null. */
