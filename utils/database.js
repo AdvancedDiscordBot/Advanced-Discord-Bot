@@ -749,17 +749,19 @@ class Database {
 	}
 
 	async getGuildEconomy(guildId) {
+		await this.ensureConnection();
 		try {
-			let economySettings = await this.GuildEconomy.findOne({ guildId });
-			if (!economySettings) {
-				// If no settings exist, create them with default values
-				economySettings = new this.GuildEconomy({ guildId });
-				await economySettings.save();
-			}
-			return economySettings;
+			// Atomic upsert: concurrent first calls must not both insert and
+			// trip the unique guildId index. Propagate failures instead of
+			// returning null, which made outages look like missing settings.
+			return await this.GuildEconomy.findOneAndUpdate(
+				{ guildId },
+				{ $setOnInsert: { guildId } },
+				{ upsert: true, new: true, setDefaultsOnInsert: true },
+			);
 		} catch (error) {
 			console.error("Error getting guild economy settings:", error);
-			return null;
+			throw error;
 		}
 	}
 
