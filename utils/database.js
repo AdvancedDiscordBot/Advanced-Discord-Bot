@@ -419,51 +419,83 @@ class Database {
 	async addXP(userId, guildId, amount, type = "message", reason = null) {
 		await this.ensureConnection();
 		try {
-			// Get current profile
-			const profile = await this.getUserProfile(userId, guildId);
+			const delta = Number(amount);
+			if (!Number.isFinite(delta)) {
+				throw new TypeError("XP amount must be a finite number");
+			}
 
-			// Calculate new XP and level
-			const newTotalXp = Math.max(0, profile.totalXp + amount);
-			const newLevel = this.calculateLevel(newTotalXp);
+			// Make sure the row exists. The actual increment happens in one
+			// pipeline update so concurrent events apply to the stored values
+			// instead of overwriting each other with a stale snapshot.
+			await this.getUserProfile(userId, guildId);
 
-			// Update profile
-			const updateData = {
-				totalXp: newTotalXp,
-				level: newLevel,
-				dailyXp: profile.dailyXp + amount,
-				weeklyXp: profile.weeklyXp + amount,
-				monthlyXp: profile.monthlyXp + amount,
-				activityScore: this.calculateActivityScore(profile, amount, type),
+			const scoreDelta = delta * (type === "voice" ? 1.5 : 1) * this.getTimeBonus();
+			const now = new Date();
+			const increments = {
+				totalXp: { $max: [0, { $add: [{ $ifNull: ["$totalXp", 0] }, delta] }] },
+				dailyXp: { $add: [{ $ifNull: ["$dailyXp", 0] }, delta] },
+				weeklyXp: { $add: [{ $ifNull: ["$weeklyXp", 0] }, delta] },
+				monthlyXp: { $add: [{ $ifNull: ["$monthlyXp", 0] }, delta] },
+				activityScore: {
+					$floor: {
+						$add: [{ $ifNull: ["$activityScore", 0] }, scoreDelta],
+					},
+				},
 			};
 
 			if (type === "message") {
-				updateData.messageCount = (profile.messageCount || 0) + 1;
-				updateData.lastMessageAt = new Date();
+				increments.messageCount = { $add: [{ $ifNull: ["$messageCount", 0] }, 1] };
+				increments.lastMessageAt = now;
 			} else if (type === "voice") {
-				updateData.voiceMinutes = (profile.voiceMinutes || 0) + 1;
-				updateData.lastVoiceAt = new Date();
+				increments.voiceMinutes = { $add: [{ $ifNull: ["$voiceMinutes", 0] }, 1] };
+				increments.lastVoiceAt = now;
 			}
 
 			const updatedProfile = await UserProfile.findOneAndUpdate(
 				{ userId, guildId },
-				{ $set: updateData },
+				[
+					{ $set: increments },
+					{
+						$set: {
+							level: {
+								$add: [
+									1,
+									{
+										$floor: {
+											$sqrt: {
+												$divide: [
+													{ $max: [{ $ifNull: ["$totalXp", 0] }, 0] },
+													100,
+												],
+											},
+										},
+									},
+								],
+							},
+						},
+					},
+				],
 				{ new: true },
 			);
+			if (!updatedProfile) throw new Error("User profile disappeared during XP update");
 
 			// Record XP transaction
 			await XPTransaction.create({
 				userId,
 				guildId,
-				amount,
+				amount: delta,
 				type,
 				reason,
 			});
 
+			const oldLevel = this.calculateLevel(
+				Math.max(0, (updatedProfile.totalXp || 0) - delta),
+			);
 			return {
 				profile: updatedProfile,
-				levelUp: newLevel > profile.level,
-				oldLevel: profile.level,
-				newLevel,
+				levelUp: updatedProfile.level > oldLevel,
+				oldLevel,
+				newLevel: updatedProfile.level,
 			};
 		} catch (error) {
 			console.error("Error adding XP:", error);
