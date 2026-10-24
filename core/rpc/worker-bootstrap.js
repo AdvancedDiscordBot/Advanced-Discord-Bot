@@ -253,22 +253,34 @@ function createShimContext(rpc, grantedEnv = {}, registrations = { pending: new 
 		};
 	};
 
-	// Scheduler proxy: routes cron scheduling through RPC
+	// Scheduler proxy: routes cron scheduling through RPC. Entries are indexed
+	// by both the generated task id and the documented logical name so that
+	// cancel("cleanup") removes the matching tick listener as well as the cron
+	// job in Core.
 	const scheduledTasks = new Map();
 	const schedulerProxy = {
 		schedule: (expression, callback, name) => {
 			return trackRegistration(rpc.call("scheduler.schedule", { expression, name }).then(({ taskId }) => {
-				const unsubscribe = rpc.on("cron:tick", (payload) => {
+				const entry = { taskId, name, unsubscribe: null };
+				entry.unsubscribe = rpc.on("cron:tick", (payload) => {
 					if (payload.taskId === taskId) return callback();
 				});
-				scheduledTasks.set(taskId, unsubscribe);
+				scheduledTasks.set(taskId, entry);
+				if (name) scheduledTasks.set(name, entry);
 				return taskId;
 			}));
 		},
-		cancel: async (taskId) => {
+		cancel: async (taskIdOrName) => {
+			const entry = scheduledTasks.get(taskIdOrName);
+			const taskId = entry?.taskId || taskIdOrName;
 			await rpc.call("scheduler.cancel", { taskId });
-			scheduledTasks.get(taskId)?.();
-			scheduledTasks.delete(taskId);
+			if (entry) {
+				entry.unsubscribe?.();
+				scheduledTasks.delete(entry.taskId);
+				if (entry.name) scheduledTasks.delete(entry.name);
+			} else {
+				scheduledTasks.delete(taskIdOrName);
+			}
 		},
 	};
 

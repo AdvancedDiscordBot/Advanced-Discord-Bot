@@ -771,19 +771,33 @@ class CapabilityBroker extends EventEmitter {
 				if (!this._scheduledTasks) this._scheduledTasks = new Map();
 				const cron = require("node-cron");
 				const taskId = `${pluginId}_${randomUUID()}`;
+				const name =
+					typeof p.name === "string" && p.name.trim() ? p.name : taskId;
+				// Match TaskScheduler.schedule: the same plugin reusing a name
+				// replaces its previous task instead of stacking duplicates.
+				if (name !== taskId) {
+					for (const [id, entry] of this._scheduledTasks) {
+						if (entry.pluginId !== pluginId || entry.name !== name) continue;
+						entry.task.stop();
+						this._scheduledTasks.delete(id);
+					}
+				}
 				const task = cron.schedule(p.expression, async () => {
-					this.emit("cron:tick", { pluginId, taskId, name: p.name || taskId });
+					this.emit("cron:tick", { pluginId, taskId, name });
 				});
-				this._scheduledTasks.set(taskId, { pluginId, task });
+				this._scheduledTasks.set(taskId, { pluginId, task, name });
 				return { ok: true, taskId };
 			}
 
 			case "schedulerCancel": {
 				if (this._scheduledTasks) {
-					const entry = this._scheduledTasks.get(p.taskId);
-					if (entry && entry.pluginId === pluginId) {
+					// The documented isolated API cancels by name, while the
+					// schedule result exposes the generated task id. Accept both.
+					for (const [id, entry] of this._scheduledTasks) {
+						if (entry.pluginId !== pluginId) continue;
+						if (id !== p.taskId && entry.name !== p.taskId) continue;
 						entry.task.stop();
-						this._scheduledTasks.delete(p.taskId);
+						this._scheduledTasks.delete(id);
 					}
 				}
 				return { ok: true };

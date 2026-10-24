@@ -426,3 +426,35 @@ test("rpcClient: close() rejects pending requests", async () => {
 
 	await assert.rejects(promise, { message: "RpcClient closed" });
 });
+
+test("broker: scheduler cancels by name and replaces same-name tasks", async () => {
+	const broker = new CapabilityBroker({ db: makeMockDb(), client: null, hooks: makeMockHooks() });
+	broker.registerCapabilities("cron-plugin", { scheduler: ["cron"] });
+
+	const first = await broker.handleRequest("cron-plugin", {
+		id: "1",
+		method: "scheduler.schedule",
+		params: { expression: "0 * * * *", name: "cleanup" },
+	});
+	assert.strictEqual(first.ok, true);
+	assert.strictEqual(broker._scheduledTasks.size, 1);
+	assert.strictEqual(broker._scheduledTasks.get(first.result.taskId).name, "cleanup");
+
+	// Same name replaces the earlier task instead of stacking another one.
+	const second = await broker.handleRequest("cron-plugin", {
+		id: "2",
+		method: "scheduler.schedule",
+		params: { expression: "30 * * * *", name: "cleanup" },
+	});
+	assert.strictEqual(second.ok, true);
+	assert.strictEqual(broker._scheduledTasks.size, 1);
+	assert.ok(broker._scheduledTasks.has(second.result.taskId));
+
+	// The documented isolated API cancels by the logical name.
+	await broker.handleRequest("cron-plugin", {
+		id: "3",
+		method: "scheduler.cancel",
+		params: { taskId: "cleanup" },
+	});
+	assert.strictEqual(broker._scheduledTasks.size, 0);
+});

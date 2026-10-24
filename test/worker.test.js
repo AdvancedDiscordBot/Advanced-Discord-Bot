@@ -363,3 +363,30 @@ test("proxy exposes updateMany, findOneAndUpdate, deleteMany", async () => {
 	const del = rpc.calls.find((c) => c.method === "model.deleteMany");
 	assert.deepStrictEqual(del.params, { modelName: "m2", query: { a: "gone" } });
 });
+
+test("scheduler proxy cancels by name and removes its tick listener", async () => {
+	const listeners = new Set();
+	const calls = [];
+	const rpc = {
+		on: (event, handler) => {
+			const entry = { event, handler };
+			listeners.add(entry);
+			return () => listeners.delete(entry);
+		},
+		call: async (method, params) => {
+			calls.push({ method, params });
+			if (method === "scheduler.schedule") return { taskId: "task-1" };
+			return { ok: true };
+		},
+	};
+	const ctx = createShimContext(rpc, {});
+
+	const taskId = await ctx.scheduler.schedule("* * * * *", () => {}, "cleanup");
+	assert.strictEqual(taskId, "task-1");
+	assert.strictEqual(listeners.size, 1);
+
+	await ctx.scheduler.cancel("cleanup");
+	assert.strictEqual(listeners.size, 0);
+	assert.strictEqual(calls.at(-1).method, "scheduler.cancel");
+	assert.strictEqual(calls.at(-1).params.taskId, "task-1");
+});
