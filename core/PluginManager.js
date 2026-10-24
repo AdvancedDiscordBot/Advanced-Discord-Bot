@@ -40,6 +40,10 @@ class PluginManager {
 		this._enableIndexAt = 0;
 		this._enableIndexTtl = 60 * 1000;
 		this._enableIndexRefreshing = false;
+		// Toggles can land while a snapshot query is running. Keep their order
+		// so a late response does not roll them back.
+		this._enableMutationSeq = 0;
+		this._enableOverrides = new Map();
 
 		// Core/platform version, checked against each plugin's engines.core range.
 		// Read once from package.json; falls back to "0.0.0" if unreadable.
@@ -161,13 +165,25 @@ class PluginManager {
 		const key = `${guildId}:${pluginName}`;
 		if (enabled) this._enableIndex.add(key);
 		else this._enableIndex.delete(key);
+		this._enableOverrides.set(key, {
+			enabled,
+			seq: ++this._enableMutationSeq,
+		});
 	}
 
 	async refreshEnableIndex({ strict = false } = {}) {
+		const startedAtSeq = this._enableMutationSeq;
 		try {
 			const rows = await this.db.getAllEnabledPluginRows();
 			const next = new Set();
 			for (const row of rows) next.add(`${row.guildId}:${row.pluginName}`);
+			// Reapply toggles that happened after this query started. Without
+			// this, a slow refresh overwrites a just-persisted admin change.
+			for (const [key, override] of this._enableOverrides) {
+				if (override.seq <= startedAtSeq) continue;
+				if (override.enabled) next.add(key);
+				else next.delete(key);
+			}
 			this._enableIndex = next;
 			this._enableIndexAt = Date.now();
 		} catch (err) {

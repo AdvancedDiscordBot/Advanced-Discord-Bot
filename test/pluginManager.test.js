@@ -37,3 +37,31 @@ test("getPluginList exposes core/version/discordPermissions", () => {
   assert.strictEqual(entry.version, "1.0.0");
   assert.deepStrictEqual(entry.discordPermissions, ["BanMembers"]);
 });
+
+test("an enable during a pending refresh is preserved", async () => {
+	const pm = makePM();
+	let resolveRows;
+	pm.db.getAllEnabledPluginRows = () => new Promise((resolve) => { resolveRows = resolve; });
+	const refreshing = pm.refreshEnableIndex();
+
+	pm.setEnabledForGuild("guild-1", "plugin-a", true);
+	resolveRows([{ guildId: "guild-1", pluginName: "other" }]);
+	await refreshing;
+
+	assert.equal(pm._enableIndex.has("guild-1:plugin-a"), true);
+	assert.equal(pm._enableIndex.has("guild-1:other"), true);
+});
+
+test("a disable during a pending refresh is preserved", async () => {
+	const pm = makePM();
+	pm._enableIndex.add("guild-1:plugin-a");
+	let resolveRows;
+	pm.db.getAllEnabledPluginRows = () => new Promise((resolve) => { resolveRows = resolve; });
+	const refreshing = pm.refreshEnableIndex();
+
+	pm.setEnabledForGuild("guild-1", "plugin-a", false);
+	resolveRows([{ guildId: "guild-1", pluginName: "plugin-a" }]);
+	await refreshing;
+
+	assert.equal(pm._enableIndex.has("guild-1:plugin-a"), false);
+});
