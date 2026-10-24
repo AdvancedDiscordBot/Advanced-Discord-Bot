@@ -833,11 +833,9 @@ class CapabilityBroker extends EventEmitter {
 			});
 
 			// Read the body with a hard byte ceiling so a plugin can't pull an
-			// unbounded response back across the RPC boundary.
-			const buf = Buffer.from(await res.arrayBuffer());
-			if (buf.length > NETWORK_MAX_BODY_BYTES) {
-				throw new Error(`Response body exceeds ${NETWORK_MAX_BODY_BYTES} bytes`);
-			}
+			// unbounded response back across the RPC boundary. Read incrementally
+			// and stop at the ceiling instead of buffering the whole body first.
+			const buf = await this._readNetworkBody(res, controller);
 			const headers = {};
 			for (const [k, v] of res.headers) headers[k] = v;
 			return {
@@ -854,6 +852,54 @@ class CapabilityBroker extends EventEmitter {
 		} finally {
 			clearTimeout(timer);
 		}
+	}
+
+	/**
+	 * Read a fetch response body without ever holding more than the configured
+	 * ceiling in memory. The web stream is consumed chunk by chunk; when the
+	 * next chunk would cross the limit it is cancelled and the request aborted.
+	 *
+	 * @param {Response} res
+	 * @param {AbortController} controller
+	 * @returns {Promise<Buffer>}
+	 * @private
+	 */
+	async _readNetworkBody(res, controller) {
+		const body = res.body;
+		if (!body || typeof body[Symbol.asyncIterator] !== "function") {
+			// Test doubles and older runtimes may only expose arrayBuffer().
+			const buf = Buffer.from(await res.arrayBuffer());
+			if (buf.length > NETWORK_MAX_BODY_BYTES) {
+				throw new Error(`Response body exceeds ${NETWORK_MAX_BODY_BYTES} bytes`);
+			}
+			return buf;
+		}
+
+		const chunks = [];
+		let total = 0;
+		try {
+			for await (const chunk of body) {
+				const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+				total += buf.length;
+				if (total > NETWORK_MAX_BODY_BYTES) {
+					if (typeof body.cancel === "function") {
+						try { await body.cancel(); }
+						catch { /* the stream may already be closed */ }
+					}
+					controller.abort();
+					throw new Error(`Response body exceeds ${NETWORK_MAX_BODY_BYTES} bytes`);
+				}
+				chunks.push(buf);
+			}
+		} catch (err) {
+			// An abort triggered by the size check can surface as AbortError;
+			// preserve the useful size message instead of a timeout message.
+			if (err.name === "AbortError" && total > NETWORK_MAX_BODY_BYTES) {
+				throw new Error(`Response body exceeds ${NETWORK_MAX_BODY_BYTES} bytes`);
+			}
+			throw err;
+		}
+		return Buffer.concat(chunks, total);
 	}
 
 	// ── Helpers ──────────────────────────────────────────────────────────

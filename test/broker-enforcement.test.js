@@ -96,6 +96,57 @@ test("enforcement: network.fetch to an allowlisted host is permitted", async () 
 	}
 });
 
+test("enforcement: network.fetch stops reading once the body cap is crossed", async () => {
+	const broker = makeBroker();
+	broker.registerCapabilities("p", { network: ["outbound-http"] }, "P", {
+		networkAllowlist: ["api.allowed.com"],
+	});
+
+	const chunk = Buffer.alloc(1024 * 1024, 1);
+	let reads = 0;
+	let cancelled = false;
+	const body = {
+		[Symbol.asyncIterator]() {
+			return {
+				async next() {
+					reads++;
+					// Far more data than the 5 MB ceiling; the broker must not
+					// consume all of it.
+					return { value: chunk, done: false };
+				},
+				async return() {
+					cancelled = true;
+					return { value: undefined, done: true };
+				},
+			};
+		},
+		async cancel() {
+			cancelled = true;
+		},
+	};
+
+	const origFetch = global.fetch;
+	global.fetch = async () => ({
+		status: 200,
+		ok: true,
+		headers: new Map(),
+		body,
+	});
+	try {
+		const res = await broker.handleRequest("p", {
+			id: "1",
+			method: "network.fetch",
+			params: { url: "https://api.allowed.com/huge" },
+		});
+		assert.strictEqual(res.ok, false);
+		assert.match(res.error, /exceeds/);
+		assert.ok(reads <= 6, `expected at most 6 reads, got ${reads}`);
+		assert.strictEqual(cancelled, true);
+	} finally {
+		global.fetch = origFetch;
+	}
+});
+
 test("enforcement: subdomains of an allowlisted host are permitted", () => {
 	const broker = makeBroker();
 	broker.registerCapabilities("p", { network: ["outbound-http"] }, "P", {
