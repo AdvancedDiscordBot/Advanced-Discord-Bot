@@ -3,6 +3,36 @@ const path = require("path");
 const chokidar = require("chokidar");
 const { PluginContext } = require("./PluginContext");
 const { validateCapabilities } = require("./capabilities");
+const { normalize } = require("./manifest-schema");
+
+// Broker capability categories. Manifest v2 calls these `permissions`; the
+// broker still consumes the category:value shape, so bridge the two here.
+const RUNTIME_CAPABILITY_CATEGORIES = [
+	"discord",
+	"storage",
+	"ai",
+	"hooks",
+	"scheduler",
+	"system",
+	"web",
+];
+
+function runtimeCapabilities(permissions = {}) {
+	const caps = {};
+	for (const category of RUNTIME_CAPABILITY_CATEGORIES) {
+		caps[category] = Array.isArray(permissions[category])
+			? [...permissions[category]]
+			: [];
+	}
+	// v2 stores hosts, not the v1 boolean. network.fetch still needs the
+	// category capability, while the broker enforces the host allowlist.
+	caps.network =
+		Array.isArray(permissions.network?.outbound) &&
+		permissions.network.outbound.length > 0
+			? ["outbound-http"]
+			: [];
+	return caps;
+}
 const { createLogger } = require("./logger");
 const { randomUUID } = require("crypto");
 const { serializeValue } = require("./rpc/schema-serialize");
@@ -118,7 +148,8 @@ class PluginManager {
 		const state = this.plugins.get(pluginName);
 		if (!state) return false;
 		if (state.source !== "package") return false;
-		const sys = state.manifest?.capabilities?.system || [];
+		const permissions = state.permissions || normalize(state.manifest || {}).permissions;
+		const sys = permissions.system || [];
 		if (sys.includes("raw-client")) return false;
 		return true;
 	}
@@ -612,15 +643,17 @@ class PluginManager {
 	}
 
 	/**
-	 * Compute the environment a plugin is allowed to see, from its declared
-	 * `system` escalation capabilities. Owner-approved at install time.
+	 * Compute the environment a plugin is allowed to see from normalized
+	 * permissions. Owner-approved at install time.
 	 *   - raw-client: full trust → the real process.env
 	 *   - env: process.env minus the most sensitive infra secrets
 	 *   - bot-token: adds DISCORD_TOKEN specifically
 	 * A plugin with no `system` capability gets `{}` (the default).
 	 */
-	grantedEnv(manifest) {
-		const sys = manifest?.capabilities?.system || [];
+	grantedEnv(permissions = {}) {
+		const sys = Array.isArray(permissions.system)
+			? permissions.system
+			: normalize(permissions || {}).permissions.system || [];
 		if (!sys.length) return {};
 		if (sys.includes("raw-client")) return { ...process.env };
 
@@ -654,6 +687,8 @@ class PluginManager {
 			overrides: new Map(),
 			hotReloadEligible: true,
 			lastError: null,
+			permissions: null,
+			capabilities: null,
 			path: null,
 			entryPath: null,
 			source: null,
@@ -689,16 +724,19 @@ class PluginManager {
 				throw new Error(`Engine check failed: ${engineErrors.join("; ")}`);
 			}
 
-			// Validate capabilities if declared
-			const caps = plugin.manifest?.capabilities;
-			if (caps) {
-				const capErrors = validateCapabilities(caps);
-				if (capErrors.length) {
-					pluginState.lastError = `Invalid capabilities: ${capErrors.join(", ")}`;
-					this.logger.warn(
-						`${plugin.name} has invalid capabilities: ${capErrors.join(", ")}`,
-					);
-				}
+			// Normalize v1 capabilities and v2 permissions into one runtime
+			// shape. Everything below (validation, worker spawn, env grants,
+			// raw-client detection) must use this, not the legacy field.
+			const permissions = normalize(plugin.manifest || {}).permissions;
+			const caps = runtimeCapabilities(permissions);
+			pluginState.permissions = permissions;
+			pluginState.capabilities = caps;
+			const capErrors = validateCapabilities(caps);
+			if (capErrors.length) {
+				pluginState.lastError = `Invalid capabilities: ${capErrors.join(", ")}`;
+				this.logger.warn(
+					`${plugin.name} has invalid capabilities: ${capErrors.join(", ")}`,
+				);
 			}
 
 			// Decide: isolated (worker) or direct (main process) loading.
@@ -718,7 +756,7 @@ class PluginManager {
 			//
 			// In-repo plugins (source: "local", e.g. the administration
 			// dashboard) and the internal "builtin" core always load directly.
-			const wantsRawClient = (caps?.system || []).includes("raw-client");
+			const wantsRawClient = (permissions.system || []).includes("raw-client");
 			const useIsolation =
 				this.isolationEnabled &&
 				this.workerManager &&
@@ -772,7 +810,7 @@ class PluginManager {
 		const ctx = this.buildContext(
 			plugin.name,
 			logger,
-			this.grantedEnv(plugin.manifest),
+			this.grantedEnv(pluginState.permissions),
 		);
 		const pluginModule = require(plugin.entryPath);
 		const loadFn = pluginModule.load || pluginModule.default || pluginModule;
@@ -791,17 +829,9 @@ class PluginManager {
 	async _loadPluginInWorker(plugin, pluginState, caps, logger) {
 		logger.info(`Spawning isolated worker for ${plugin.name}...`);
 
-		// Derive the network.outbound host allowlist from the normalized v2
-		// manifest. The broker enforces outbound requests against this list per
-		// call; an empty list means "declared network capability but no hosts",
-		// which the broker treats as "reach nothing".
-		let networkAllowlist = [];
-		try {
-			const { normalize } = require("./manifest-schema");
-			networkAllowlist = normalize(plugin.manifest || {}).permissions.network.outbound || [];
-		} catch (e) {
-			logger.warn(`Could not derive network allowlist for ${plugin.name}: ${e.message}`);
-		}
+		// The broker enforces outbound requests against the normalized host
+		// allowlist per call; an empty list means "reach nothing".
+		const networkAllowlist = pluginState.permissions?.network?.outbound || [];
 
 		try {
 			await this.workerManager.spawnWorker(
@@ -809,7 +839,7 @@ class PluginManager {
 				plugin.entryPath,
 				caps || {},
 				plugin.manifest?.displayName || plugin.name,
-				{ networkAllowlist, grantedEnv: this.grantedEnv(plugin.manifest) },
+				{ networkAllowlist, grantedEnv: this.grantedEnv(pluginState.permissions) },
 			);
 
 			pluginState.isolated = true;
@@ -1173,7 +1203,7 @@ class PluginManager {
 			category: plugin.manifest?.category || null,
 			npmPackage: plugin.manifest?.npmPackage || plugin.packageName || null,
 			discordPermissions: plugin.manifest?.discordPermissions || [],
-			capabilities: plugin.manifest?.capabilities || null,
+			capabilities: plugin.capabilities || plugin.manifest?.capabilities || null,
 			core: plugin.source === "local" || plugin.source === "builtin",
 			enabled: plugin.enabled,
 			hotReloadEligible: plugin.hotReloadEligible,
