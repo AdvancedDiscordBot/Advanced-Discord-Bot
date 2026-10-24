@@ -122,14 +122,17 @@ class PluginRegistry {
 	async searchPlugins(query, category = null, force = false) {
 		const plugins = await this.fetchRegistry(force);
 
-		let filtered = plugins;
+		// Registry files are hand-maintained. Drop junk entries and compare only
+		// real strings so one missing description cannot break every search.
+		let filtered = plugins.filter(
+			(p) => p && typeof p === "object" && !Array.isArray(p),
+		);
 		if (query) {
-			const q = query.toLowerCase();
+			const q = String(query).toLowerCase();
+			const has = (value) =>
+				typeof value === "string" && value.toLowerCase().includes(q);
 			filtered = filtered.filter(
-				(p) =>
-					p.name.toLowerCase().includes(q) ||
-					p.displayName.toLowerCase().includes(q) ||
-					p.description.toLowerCase().includes(q),
+				(p) => has(p.name) || has(p.displayName) || has(p.description),
 			);
 		}
 
@@ -293,9 +296,12 @@ class PluginRegistry {
 			[packageName, `adb-plugin-${packageName}`, packageName.replace(/^adb-plugin-/, "")]
 				.map((n) => n.toLowerCase()),
 		);
-		const matches = (n) => n && candidates.has(n.toLowerCase());
+		const matches = (n) =>
+			typeof n === "string" && candidates.has(n.toLowerCase());
 		const plugins = await this.fetchRegistry();
-		return plugins.find((p) => matches(p.npmPackage) || matches(p.name));
+		return plugins.find(
+			(p) => p && typeof p === "object" && (matches(p.npmPackage) || matches(p.name)),
+		);
 	}
 
 	async getPluginDetails(packageName) {
