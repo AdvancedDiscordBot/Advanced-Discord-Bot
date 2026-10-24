@@ -390,11 +390,13 @@ class Database {
 	async getUserProfile(userId, guildId) {
 		await this.ensureConnection();
 		try {
-			let profile = await UserProfile.findOne({ userId, guildId });
-			if (!profile) {
-				profile = await UserProfile.create({ userId, guildId });
-			}
-			return profile;
+			// Atomic upsert: concurrent first events for the same member must
+			// not both insert and trip the unique userId+guildId index.
+			return await UserProfile.findOneAndUpdate(
+				{ userId, guildId },
+				{ $setOnInsert: { userId, guildId } },
+				{ upsert: true, new: true },
+			);
 		} catch (error) {
 			console.error("Error getting user profile:", error);
 			throw error;
