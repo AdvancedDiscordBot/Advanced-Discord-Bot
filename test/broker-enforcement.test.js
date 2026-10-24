@@ -96,6 +96,28 @@ test("enforcement: network.fetch to an allowlisted host is permitted", async () 
 	}
 });
 
+test("enforcement: getAllPluginConfigs is scoped to the calling plugin", async () => {
+	const db = {
+		getAllPluginConfigs: async (guildId) => [
+			{ guildId, pluginName: "caller", data: { theme: "dark" } },
+			{ guildId, pluginName: "unrelated", data: { webhook: "secret" } },
+		],
+	};
+	const broker = new CapabilityBroker({ db, client: null, hooks: {} });
+	broker.registerCapabilities("caller", { storage: ["own-collection"] }, "Caller");
+
+	const res = await broker.handleRequest("caller", {
+		id: "1",
+		method: "db.getAllPluginConfigs",
+		params: { guildId: "g1" },
+	});
+
+	assert.strictEqual(res.ok, true);
+	assert.deepStrictEqual(res.result, [
+		{ guildId: "g1", pluginName: "caller", data: { theme: "dark" } },
+	]);
+});
+
 test("enforcement: subdomains of an allowlisted host are permitted", () => {
 	const broker = makeBroker();
 	broker.registerCapabilities("p", { network: ["outbound-http"] }, "P", {

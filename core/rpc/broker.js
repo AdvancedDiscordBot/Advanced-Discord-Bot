@@ -434,10 +434,15 @@ class CapabilityBroker extends EventEmitter {
 					await this.db.updatePluginConfig(p.guildId, pluginId, p.data),
 				);
 
-			case "getAllPluginConfigs":
+			case "getAllPluginConfigs": {
+				// storage:own-collection authorizes this plugin's own row, not
+				// every plugin's settings for the guild. The database method stays
+				// guild-wide for trusted in-process callers (the dashboard).
+				const configs = await this.db.getAllPluginConfigs(p.guildId);
 				return this._serialize(
-					await this.db.getAllPluginConfigs(p.guildId),
+					configs.filter((config) => config.pluginName === pluginId),
 				);
+			}
 
 			// ── User Profiles (read) ──────────────────────────────────
 			case "getUserProfile":

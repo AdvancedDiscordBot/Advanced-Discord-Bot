@@ -44,7 +44,7 @@ const RPC_METHODS = {
 	"db.getAllPluginConfigs": {
 		capability: "storage:own-collection",
 		handler: "getAllPluginConfigs",
-		description: "Read all plugin configs for a guild",
+		description: "Read this plugin's own config for a guild",
 	},
 
 	// ── Database: User Profiles (read-profiles) ─────────────────────────
