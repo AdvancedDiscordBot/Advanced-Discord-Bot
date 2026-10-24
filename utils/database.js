@@ -340,46 +340,72 @@ class Database {
 		await this.ensureConnection();
 		try {
 			const now = new Date();
-			let rateLimit = await AIRateLimit.findOne({ userId, guildId });
+			const windowStart = new Date(now.getTime() - timeWindow);
+			const nextReset = new Date(now.getTime() + timeWindow);
 
-			if (!rateLimit) {
-				// First request
-				await AIRateLimit.create({
+			// Create the first row atomically, with a zero count. The caller is
+			// charged by the increment below, so concurrent first requests all
+			// go through the same conditional path.
+			await AIRateLimit.findOneAndUpdate(
+				{ userId, guildId },
+				{
+					$setOnInsert: {
+						userId,
+						guildId,
+						requestCount: 0,
+						lastRequest: now,
+						resetAt: nextReset,
+					},
+				},
+				{ upsert: true, new: true },
+			);
+
+			// Only one caller can observe an expired window and reset it; the
+			// others fall through to the capped increment.
+			const reset = await AIRateLimit.findOneAndUpdate(
+				{
 					userId,
 					guildId,
-					requestCount: 1,
-					lastRequest: now,
-					resetAt: new Date(now.getTime() + timeWindow),
-				});
-				return { allowed: true, remaining: maxRequests - 1 };
+					$or: [
+						{ resetAt: { $lte: now } },
+						{ lastRequest: { $lt: windowStart } },
+					],
+				},
+				{
+					$set: {
+						requestCount: 1,
+						lastRequest: now,
+						resetAt: nextReset,
+					},
+				},
+				{ new: true },
+			);
+			if (reset) {
+				return { allowed: true, remaining: Math.max(0, maxRequests - 1) };
 			}
 
-			const timeDiff = now.getTime() - rateLimit.lastRequest.getTime();
-
-			if (timeDiff > timeWindow || now > rateLimit.resetAt) {
-				// Reset counter
-				rateLimit.requestCount = 1;
-				rateLimit.lastRequest = now;
-				rateLimit.resetAt = new Date(now.getTime() + timeWindow);
-				await rateLimit.save();
-				return { allowed: true, remaining: maxRequests - 1 };
-			} else if (rateLimit.requestCount >= maxRequests) {
-				// Rate limited
-				return {
-					allowed: false,
-					remaining: 0,
-					resetTime: rateLimit.resetAt,
-				};
-			} else {
-				// Increment counter
-				rateLimit.requestCount += 1;
-				rateLimit.lastRequest = now;
-				await rateLimit.save();
+			const incremented = await AIRateLimit.findOneAndUpdate(
+				{
+					userId,
+					guildId,
+					requestCount: { $lt: maxRequests },
+				},
+				{ $inc: { requestCount: 1 }, $set: { lastRequest: now } },
+				{ new: true },
+			);
+			if (incremented) {
 				return {
 					allowed: true,
-					remaining: maxRequests - rateLimit.requestCount,
+					remaining: Math.max(0, maxRequests - incremented.requestCount),
 				};
 			}
+
+			const current = await AIRateLimit.findOne({ userId, guildId });
+			return {
+				allowed: false,
+				remaining: 0,
+				resetTime: current?.resetAt,
+			};
 		} catch (error) {
 			console.error("Error checking rate limit:", error);
 			throw error;
