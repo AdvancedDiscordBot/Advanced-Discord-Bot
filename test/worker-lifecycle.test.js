@@ -177,6 +177,8 @@ test("lifecycle: Worker construction failure rolls back broker registration", as
 
 test("lifecycle: error plus exit counts once and stops after MAX_CRASH_COUNT attempts", async (t) => {
 	const h = makeHarness(t);
+	const gaveUp = [];
+	h.manager.onWorkerGaveUp = (failure) => gaveUp.push(failure);
 	let worker = await h.ready();
 	for (let attempt = 1; attempt <= h.MAX_CRASH_COUNT; attempt++) {
 		const entry = h.manager.workers.get("plugin");
@@ -198,6 +200,10 @@ test("lifecycle: error plus exit counts once and stops after MAX_CRASH_COUNT att
 	assert.equal(h.workers.length, h.MAX_CRASH_COUNT);
 	assert.equal(h.manager.hasWorker("plugin"), false);
 	assert.equal(h.broker.resourceTrackers.size, 0);
+	assert.equal(gaveUp.length, 1);
+	assert.equal(gaveUp[0].pluginId, "plugin");
+	assert.equal(gaveUp[0].crashCount, h.MAX_CRASH_COUNT);
+	assert.match(gaveUp[0].error.message, /runtime exploded/);
 });
 
 test("lifecycle: unload cancels a queued crash restart", async (t) => {

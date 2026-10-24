@@ -37,3 +37,22 @@ test("getPluginList exposes core/version/discordPermissions", () => {
   assert.strictEqual(entry.version, "1.0.0");
   assert.deepStrictEqual(entry.discordPermissions, ["BanMembers"]);
 });
+
+test("worker crash exhaustion disables the plugin and records the reason", () => {
+	const pm = makePM();
+	const state = pm.initPluginState("crashed", {});
+	state.enabled = true;
+	state.loaded = true;
+	pm.plugins.set("crashed", state);
+
+	pm._onWorkerGaveUp({
+		pluginId: "crashed",
+		crashCount: 3,
+		error: new Error("runtime exploded"),
+	});
+
+	assert.strictEqual(state.enabled, false);
+	assert.strictEqual(state.loaded, false);
+	assert.match(state.lastError, /crashed 3 times/);
+	assert.match(state.lastError, /runtime exploded/);
+});

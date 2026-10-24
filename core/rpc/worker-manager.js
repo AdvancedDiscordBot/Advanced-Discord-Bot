@@ -37,9 +37,10 @@ class WorkerManager {
 	 * @param {object} opts.hooks - HookBus instance
 	 * @param {string} [opts.logNamespace]
 	 */
-	constructor({ broker, hooks, logNamespace = "WorkerManager" }) {
+	constructor({ broker, hooks, onWorkerGaveUp = null, logNamespace = "WorkerManager" }) {
 		this.broker = broker;
 		this.hooks = hooks;
+		this.onWorkerGaveUp = onWorkerGaveUp;
 		this.logger = createLogger(logNamespace);
 
 		/** @type {Map<string, WorkerEntry>} pluginId → worker state */
@@ -388,9 +389,37 @@ class WorkerManager {
 					`The plugin will not be loaded until manually reloaded.`,
 				error.message,
 			);
-			stopping.then(() => {
-				if (this.workers.get(pluginId) === entry) this.workers.delete(pluginId);
-			});
+			const failure = {
+				pluginId,
+				pluginName: entry.pluginName,
+				crashCount: entry.crashCount,
+				error,
+			};
+			const notifyGaveUp = () => {
+				if (typeof this.onWorkerGaveUp !== "function") return;
+				try {
+					this.onWorkerGaveUp(failure);
+				} catch (callbackError) {
+					this.logger.error(
+						`onWorkerGaveUp handler failed for ${pluginId}:`,
+						callbackError.message,
+					);
+				}
+			};
+			stopping.then(
+				() => {
+					if (this.workers.get(pluginId) === entry) this.workers.delete(pluginId);
+					notifyGaveUp();
+				},
+				(stopError) => {
+					this.logger.error(
+						`Failed to stop crashed worker ${pluginId}:`,
+						stopError.message,
+					);
+					if (this.workers.get(pluginId) === entry) this.workers.delete(pluginId);
+					notifyGaveUp();
+				},
+			);
 			return;
 		}
 

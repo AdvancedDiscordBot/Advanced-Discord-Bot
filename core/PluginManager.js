@@ -71,6 +71,7 @@ class PluginManager {
 		this.workerManager = new WorkerManager({
 			broker: this.broker,
 			hooks: this.hooks,
+			onWorkerGaveUp: (failure) => this._onWorkerGaveUp(failure),
 		});
 
 		// Register RPC handlers for plugin.registerCommand / registerEvent
@@ -894,6 +895,27 @@ class PluginManager {
 			if (this.plugins.get(pluginName) === pluginState) this.plugins.delete(pluginName);
 		}
 		return true;
+	}
+
+	/**
+	 * Reflect a worker that exhausted its crash budget. The broker has already
+	 * removed its capabilities and registrations, so leaving the state enabled
+	 * would advertise a plugin that cannot receive commands or events.
+	 * @private
+	 */
+	_onWorkerGaveUp(failure = {}) {
+		const pluginName = failure.pluginId;
+		if (!pluginName) return;
+		const state = this.plugins.get(pluginName);
+		if (!state) return;
+		const detail = failure.error?.message || "unknown worker error";
+		state.enabled = false;
+		state.loaded = false;
+		state.lastError = `Worker crashed ${failure.crashCount || "repeatedly"} times and was stopped: ${detail}`;
+		this.clearPluginRegistrations(pluginName);
+		this.logger.error(
+			`Plugin ${pluginName} disabled after worker crash limit: ${detail}`,
+		);
 	}
 
 	/** Stop plugin-owned resources only; the caller still owns DB, scheduler and client shutdown. */
