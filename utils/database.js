@@ -681,29 +681,55 @@ class Database {
 	) {
 		await this.ensureConnection();
 		try {
-			// Update giver (deduct points and increment pointsGiven)
-			const giverUpdate = await UserProfile.findOneAndUpdate(
-				{ userId: fromUserId, guildId },
-				{
-					$inc: {
-						points: -amount,
-						pointsGiven: amount,
-					},
-				},
-				{ upsert: true, new: true },
-			);
+			const points = Number(amount);
+			if (!Number.isFinite(points) || points <= 0) {
+				throw new TypeError("Points amount must be a positive finite number");
+			}
+			if (fromUserId === toUserId) {
+				throw new Error("Cannot give points to yourself");
+			}
 
-			// Update receiver (add points and increment pointsReceived)
-			const receiverUpdate = await UserProfile.findOneAndUpdate(
-				{ userId: toUserId, guildId },
+			// Debit only when the stored balance still covers the transfer. The
+			// filter makes concurrent transfers safe without allowing overdrafts.
+			const giverUpdate = await UserProfile.findOneAndUpdate(
+				{ userId: fromUserId, guildId, points: { $gte: points } },
 				{
 					$inc: {
-						points: amount,
-						pointsReceived: amount,
+						points: -points,
+						pointsGiven: points,
 					},
 				},
-				{ upsert: true, new: true },
+				{ new: true },
 			);
+			if (!giverUpdate) {
+				throw new Error("Insufficient points");
+			}
+
+			let receiverUpdate;
+			try {
+				receiverUpdate = await UserProfile.findOneAndUpdate(
+					{ userId: toUserId, guildId },
+					{
+						$inc: {
+							points: points,
+							pointsReceived: points,
+						},
+					},
+					{ upsert: true, new: true, setDefaultsOnInsert: true },
+				);
+			} catch (error) {
+				// Put the debit back if the credit could not be written, so a
+				// failed transfer never leaves the giver short.
+				try {
+					await UserProfile.updateOne(
+						{ userId: fromUserId, guildId },
+						{ $inc: { points: points, pointsGiven: -points } },
+					);
+				} catch (refundError) {
+					console.error("Failed to refund points after transfer error:", refundError);
+				}
+				throw error;
+			}
 
 			return { giver: giverUpdate, receiver: receiverUpdate };
 		} catch (error) {
