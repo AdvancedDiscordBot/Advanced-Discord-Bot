@@ -36,6 +36,19 @@ test("discovery follows local, npm-link and scoped symlinks and skips malformed 
 	assert.equal(plugins.find((p) => p.name === "scoped").packageName, "@scope/adb-plugin-scoped");
 });
 
+test("unload removes an in-process plugin's compiled models", async () => {
+	const mongoose = require("mongoose");
+	const manager = makeManager();
+	const state = manager.initPluginState("modelowner", {});
+	manager.plugins.set("modelowner", state);
+	const modelName = "plugin_modelowner_item";
+	mongoose.model(modelName, new mongoose.Schema({ name: String }));
+
+	await manager.unloadPlugin("modelowner");
+
+	assert.strictEqual(mongoose.models[modelName], undefined);
+});
+
 test("another plugin cannot take command ownership or remove the owner's command on unload", async () => {
 	const manager = makeManager();
 	for (const name of ["owner", "other"]) manager.plugins.set(name, manager.initPluginState(name, {}));

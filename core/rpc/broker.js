@@ -124,8 +124,13 @@ class CapabilityBroker extends EventEmitter {
 			entry.task.stop();
 			this._scheduledTasks.delete(key);
 		}
-		for (const key of this._modelRegistry?.keys() || []) {
-			if (key.startsWith(`${pluginId}:`)) this._modelRegistry.delete(key);
+		for (const [key, model] of this._modelRegistry || []) {
+			if (!key.startsWith(`${pluginId}:`)) continue;
+			this._modelRegistry.delete(key);
+			// Removing only the registry entry leaves the compiled model in
+			// mongoose.models, so the next load of this plugin silently reuses
+			// the old schema. Unload must release both.
+			this._deleteCompiledModel(model?.modelName);
 		}
 		this.emit("plugin:unregistered", pluginId);
 	}
@@ -1008,20 +1013,41 @@ class CapabilityBroker extends EventEmitter {
 		const mongoose = require("mongoose");
 		const { rehydrateSchema } = require("./schema-serialize");
 		const prefixedName = `plugin_${pluginId}_${modelName}`;
-		if (!mongoose.models[prefixedName]) {
-			// Isolated plugins send a plain schema descriptor over IPC (a real
-			// mongoose.Schema can't be structured-cloned). Rehydrate it here.
-			// Direct callers may still pass a real Schema — pass those through.
-			const realSchema =
-				schema && schema.__adbSchema
-					? rehydrateSchema(schema)
-					: schema;
-			// A worker cannot select a Core or another plugin's collection.
-			if (schema.__adbSchema) realSchema.set("collection", undefined);
-			mongoose.model(prefixedName, realSchema);
-		}
 		const key = `${pluginId}:${modelName}`;
-		this._modelRegistry.set(key, mongoose.models[prefixedName]);
+		const registered = this._modelRegistry.get(key);
+		if (registered) return registered;
+
+		// A compiled model with no registry entry is a leftover from a previous
+		// generation. Reusing it would keep the old schema, so replace it.
+		this._deleteCompiledModel(prefixedName);
+		// Isolated plugins send a plain schema descriptor over IPC (a real
+		// mongoose.Schema can't be structured-cloned). Rehydrate it here.
+		// Direct callers may still pass a real Schema — pass those through.
+		const realSchema =
+			schema && schema.__adbSchema
+				? rehydrateSchema(schema)
+				: schema;
+		// A worker cannot select a Core or another plugin's collection.
+		if (schema.__adbSchema) realSchema.set("collection", undefined);
+		const model = mongoose.model(prefixedName, realSchema);
+		this._modelRegistry.set(key, model);
+		return model;
+	}
+
+	/**
+	 * Remove a namespaced model from Mongoose without throwing when it was
+	 * never compiled (or was already removed by another teardown path).
+	 * @private
+	 */
+	_deleteCompiledModel(modelName) {
+		if (!modelName) return;
+		const mongoose = require("mongoose");
+		if (!mongoose.models[modelName]) return;
+		try {
+			mongoose.deleteModel(modelName);
+		} catch (error) {
+			this.logger.warn(`Failed to delete plugin model ${modelName}: ${error.message}`);
+		}
 	}
 
 	_getModel(pluginId, modelName) {

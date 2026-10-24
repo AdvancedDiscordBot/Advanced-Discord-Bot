@@ -859,6 +859,30 @@ class PluginManager {
 		pluginState.commandNames.clear();
 		pluginState.overrides.clear();
 		pluginState.hasCommands = false;
+
+		// In-process plugins register models straight onto mongoose. Remove
+		// this generation's compiled schemas so a reload compiles the current
+		// plugin.json/defineModel definition instead of reusing the old one.
+		this._deletePluginModels(pluginName);
+	}
+
+	/**
+	 * Drop every compiled model owned by a plugin. Worker models are normally
+	 * released by broker.unregisterCapabilities(); this also covers in-process
+	 * plugins and teardown paths where no worker was registered.
+	 * @private
+	 */
+	_deletePluginModels(pluginName) {
+		const mongoose = require("mongoose");
+		const prefix = `plugin_${pluginName}_`;
+		for (const modelName of Object.keys(mongoose.models)) {
+			if (!modelName.startsWith(prefix)) continue;
+			try {
+				mongoose.deleteModel(modelName);
+			} catch (error) {
+				this.logger.warn(`Failed to delete model ${modelName}: ${error.message}`);
+			}
+		}
 	}
 
 	_teardownPlugin(pluginName, pluginState, reason) {

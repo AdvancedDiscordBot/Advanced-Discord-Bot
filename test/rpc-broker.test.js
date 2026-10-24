@@ -256,6 +256,24 @@ test("broker: unregisterCapabilities removes plugin", () => {
 	assert.strictEqual(broker.hasCapability("plugin-a", "storage:own-collection"), false);
 });
 
+test("broker: unregisterCapabilities deletes compiled plugin models", () => {
+	const mongoose = require("mongoose");
+	const broker = new CapabilityBroker({ db: makeMockDb(), client: null, hooks: makeMockHooks() });
+	const modelName = "plugin_unload_check_item";
+	broker.registerCapabilities("unload_check", { storage: ["own-collection"] });
+	broker.registerModel("unload_check", "item", new mongoose.Schema({ name: String }));
+	assert.ok(mongoose.models[modelName]);
+
+	broker.unregisterCapabilities("unload_check");
+	assert.strictEqual(mongoose.models[modelName], undefined);
+
+	// A later generation with a different schema must compile a fresh model.
+	broker.registerCapabilities("unload_check", { storage: ["own-collection"] });
+	const next = broker.registerModel("unload_check", "item", new mongoose.Schema({ name: String, price: Number }));
+	assert.ok(next.schema.path("price"));
+	broker.unregisterCapabilities("unload_check");
+});
+
 test("broker: getStats tracks requests and denials", async () => {
 	const broker = new CapabilityBroker({ db: makeMockDb(), client: null, hooks: makeMockHooks() });
 	broker.registerCapabilities("plugin-a", { storage: ["own-collection"] });

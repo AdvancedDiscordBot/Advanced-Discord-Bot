@@ -126,7 +126,9 @@ function setup(t) {
 	};
 	t.after(async () => {
 		await manager.workerManager.shutdown();
-		for (const { Model } of collections.values()) mongoose.deleteModel(Model.modelName);
+		for (const { Model } of collections.values()) {
+			if (mongoose.models[Model.modelName]) mongoose.deleteModel(Model.modelName);
+		}
 	});
 	return { manager, client, collections };
 }
