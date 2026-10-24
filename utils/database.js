@@ -153,6 +153,46 @@ class Database {
 		}
 	}
 
+	/**
+	 * Patch one command's settings without replacing sibling commands or other
+	 * plugin data. Only fields explicitly supplied are written.
+	 */
+	async updatePluginCommandConfig(guildId, pluginName, commandName, changes) {
+		await this.ensureConnection();
+		try {
+			if (
+				typeof commandName !== "string" ||
+				!commandName ||
+				commandName.startsWith("$") ||
+				commandName.includes(".")
+			) {
+				throw new Error(`Invalid command name: ${commandName}`);
+			}
+			const set = {};
+			if (typeof changes?.enabled === "boolean") {
+				set[`data._commands.${commandName}.enabled`] = changes.enabled;
+			}
+			if (Array.isArray(changes?.allowedRoles)) {
+				set[`data._commands.${commandName}.allowedRoles`] = changes.allowedRoles;
+			}
+			if (!Object.keys(set).length) {
+				return this.getPluginConfig(guildId, pluginName);
+			}
+
+			return await PluginConfig.findOneAndUpdate(
+				{ guildId, pluginName },
+				{
+					$set: set,
+					$setOnInsert: { guildId, pluginName },
+				},
+				{ upsert: true, new: true, setDefaultsOnInsert: false },
+			);
+		} catch (error) {
+			console.error("Error updating command config:", error);
+			throw error;
+		}
+	}
+
 	async getAllPluginConfigs(guildId) {
 		await this.ensureConnection();
 		try {

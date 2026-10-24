@@ -94,6 +94,18 @@ async function harness(t, { grants = [], env = {} } = {}) {
 			configs.set(`${guildId}:${pluginName}`, value);
 			return clone(value);
 		},
+		async updatePluginCommandConfig(guildId, pluginName, commandName, changes) {
+			const value = await this.getPluginConfig(guildId, pluginName);
+			value.data = clone(value.data || {});
+			value.data._commands = value.data._commands || {};
+			value.data._commands[commandName] = {
+				...clone(value.data._commands[commandName] || {}),
+				...(changes.enabled !== undefined ? { enabled: changes.enabled } : {}),
+				...(changes.allowedRoles !== undefined ? { allowedRoles: clone(changes.allowedRoles) } : {}),
+			};
+			configs.set(`${guildId}:${pluginName}`, value);
+			return clone(value);
+		},
 		async getAllPluginConfigs(guildId) {
 			return [...configs.values()].filter((row) => row.guildId === guildId).map(clone);
 		},

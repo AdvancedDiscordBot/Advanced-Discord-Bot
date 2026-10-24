@@ -1347,14 +1347,10 @@ async function startApiServer({ client, db, pluginManager, hooks, startListening
 		}
 
 		await db.ensureConnection();
-		const existing = await db.getPluginConfig(guildId, name);
-		const data = existing?.data || {};
-		data._commands = data._commands || {};
-		data._commands[cmd] = {
-			enabled: enabled ?? (data._commands[cmd]?.enabled !== false),
-			allowedRoles: allowedRoles ?? data._commands[cmd]?.allowedRoles ?? [],
-		};
-		const updated = await db.updatePluginConfig(guildId, name, data);
+		const updated = await db.updatePluginCommandConfig(guildId, name, cmd, {
+			enabled,
+			allowedRoles,
+		});
 		return { command: updated?.data?._commands?.[cmd] };
 	});
 
