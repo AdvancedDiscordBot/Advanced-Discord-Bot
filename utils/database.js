@@ -15,6 +15,23 @@ const {
 	GuildRoleGrant,
 } = require("../models/schemas");
 
+// Leaderboards are paginated for people, not exported wholesale. Bound every
+// caller (dashboard query string or plugin RPC) at the data layer.
+const MAX_LEADERBOARD_LIMIT = 100;
+const DEFAULT_LEADERBOARD_LIMIT = 10;
+
+function normalizeLeaderboardLimit(value) {
+	const parsed = Number(value);
+	if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_LEADERBOARD_LIMIT;
+	return Math.min(Math.floor(parsed), MAX_LEADERBOARD_LIMIT);
+}
+
+function normalizeLeaderboardSkip(value) {
+	const parsed = Number(value);
+	if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+	return Math.floor(parsed);
+}
+
 class Database {
 	constructor() {
 		// Don't connect in constructor to avoid multiple connections
@@ -499,7 +516,7 @@ class Database {
 	}
 
 	// 🏆 Leaderboard Methods
-	async getTopUsers(guildId, limit = 10, type = "totalXp") {
+	async getTopUsers(guildId, limit = DEFAULT_LEADERBOARD_LIMIT, type = "totalXp") {
 		await this.ensureConnection();
 		try {
 			const sortField = {};
@@ -507,7 +524,7 @@ class Database {
 
 			const users = await UserProfile.find({ guildId })
 				.sort(sortField)
-				.limit(limit)
+				.limit(normalizeLeaderboardLimit(limit))
 				.select(
 					"userId username totalXp level messageCount voiceMinutes activityScore",
 				);
@@ -712,13 +729,13 @@ class Database {
 		}
 	}
 
-	async getPointsLeaderboard(guildId, limit = 10, skip = 0) {
+	async getPointsLeaderboard(guildId, limit = DEFAULT_LEADERBOARD_LIMIT, skip = 0) {
 		await this.ensureConnection();
 		try {
 			const users = await UserProfile.find({ guildId })
 				.sort({ points: -1 })
-				.skip(skip)
-				.limit(limit)
+				.skip(normalizeLeaderboardSkip(skip))
+				.limit(normalizeLeaderboardLimit(limit))
 				.lean();
 
 			const totalUsers = await UserProfile.countDocuments({
