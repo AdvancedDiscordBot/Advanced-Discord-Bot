@@ -93,11 +93,13 @@ class Database {
 	async getServerConfig(guildId) {
 		await this.ensureConnection();
 		try {
-			let config = await ServerConfig.findOne({ guildId });
-			if (!config) {
-				config = await ServerConfig.create({ guildId });
-			}
-			return config;
+			// Atomic upsert: two first reads for the same guild must not both
+			// insert and trip the unique guildId index.
+			return await ServerConfig.findOneAndUpdate(
+				{ guildId },
+				{ $setOnInsert: { guildId } },
+				{ upsert: true, new: true },
+			);
 		} catch (error) {
 			console.error("Error getting server config:", error);
 			throw error;
