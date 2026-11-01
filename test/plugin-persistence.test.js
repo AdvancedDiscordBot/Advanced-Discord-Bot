@@ -6,7 +6,14 @@
 
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
-const { planReconcile } = require("../core/plugin-persistence");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const {
+	planReconcile,
+	readManifest,
+	writeManifest,
+} = require("../core/plugin-persistence");
 
 describe("plugin-persistence planReconcile", () => {
 	it("no actions when everything already matches", () => {
@@ -67,5 +74,64 @@ describe("plugin-persistence planReconcile", () => {
 		assert.deepEqual(actions, [
 			{ action: "install", package: "adb-plugin-x", spec: "adb-plugin-x" },
 		]);
+	});
+});
+
+
+describe("plugin-persistence atomic writeManifest", () => {
+	it("writes manifest atomically and survives round trip", () => {
+		const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "adb-manifest-test-"));
+		const manifestPath = path.join(tempDir, "installed-plugins.json");
+
+		try {
+			const samplePlugins = [
+				{ package: "adb-plugin-test", version: "1.0.0" },
+				{ package: "adb-plugin-extra", removed: true },
+			];
+
+			writeManifest(samplePlugins, manifestPath);
+			const loaded = readManifest(manifestPath);
+			assert.deepEqual(loaded, samplePlugins);
+
+			// Ensure no leftover temp files exist
+			const files = fs.readdirSync(tempDir);
+			assert.deepEqual(files, ["installed-plugins.json"]);
+		} finally {
+			fs.rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	it("leaves original manifest intact and cleans up temp file if rename fails", () => {
+		const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "adb-manifest-fail-"));
+		const manifestPath = path.join(tempDir, "installed-plugins.json");
+
+		try {
+			const originalPlugins = [{ package: "original-pkg", version: "1.0.0" }];
+			writeManifest(originalPlugins, manifestPath);
+
+			const origRename = fs.renameSync;
+			fs.renameSync = () => {
+				throw new Error("Simulated disk rename failure");
+			};
+
+			try {
+				assert.throws(
+					() => writeManifest([{ package: "new-corrupt-pkg", version: "2.0.0" }], manifestPath),
+					/Simulated disk rename failure/,
+				);
+			} finally {
+				fs.renameSync = origRename;
+			}
+
+			// Original manifest should still be intact
+			const current = readManifest(manifestPath);
+			assert.deepEqual(current, originalPlugins);
+
+			// Temp files should have been removed
+			const remainingFiles = fs.readdirSync(tempDir);
+			assert.deepEqual(remainingFiles, ["installed-plugins.json"]);
+		} finally {
+			fs.rmSync(tempDir, { recursive: true, force: true });
+		}
 	});
 });

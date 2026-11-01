@@ -23,9 +23,9 @@ const logger = createLogger("PluginPersistence");
 
 const MANIFEST_PATH = path.join(process.cwd(), "data", "installed-plugins.json");
 
-function readManifest() {
+function readManifest(targetPath = MANIFEST_PATH) {
 	try {
-		const data = JSON.parse(fs.readFileSync(MANIFEST_PATH, "utf8"));
+		const data = JSON.parse(fs.readFileSync(targetPath, "utf8"));
 		return data && typeof data === "object" && Array.isArray(data.plugins)
 			? data.plugins
 			: [];
@@ -34,9 +34,39 @@ function readManifest() {
 	}
 }
 
-function writeManifest(plugins) {
-	fs.mkdirSync(path.dirname(MANIFEST_PATH), { recursive: true });
-	fs.writeFileSync(MANIFEST_PATH, JSON.stringify({ plugins }, null, 2));
+function writeManifest(plugins, targetPath = MANIFEST_PATH) {
+	const dir = path.dirname(targetPath);
+	fs.mkdirSync(dir, { recursive: true });
+	const tempPath = path.join(
+		dir,
+		`.tmp-${path.basename(targetPath)}-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+	);
+	const content = JSON.stringify({ plugins }, null, 2);
+	let fd = null;
+	try {
+		fd = fs.openSync(tempPath, "w");
+		fs.writeFileSync(fd, content, "utf8");
+		fs.fsyncSync(fd);
+		fs.closeSync(fd);
+		fd = null;
+		fs.renameSync(tempPath, targetPath);
+	} catch (err) {
+		if (fd !== null) {
+			try {
+				fs.closeSync(fd);
+			} catch {
+				// ignore close error
+			}
+		}
+		try {
+			if (fs.existsSync(tempPath)) {
+				fs.unlinkSync(tempPath);
+			}
+		} catch {
+			// ignore cleanup error
+		}
+		throw err;
+	}
 }
 
 /** Version currently present in node_modules, or null. */
@@ -136,7 +166,9 @@ async function reconcileInstalledPlugins() {
 }
 
 module.exports = {
+	MANIFEST_PATH,
 	readManifest,
+	writeManifest,
 	recordInstall,
 	recordUninstall,
 	planReconcile,
