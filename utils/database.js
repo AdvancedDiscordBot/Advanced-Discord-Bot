@@ -416,7 +416,7 @@ class Database {
 		}
 	}
 
-	async addXP(userId, guildId, amount, type = "message", reason = null) {
+	async addXP(userId, guildId, amount, type = "message", reason = null, options = {}) {
 		await this.ensureConnection();
 		try {
 			// Get current profile
@@ -440,7 +440,11 @@ class Database {
 				updateData.messageCount = (profile.messageCount || 0) + 1;
 				updateData.lastMessageAt = new Date();
 			} else if (type === "voice") {
-				updateData.voiceMinutes = (profile.voiceMinutes || 0) + 1;
+				// Voice awards cover a whole session, so callers pass its length in minutes.
+				const minutes = Number.isFinite(options?.voiceMinutes) && options.voiceMinutes > 0
+					? Math.floor(options.voiceMinutes)
+					: 1;
+				updateData.voiceMinutes = (profile.voiceMinutes || 0) + minutes;
 				updateData.lastVoiceAt = new Date();
 			}
 

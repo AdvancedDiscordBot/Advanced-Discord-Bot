@@ -48,7 +48,7 @@ module.exports = {
 			if (minutes < 1) return;
 			const xp = minutes * (config.xpPerVoiceMinute ?? 2);
 			if (xp <= 0) return;
-			const result = await db.addXP(member.id, guild.id, xp, "voice", `${minutes} minutes in voice chat`);
+			const result = await db.addXP(member.id, guild.id, xp, "voice", `${minutes} minutes in voice chat`, { voiceMinutes: minutes });
 			if (result.levelUp && client?.hooks) {
 				await client.hooks.emitHook("onLevelUp", {
 					user: member.user, guild, guildId: guild.id, newLevel: result.newLevel, profile: result.profile,
