@@ -1,65 +1,78 @@
----
-name: 🛠️ Pull Request
-about: Submit a pull request for code, documentation, or feature enhancement
-title: '[PR] <type>: <short description>'
-labels: 'gssoc', 'under review'
-assignees: ''
 
+---
+name: "🛠️ Pull Request"
+about: "Submit a pull request for code, documentation, or feature enhancements"
+title: "[PR] <type>: <short description>"
+labels: "gssoc, under review"
+assignees: ""
 ---
 
 # 🛠️ Pull Request Details
 
 ## 📌 Description
 
-<!-- A detailed description of what this PR does and why it's needed. -->
+<!-- Clearly describe what this PR changes and why it is needed. -->
 
-> This PR adds the course upload module to the admin panel, allowing instructors to upload video content and attach downloadable PDFs.
+Provide a detailed explanation of the changes introduced.
 
 ---
 
 ## 🧪 Related Issues
 
-Fixes #<issue-number> (if applicable)
+<!-- Link the issue associated with this pull request. -->
+
+Fixes #<issue-number>
 
 ---
 
 ## 🔍 Type of Change
 
-Please delete options that are not relevant:
+Select all applicable options:
 
-- [x] 🐛 Bug fix
+- [ ] 🐛 Bug fix
 - [ ] ✨ New feature
 - [ ] 📝 Documentation update
-- [ ] ♻️ Code refactor
-- [ ] 🔧 Configuration
+- [ ] ♻️ Code refactoring
+- [ ] 🔧 Configuration change
+- [ ] ⚡ Performance improvement
+- [ ] 🔒 Security improvement
+- [ ] ♿ Accessibility improvement
 
 ---
 
 ## ✅ Checklist
 
-Before submitting your PR, check all the points below:
+Before submitting your PR, ensure that:
 
-- [ ] My code follows the **style guidelines** of this project
-- [ ] I have performed a **self-review** of my code
-- [ ] I have **commented** my code, especially in hard-to-understand areas
-- [ ] I have made corresponding changes to the **documentation**
-- [ ] My changes **generate no new warnings**
-- [ ] I have added **tests** that prove my fix is effective or that my feature works
-- [ ] New and existing unit tests pass locally
-- [ ] I have **linked the related issue**
-
----
-
-## 📸 Screenshots (if applicable)
-
-Paste screenshots or a screen recording of the feature/bug fix.
+- [ ] My code follows the project's coding standards.
+- [ ] I have performed a self-review of my code.
+- [ ] I have added comments where necessary.
+- [ ] I have updated the relevant documentation.
+- [ ] My changes generate no new warnings.
+- [ ] I have added or updated relevant tests.
+- [ ] All existing and new tests pass.
+- [ ] I have linked the related issue.
+- [ ] My changes do not introduce breaking changes.
+- [ ] I have checked for unnecessary files or dependencies.
 
 ---
 
-## 🙋‍♂️ Reviewer Notes
+## 📸 Screenshots / Recordings
 
-Mention anything that reviewers should focus on or be aware of.
+<!-- Add screenshots or screen recordings if applicable. -->
 
 ---
 
-> ✅ PRs that follow the structure and guidelines are reviewed and merged faster!
+## 🙋 Reviewer Notes
+
+<!-- Mention important implementation details or areas requiring special attention. -->
+
+---
+
+## 📋 Additional Information
+
+<!-- Include any additional context, dependencies, or migration steps if needed. -->
+
+---
+
+> ✅ Thank you for contributing! Following this template helps maintain code quality and makes the review process faster and more efficient.
